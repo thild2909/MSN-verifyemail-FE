@@ -1,6 +1,8 @@
 import {
   MailCheck,
   Search,
+  Radar,
+  Building2,
   Inbox,
   ShieldAlert,
   Code2,
@@ -31,6 +33,8 @@ export const NAV: NavSection[] = [
     items: [
       { label: "Email Verification", href: "/verification", icon: MailCheck, match: ["/verification", "/dashboard"] },
       { label: "Email Finder", href: "/finder", icon: Search },
+      { label: "Find Leads", href: "/find-leads", icon: Radar },
+      { label: "Enrichment", href: "/enrich", icon: Building2 },
       { label: "Inbox Placement", href: "/inbox-placement", icon: Inbox, soon: true },
       { label: "Blacklist Monitor", href: "/blacklist", icon: ShieldAlert, soon: true },
     ],

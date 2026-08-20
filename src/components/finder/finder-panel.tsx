@@ -9,15 +9,18 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusBadge } from "@/components/verification/status-badge";
-import { findEmailsByPerson, findEmailsByDomain, verifyEmail } from "@/lib/api/client";
+import { findPersonEmail, findEmailsByDomain, verifyEmail } from "@/lib/api/client";
+import { FINDER_STATE_META, scoreIsMeaningful } from "@/lib/finder/state-ui";
 import { Loader2 as Spinner } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import type { FinderResult } from "@/lib/types";
+import type { FinderOutcome, FinderResult, FinderState } from "@/lib/types";
 
 type Mode = "person" | "domain";
 
-function ConfidenceBar({ value }: { value: number }) {
+const STATE_UI = FINDER_STATE_META;
+
+function ScoreBar({ value }: { value: number }) {
   const tone = value >= 85 ? "bg-[hsl(var(--valid))]" : value >= 60 ? "bg-[hsl(var(--risky))]" : "bg-muted-foreground";
   return (
     <div className="flex items-center gap-2">
@@ -36,39 +39,106 @@ export function FinderPanel() {
   const [results, setResults] = React.useState<FinderResult[]>([]);
   const { toast } = useToast();
 
-  const search = useMutation({
-    mutationFn: () =>
-      mode === "person" ? findEmailsByPerson(person) : findEmailsByDomain(domain),
-    onSuccess: (data) => setResults(data),
-  });
+  const [verifyingIds, setVerifyingIds] = React.useState<Set<string>>(new Set());
+  const [finderState, setFinderState] = React.useState<FinderState | null>(null);
 
-  const [verifyingId, setVerifyingId] = React.useState<string | null>(null);
+  const markVerifying = (id: string, on: boolean) =>
+    setVerifyingIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  /** Toast + banner copy for a server-side person-finder outcome. */
+  const announceOutcome = (o: FinderOutcome) => {
+    const savings = o.fromCache
+      ? " (from cache)"
+      : o.skipped > 0
+        ? ` — skipped ${o.skipped} check${o.skipped === 1 ? "" : "s"}`
+        : "";
+    const copy: Record<FinderState, { variant: "success" | "info" | "warning"; title: string; description: string }> = {
+      verified: { variant: "success", title: "Email found", description: `Verified the deliverable address${savings}.` },
+      accept_all: { variant: "info", title: "Unverified", description: `Plausible but the backend couldn't confirm deliverability${savings}.` },
+      no_mx: { variant: "warning", title: "No mail server", description: "This domain has no MX record and can't receive email." },
+      not_found: { variant: "warning", title: "Email not found", description: `No mailbox could be confirmed for this person${savings}.` },
+    };
+    const c = copy[o.state];
+    toast({ variant: c.variant, title: c.title, description: c.description });
+  };
+
+  const search = useMutation({
+    mutationFn: async () => {
+      if (mode === "person") {
+        const outcome = await findPersonEmail(person);
+        return { kind: "person" as const, outcome };
+      }
+      const contacts = await findEmailsByDomain(domain);
+      return { kind: "domain" as const, contacts };
+    },
+    onSuccess: (data) => {
+      if (data.kind === "person") {
+        // The server already verified with early-exit — just show the winner.
+        setResults([{ ...data.outcome.result, state: data.outcome.state }]);
+        setFinderState(data.outcome.state);
+        announceOutcome(data.outcome);
+      } else {
+        // Domain discovery also runs the server pipeline: each contact is
+        // already resolved with its own verdict `state`.
+        setFinderState(null);
+        setResults(data.contacts);
+        const found = data.contacts.filter((c) => c.state === "verified" || c.state === "accept_all").length;
+        toast({
+          variant: found > 0 ? "success" : "info",
+          title: `${found} of ${data.contacts.length} contacts found`,
+          description: found > 0 ? "Deliverable addresses are marked Verified." : "No mailbox could be confirmed on this domain.",
+        });
+      }
+    },
+  });
 
   const canSearch =
     mode === "person"
       ? person.firstName && person.lastName && person.domain
       : domain.trim().length > 0;
 
+  /** Manual live re-verify of one row; mirrors the server's verdict rule. */
   const verifyRow = async (r: FinderResult) => {
-    setVerifyingId(r.id);
+    markVerifying(r.id, true);
     try {
-      const { result, provider } = await verifyEmail(r.email);
-      setResults((prev) => prev.map((x) => (x.id === r.id ? { ...x, status: result.status } : x)));
-      toast({
-        variant: result.status === "valid" ? "success" : result.status === "invalid" ? "error" : "warning",
-        title: `${result.email} → ${result.status}`,
-        description: provider === "mock" ? "Simulated (backend offline)" : "Verified live",
-      });
+      const { result } = await verifyEmail(r.email);
+      const state: FinderState =
+        result.status === "valid"
+          ? "verified"
+          : result.status !== "invalid" && result.score >= 60
+            ? "accept_all"
+            : "not_found";
+      setResults((prev) => prev.map((x) => (x.id === r.id ? { ...x, status: result.status, score: result.score, state } : x)));
+      if (mode === "person") setFinderState(state);
     } catch {
-      toast({ variant: "error", title: "Verification failed", description: r.email });
+      /* leave the row unchanged on error */
     } finally {
-      setVerifyingId(null);
+      markVerifying(r.id, false);
     }
   };
 
   const copy = (email: string) => {
     navigator.clipboard?.writeText(email);
     toast({ variant: "success", title: "Copied", description: email });
+  };
+
+  const exportCsv = () => {
+    if (results.length === 0) return;
+    const header = "email,score,status\n";
+    const body = results.map((r) => `${r.email},${r.score},${r.status}`).join("\n");
+    const blob = new Blob([header + body], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "found-emails.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ variant: "success", title: "Exported to CSV", description: `${results.length} contacts.` });
   };
 
   return (
@@ -143,26 +213,56 @@ export function FinderPanel() {
           <Card>
             <CardContent className="p-0">
               <div className="flex items-center justify-between p-4">
-                <p className="text-sm font-medium">
-                  {search.isPending ? "Searching…" : `${results.length} possible email${results.length === 1 ? "" : "s"}`}
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  {search.isPending ? (
+                    <>
+                      <Spinner className="size-3.5 animate-spin text-primary" />
+                      {mode === "person" ? "Finding the best email…" : "Finding & verifying contacts…"}
+                    </>
+                  ) : mode === "person" ? (
+                    finderState === "not_found" || finderState === "no_mx" ? "Result" : "Best match"
+                  ) : (
+                    `${results.length} contact${results.length === 1 ? "" : "s"}`
+                  )}
                 </p>
-                {results.length > 0 && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => toast({ variant: "info", title: "Exported to CSV", description: `${results.length} contacts.` })}
-                  >
-                    <Download className="size-4" /> Export CSV
-                  </Button>
-                )}
+                {results.length > 0 && !search.isPending &&
+                  !(mode === "person" && (finderState === "not_found" || finderState === "no_mx")) && (
+                    <Button variant="outline" size="sm" onClick={exportCsv}>
+                      <Download className="size-4" /> Export CSV
+                    </Button>
+                  )}
               </div>
+
+              {mode === "person" && (finderState === "not_found" || finderState === "no_mx") && !search.isPending ? (
+                <div className="flex flex-col items-center gap-2 px-6 py-10 text-center">
+                  {React.createElement(STATE_UI[finderState].icon, { className: "size-8 text-muted-foreground" })}
+                  <p className="text-sm font-semibold">{STATE_UI[finderState].label}</p>
+                  <p className="max-w-sm text-xs text-muted-foreground">
+                    {finderState === "no_mx"
+                      ? `${person.domain} has no mail server, so it can't receive email.`
+                      : `The backend couldn't confirm any mailbox for ${person.firstName} ${person.lastName} on this domain.`}
+                  </p>
+                  {finderState === "not_found" && results[0]?.email && (
+                    <p className="text-xs text-muted-foreground">
+                      Closest format (unverified): <span className="font-medium text-foreground">{results[0].email}</span>
+                    </p>
+                  )}
+                </div>
+              ) : (
+              <>
+              {mode === "person" && finderState && !search.isPending && (
+                <div className={cn("mx-4 mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm", STATE_UI[finderState].className)}>
+                  {React.createElement(STATE_UI[finderState].icon, { className: "size-4 shrink-0" })}
+                  {STATE_UI[finderState].label}
+                </div>
+              )}
               <Table>
                 <TableHeader>
                   <TableRow>
                     {mode === "domain" && <TableHead>Name</TableHead>}
                     {mode === "domain" && <TableHead>Title</TableHead>}
                     <TableHead>Email</TableHead>
-                    <TableHead>Confidence</TableHead>
+                    <TableHead>Score</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -174,10 +274,34 @@ export function FinderPanel() {
                         <TableRow key={r.id}>
                           {mode === "domain" && <TableCell className="font-medium">{r.name}</TableCell>}
                           {mode === "domain" && <TableCell className="text-muted-foreground">{r.jobTitle}</TableCell>}
-                          <TableCell className="font-medium">{r.email}</TableCell>
-                          <TableCell><ConfidenceBar value={r.confidence} /></TableCell>
+                          <TableCell className={cn("font-medium", r.state && !scoreIsMeaningful(r.state) && "text-muted-foreground")}>
+                            <div className="flex items-center gap-2">
+                              <span>{r.email}</span>
+                              {mode === "person" && r.bestGuess && (
+                                <span className="rounded-full bg-[hsl(var(--valid))]/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--valid))]">
+                                  Best guess
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>
-                            {r.status === "unverified" ? (
+                            {r.state && scoreIsMeaningful(r.state) ? (
+                              <ScoreBar value={r.score} />
+                            ) : (
+                              <span className="text-sm text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {verifyingIds.has(r.id) ? (
+                              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Spinner className="size-3 animate-spin" /> Verifying…
+                              </span>
+                            ) : r.state ? (
+                              <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium", STATE_UI[r.state].className)}>
+                                {React.createElement(STATE_UI[r.state].icon, { className: "size-3" })}
+                                {STATE_UI[r.state].chip}
+                              </span>
+                            ) : r.status === "unverified" ? (
                               <span className="text-xs text-muted-foreground">Unverified</span>
                             ) : (
                               <StatusBadge status={r.status} />
@@ -188,8 +312,8 @@ export function FinderPanel() {
                               <Button size="icon" variant="ghost" onClick={() => copy(r.email)} aria-label="Copy">
                                 <Copy className="size-4" />
                               </Button>
-                              <Button size="sm" variant="ghost" disabled={verifyingId === r.id} onClick={() => verifyRow(r)}>
-                                {verifyingId === r.id ? <Spinner className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} Verify
+                              <Button size="sm" variant="ghost" disabled={verifyingIds.has(r.id)} onClick={() => verifyRow(r)}>
+                                {verifyingIds.has(r.id) ? <Spinner className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} Verify
                               </Button>
                             </div>
                           </TableCell>
@@ -197,6 +321,8 @@ export function FinderPanel() {
                       ))}
                 </TableBody>
               </Table>
+              </>
+              )}
             </CardContent>
           </Card>
         )}

@@ -290,10 +290,10 @@ export const MOCK_FINDER_SEARCHES: FinderSearch[] = [
     query: "acme.com",
     createdAt: "2026-08-15T13:20:00Z",
     results: [
-      { id: "fr_1", email: "john.smith@acme.com", confidence: 96, pattern: "{first}.{last}", source: "web + pattern match", name: "John Smith", jobTitle: "CEO", domain: "acme.com", status: "valid" },
-      { id: "fr_2", email: "sarah.lee@acme.com", confidence: 94, pattern: "{first}.{last}", source: "web + pattern match", name: "Sarah Lee", jobTitle: "CTO", domain: "acme.com", status: "valid" },
-      { id: "fr_3", email: "david.wong@acme.com", confidence: 91, pattern: "{first}.{last}", source: "web + pattern match", name: "David Wong", jobTitle: "COO", domain: "acme.com", status: "risky" },
-      { id: "fr_4", email: "emily.brown@acme.com", confidence: 88, pattern: "{first}.{last}", source: "pattern match", name: "Emily Brown", jobTitle: "VP Engineering", domain: "acme.com", status: "unverified" },
+      { id: "fr_1", email: "john.smith@acme.com", score: 96, pattern: "{first}.{last}", source: "web + pattern match", name: "John Smith", jobTitle: "CEO", domain: "acme.com", status: "valid" },
+      { id: "fr_2", email: "sarah.lee@acme.com", score: 94, pattern: "{first}.{last}", source: "web + pattern match", name: "Sarah Lee", jobTitle: "CTO", domain: "acme.com", status: "valid" },
+      { id: "fr_3", email: "david.wong@acme.com", score: 91, pattern: "{first}.{last}", source: "web + pattern match", name: "David Wong", jobTitle: "COO", domain: "acme.com", status: "risky" },
+      { id: "fr_4", email: "emily.brown@acme.com", score: 88, pattern: "{first}.{last}", source: "pattern match", name: "Emily Brown", jobTitle: "VP Engineering", domain: "acme.com", status: "catch_all" },
     ],
   },
 ];

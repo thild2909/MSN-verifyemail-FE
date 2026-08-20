@@ -24,8 +24,14 @@ import type {
   CreditBalance,
   CreditTransaction,
   DomainStat,
+  BulkFinderResponse,
   EmailList,
   EmailRecord,
+  EnrichmentTable,
+  EnrichRow,
+  EnrichColumnKind,
+  EnrichRecordType,
+  FinderOutcome,
   FinderResult,
   Integration,
   TeamMember,
@@ -33,8 +39,16 @@ import type {
   Webhook,
   WebhookDelivery,
 } from "../types";
-import { verifyEmailSync, statusBucket } from "../mock/verification-engine";
+import { statusBucket } from "../mock/verification-engine";
 import { seededRandom } from "../utils";
+import { cleanDomain } from "../finder/patterns";
+import type {
+  ProxyConfig,
+  ProxyType,
+  RotationStrategy,
+  CompanyCollectJob,
+  CollectedCompany,
+} from "../leads/collect-types";
 
 /* --------------------------- Verification -------------------------- */
 
@@ -268,65 +282,238 @@ export async function getTransactions(): Promise<CreditTransaction[]> {
 
 const FINDER_TITLES = ["CEO", "CTO", "COO", "VP Sales", "Head of Marketing", "Engineering Lead"];
 
-export async function findEmailsByPerson(input: {
+/**
+ * Find one person's email through the server-side finder pipeline (a single
+ * request): the server generates candidates, verifies them with early-exit, and
+ * uses a per-domain fact cache so repeat lookups on the same company are nearly
+ * free. Returns the single winning address plus how the answer was reached.
+ */
+export async function findPersonEmail(input: {
   firstName: string;
   lastName: string;
   domain: string;
-}): Promise<FinderResult[]> {
-  await sleep(900);
-  const { firstName, lastName, domain } = input;
-  const f = firstName.trim().toLowerCase();
-  const l = lastName.trim().toLowerCase();
-  const d = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const patterns: { email: string; pattern: string; confidence: number }[] = [
-    { email: `${f}.${l}@${d}`, pattern: "{first}.{last}", confidence: 94 },
-    { email: `${f[0]}${l}@${d}`, pattern: "{f}{last}", confidence: 82 },
-    { email: `${f}@${d}`, pattern: "{first}", confidence: 63 },
-    { email: `${f}_${l}@${d}`, pattern: "{first}_{last}", confidence: 48 },
-  ];
-  return patterns.map((p, i) => {
-    const res = verifyEmailSync(p.email);
-    return {
-      id: `pf_${i}`,
-      email: p.email,
-      confidence: p.confidence,
-      pattern: p.pattern,
-      source: "pattern match",
-      name: `${firstName} ${lastName}`,
-      domain: d,
-      status: res.status,
-    };
-  });
+}): Promise<FinderOutcome> {
+  const { data } = await apiPost<FinderOutcome>("/api/v1/finder", input);
+  return data;
 }
 
+/**
+ * Find emails for many people in one request (bulk finder). The server runs the
+ * finder for each person with a shared domain + per-email cache, so people at
+ * the same company cost far fewer backend calls. Returns per-person outcomes
+ * plus resource-savings stats.
+ */
+export async function findEmailsBulk(
+  people: { firstName: string; lastName: string; domain: string }[],
+): Promise<BulkFinderResponse> {
+  const { data } = await apiPost<BulkFinderResponse>("/api/v1/finder/bulk", { people });
+  return data;
+}
+
+/**
+ * Discover likely contacts at a company, resolving each through the same
+ * server finder pipeline as the single/bulk finders (shared domain + email
+ * cache, early-exit, confidence threshold). Each row carries its own verdict
+ * `state`, so the UI reports verified / unverified / not-found identically.
+ */
 export async function findEmailsByDomain(domainInput: string): Promise<FinderResult[]> {
-  await sleep(1000);
-  const d = domainInput.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const names = [
+  const d = cleanDomain(domainInput);
+  const roster: [string, string][] = [
     ["John", "Smith"], ["Sarah", "Lee"], ["David", "Wong"], ["Emily", "Brown"],
     ["Michael", "Chen"], ["Laura", "Davis"], ["James", "Wilson"], ["Anna", "Patel"],
   ];
-  return names.map(([first, last], i) => {
-    const email = `${first.toLowerCase()}.${last.toLowerCase()}@${d}`;
-    const conf = 96 - i * 4;
-    const res = verifyEmailSync(email);
-    return {
-      id: `df_${i}`,
-      email,
-      confidence: conf,
-      pattern: "{first}.{last}",
-      source: "web + pattern match",
-      name: `${first} ${last}`,
-      jobTitle: FINDER_TITLES[Math.floor(seededRandom(email) * FINDER_TITLES.length)],
-      domain: d,
-      status: res.status,
-    };
-  });
+
+  const { results } = await findEmailsBulk(roster.map(([firstName, lastName]) => ({ firstName, lastName, domain: d })));
+
+  return results.map((r, i) => ({
+    ...r.outcome.result,
+    id: `df_${i}`,
+    name: `${roster[i][0]} ${roster[i][1]}`,
+    jobTitle: FINDER_TITLES[Math.floor(seededRandom(r.outcome.result.email) * FINDER_TITLES.length)],
+    state: r.outcome.state,
+  }));
 }
 
 export async function getFinderSearches() {
   await sleep(200);
   return MOCK_FINDER_SEARCHES;
+}
+
+/* --------------------- Enrichment tables (Clay-style) -------------------- */
+
+export async function getEnrichTables(): Promise<EnrichmentTable[]> {
+  return apiGet<EnrichmentTable[]>("/api/v1/enrich");
+}
+
+export async function getEnrichTable(id: string): Promise<EnrichmentTable | undefined> {
+  try {
+    return await apiGet<EnrichmentTable>(`/api/v1/enrich/${id}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return undefined;
+    throw err;
+  }
+}
+
+export interface CreateEnrichInput {
+  name: string;
+  fileName: string;
+  recordType: EnrichRecordType;
+  importedColumns: string[];
+  identityColumns: string[];
+  rows: Record<string, string>[];
+  columns: EnrichColumnKind[];
+}
+
+/** Create an enrichment table; it kicks off the background enrichment run. */
+export async function createEnrichTable(input: CreateEnrichInput): Promise<{ table: EnrichmentTable; truncated: number }> {
+  const { data, raw } = await apiPost<EnrichmentTable>("/api/v1/enrich", input);
+  return { table: data, truncated: raw.truncated ?? 0 };
+}
+
+export interface RowsQuery {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  filter?: string; // "all" | "has_email" | "no_email" | "enriched" | "pending"
+}
+
+export interface RowsPage {
+  rows: EnrichRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function getEnrichRows(id: string, query: RowsQuery = {}): Promise<RowsPage> {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  if (query.search) params.set("search", query.search);
+  if (query.filter) params.set("filter", query.filter);
+  return apiGet<RowsPage>(`/api/v1/enrich/${id}/rows?${params.toString()}`);
+}
+
+export async function addEnrichColumn(id: string, kind: EnrichColumnKind): Promise<EnrichmentTable> {
+  const { data } = await apiPost<EnrichmentTable>(`/api/v1/enrich/${id}/columns`, { kind });
+  return data;
+}
+
+export async function removeEnrichColumn(id: string, colId: string): Promise<EnrichmentTable> {
+  const res = await fetch(`/api/v1/enrich/${id}/columns?colId=${encodeURIComponent(colId)}`, { method: "DELETE" });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Remove failed", res.status);
+  return json.data as EnrichmentTable;
+}
+
+export async function renameEnrichTable(id: string, name: string): Promise<EnrichmentTable> {
+  const res = await fetch(`/api/v1/enrich/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
+  });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Rename failed", res.status);
+  return json.data as EnrichmentTable;
+}
+
+export async function deleteEnrichTable(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/enrich/${id}`, { method: "DELETE" });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
+}
+
+export async function runEnrichTable(id: string): Promise<EnrichmentTable> {
+  const { data } = await apiPost<EnrichmentTable>(`/api/v1/enrich/${id}/run`, {});
+  return data;
+}
+
+/** URL for the server-generated export (download via an anchor). */
+export function enrichExportUrl(id: string, format: "csv" | "xlsx"): string {
+  return `/api/v1/enrich/${id}/export?${new URLSearchParams({ format }).toString()}`;
+}
+
+/** Loop-closer: create a Verification List from a table's discovered emails. */
+export async function pushEnrichToVerification(id: string): Promise<{ listId: string; count: number }> {
+  const { data } = await apiPost<{ listId: string; count: number }>(`/api/v1/enrich/${id}/push-to-verification`, {});
+  return data;
+}
+
+/* ---------------- Company collection + proxy config ---------------- */
+
+export async function getProxyConfig(): Promise<ProxyConfig> {
+  return apiGet<ProxyConfig>("/api/v1/proxies");
+}
+
+export interface ProxyEntryInput {
+  id?: string;
+  label: string;
+  host: string;
+  port: number;
+  type: ProxyType;
+  username?: string;
+  password?: string;
+  country?: string;
+  enabled: boolean;
+}
+export interface ProxyConfigInput {
+  enabled: boolean;
+  rotation: RotationStrategy;
+  concurrency: number;
+  delayMs: number;
+  backoffMs: number;
+  maxRetries: number;
+  proxies: ProxyEntryInput[];
+}
+
+export async function setProxyConfig(cfg: ProxyConfigInput): Promise<ProxyConfig> {
+  const res = await fetch("/api/v1/proxies", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Save failed", res.status);
+  return json.data as ProxyConfig;
+}
+
+export async function testProxies(id?: string): Promise<ProxyConfig> {
+  const { data } = await apiPost<ProxyConfig>("/api/v1/proxies/test", id ? { id } : {});
+  return data;
+}
+
+export async function getCollectJobs(): Promise<CompanyCollectJob[]> {
+  return apiGet<CompanyCollectJob[]>("/api/v1/leads/collect");
+}
+
+export async function getCollectJob(id: string): Promise<CompanyCollectJob | undefined> {
+  try {
+    return await apiGet<CompanyCollectJob>(`/api/v1/leads/collect/${id}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return undefined;
+    throw err;
+  }
+}
+
+export interface CreateCollectInput {
+  name: string;
+  fileName: string;
+  rows: { company: string; location: string }[];
+}
+export async function createCollectJob(input: CreateCollectInput): Promise<{ job: CompanyCollectJob; truncated: number }> {
+  const { data, raw } = await apiPost<CompanyCollectJob>("/api/v1/leads/collect", input);
+  return { job: data, truncated: raw.truncated ?? 0 };
+}
+
+export async function deleteCollectJob(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/leads/collect/${id}`, { method: "DELETE" });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
+}
+
+export interface CollectCompaniesQuery { page?: number; pageSize?: number; search?: string; filter?: string }
+export interface CollectCompaniesPage { companies: CollectedCompany[]; total: number; page: number; pageSize: number }
+
+export async function getCollectedCompanies(id: string, query: CollectCompaniesQuery = {}): Promise<CollectCompaniesPage> {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  if (query.search) params.set("search", query.search);
+  if (query.filter) params.set("filter", query.filter);
+  return apiGet<CollectCompaniesPage>(`/api/v1/leads/collect/${id}/companies?${params.toString()}`);
 }
 
 /* --------------------------- API / webhooks ------------------------ */

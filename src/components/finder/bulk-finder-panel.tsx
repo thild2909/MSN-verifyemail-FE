@@ -2,20 +2,19 @@
 import * as React from "react";
 import Papa from "papaparse";
 import {
-  FileText, CheckCircle2, Loader2, X, ArrowRight, Download, Search, ShieldCheck, Copy,
+  FileText, CheckCircle2, Loader2, X, ArrowRight, Download, Search, Copy, Zap,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FileDropzone } from "@/components/verification/file-dropzone";
-import { StatusBadge } from "@/components/verification/status-badge";
-import { verifyEmail } from "@/lib/api/client";
-import { formatNumber, seededRandom, cn } from "@/lib/utils";
+import { findEmailsBulk, verifyEmail } from "@/lib/api/client";
+import { FINDER_STATE_META, scoreIsMeaningful } from "@/lib/finder/state-ui";
+import { formatNumber, cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
-import type { VerificationStatus } from "@/lib/types";
+import type { BulkFinderResponse, FinderState, VerificationStatus } from "@/lib/types";
 
 type Step = "idle" | "mapping" | "finding" | "done";
 
@@ -31,16 +30,16 @@ interface FoundRow {
   name: string;
   domain: string;
   email: string;
-  confidence: number;
-  pattern: string;
+  score: number;
   status: VerificationStatus | "unverified";
-  verifying?: boolean;
+  state: FinderState;
 }
 
 const FIRST_RE = /first|fname|given/i;
 const LAST_RE = /last|lname|surname|family/i;
 const DOMAIN_RE = /domain|company|organi|website|employer|account/i;
-const MAX_VERIFY = 200;
+/** Matches the server's per-request cap (FINDER_BULK_MAX). */
+const MAX_FIND = 100;
 
 /** Turn a company/domain cell into a best-guess domain. */
 function toDomain(value: string): string {
@@ -60,17 +59,16 @@ export function BulkFinderPanel() {
   const [parsed, setParsed] = React.useState<Parsed | null>(null);
   const [map, setMap] = React.useState({ first: "", last: "", domain: "" });
   const [rows, setRows] = React.useState<FoundRow[]>([]);
-  const [progress, setProgress] = React.useState(0);
-  const abortRef = React.useRef<AbortController | null>(null);
+  const [stats, setStats] = React.useState<BulkFinderResponse["stats"] | null>(null);
+  const [verifyingIds, setVerifyingIds] = React.useState<Set<string>>(new Set());
   const { toast } = useToast();
 
   const reset = () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
     setStep("idle");
     setParsed(null);
     setRows([]);
-    setProgress(0);
+    setStats(null);
+    setVerifyingIds(new Set());
   };
 
   const onFile = (file: File) => {
@@ -103,91 +101,94 @@ export function BulkFinderPanel() {
     }
   };
 
-  const findEmails = () => {
+  const findEmails = async () => {
     if (!parsed) return;
     setStep("finding");
     const fi = parsed.columns.indexOf(map.first);
     const li = parsed.columns.indexOf(map.last);
     const di = parsed.columns.indexOf(map.domain);
 
-    const found: FoundRow[] = [];
-    for (let i = 0; i < parsed.rows.length; i++) {
-      const r = parsed.rows[i];
+    // The finder needs first + last + domain per person.
+    const people: { firstName: string; lastName: string; domain: string }[] = [];
+    const names: string[] = [];
+    let skippedRows = 0;
+    for (const r of parsed.rows) {
       const first = (r[fi] ?? "").trim();
       const last = (r[li] ?? "").trim();
       const domain = toDomain(r[di] ?? "");
-      if ((!first && !last) || !domain) continue;
-      const local = first && last ? `${first}.${last}`.toLowerCase() : (first || last).toLowerCase();
-      const email = `${local.replace(/[^a-z0-9._-]/g, "")}@${domain}`;
-      const conf = 78 + Math.round(seededRandom(email) * 18); // 78–96
-      found.push({
-        id: `bf_${i}`,
-        name: [first, last].filter(Boolean).join(" ") || domain,
-        domain,
-        email,
-        confidence: conf,
-        pattern: first && last ? "{first}.{last}" : "{name}",
-        status: "unverified",
-      });
+      if (!first || !last || !domain) {
+        skippedRows++;
+        continue;
+      }
+      people.push({ firstName: first, lastName: last, domain });
+      names.push(`${first} ${last}`);
     }
 
-    // brief animated progress for feedback, then reveal results
-    let p = 0;
-    const tick = () => {
-      p = Math.min(100, p + 12);
-      setProgress(p);
-      if (p < 100) setTimeout(tick, 60);
-      else {
-        setRows(found);
-        setStep("done");
-        toast({
-          variant: "success",
-          title: "Emails discovered",
-          description: `${formatNumber(found.length)} contacts from ${formatNumber(parsed.rows.length)} rows.`,
-        });
-      }
-    };
-    setTimeout(tick, 100);
+    const capped = people.slice(0, MAX_FIND);
+    const overflow = people.length - capped.length;
+    if (capped.length === 0) {
+      toast({ variant: "warning", title: "No usable rows", description: "Each row needs first name, last name and a company/domain." });
+      setStep("mapping");
+      return;
+    }
+
+    try {
+      const { results, stats } = await findEmailsBulk(capped);
+      const found: FoundRow[] = results.map((res, i) => ({
+        id: `bf_${i}`,
+        name: names[i],
+        domain: res.outcome.result.domain,
+        email: res.outcome.result.email,
+        score: res.outcome.result.score,
+        status: res.outcome.result.status,
+        state: res.outcome.state,
+      }));
+      setRows(found);
+      setStats(stats);
+      setStep("done");
+      const notes = [
+        skippedRows ? `${formatNumber(skippedRows)} row(s) skipped` : "",
+        overflow ? `${formatNumber(overflow)} over the ${MAX_FIND} cap` : "",
+      ].filter(Boolean).join(" · ");
+      toast({
+        variant: "success",
+        title: "Emails found",
+        description: `${formatNumber(found.length)} people · ${stats.backendCalls} live checks (saved ${stats.saved})${notes ? ` · ${notes}` : ""}.`,
+      });
+    } catch {
+      toast({ variant: "error", title: "Bulk find failed", description: "Please try again." });
+      setStep("mapping");
+    }
   };
 
-  const verifyAll = async () => {
-    const targets = rows.slice(0, MAX_VERIFY);
-    const controller = new AbortController();
-    abortRef.current = controller;
-    let next = 0;
-    const worker = async () => {
-      while (next < targets.length) {
-        if (controller.signal.aborted) return;
-        const row = targets[next++];
-        setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, verifying: true } : x)));
-        try {
-          const { result } = await verifyEmail(row.email);
-          setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, status: result.status, verifying: false } : x)));
-        } catch {
-          setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, verifying: false } : x)));
-        }
-      }
-    };
-    toast({ variant: "info", title: "Verifying discovered emails…" });
-    await Promise.all(Array.from({ length: 6 }, () => worker()));
-    if (!controller.signal.aborted) toast({ variant: "success", title: "Verification finished" });
-    abortRef.current = null;
-  };
-
+  /** Manual live re-check of one row (bypasses cache on the single-verify path). */
   const verifyRow = async (row: FoundRow) => {
-    setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, verifying: true } : x)));
+    setVerifyingIds((s) => new Set(s).add(row.id));
     try {
       const { result } = await verifyEmail(row.email);
-      setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, status: result.status, verifying: false } : x)));
+      // Mirror the server's verdict rule so the state chip stays consistent.
+      const state: FinderState =
+        result.status === "valid"
+          ? "verified"
+          : result.status !== "invalid" && result.score >= 60
+            ? "accept_all"
+            : "not_found";
+      setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, status: result.status, score: result.score, state } : x)));
     } catch {
-      setRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, verifying: false } : x)));
+      /* leave the row unchanged on error */
+    } finally {
+      setVerifyingIds((s) => {
+        const n = new Set(s);
+        n.delete(row.id);
+        return n;
+      });
     }
   };
 
   const exportCsv = () => {
-    const header = "name,email,domain,confidence,status\n";
+    const header = "name,email,domain,score,status,state\n";
     const body = rows
-      .map((r) => `"${r.name}",${r.email},${r.domain},${r.confidence},${r.status}`)
+      .map((r) => `"${r.name}",${r.email},${r.domain},${r.score},${r.status},${r.state}`)
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -267,28 +268,37 @@ export function BulkFinderPanel() {
         )}
 
         {step === "finding" && (
-          <div className="space-y-3 py-4">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Loader2 className="size-4 animate-spin text-primary" /> Discovering emails…
-            </div>
-            <Progress value={progress} />
+          <div className="flex items-center gap-2 py-6 text-sm font-medium">
+            <Loader2 className="size-4 animate-spin text-primary" />
+            Finding &amp; verifying emails — one shared pass over the backend…
           </div>
         )}
 
         {step === "done" && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-medium">{formatNumber(rows.length)} emails discovered</p>
+              <p className="text-sm font-medium">
+                {formatNumber(rows.filter((r) => scoreIsMeaningful(r.state)).length)} found
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {formatNumber(rows.filter((r) => !scoreIsMeaningful(r.state)).length)} not found
+                </span>
+              </p>
               <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={verifyAll}>
-                  <ShieldCheck className="size-4" /> Verify all
-                </Button>
                 <Button size="sm" variant="outline" onClick={exportCsv}>
                   <Download className="size-4" /> Export CSV
                 </Button>
                 <Button size="sm" variant="ghost" onClick={reset}>New file</Button>
               </div>
             </div>
+
+            {stats && (
+              <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
+                <Zap className="size-4 shrink-0" />
+                {formatNumber(stats.backendCalls)} live checks for {formatNumber(stats.people)} people — saved{" "}
+                {formatNumber(stats.saved)} of {formatNumber(stats.naiveCalls)} thanks to early-exit + shared domain/email cache.
+              </div>
+            )}
 
             <div className="rounded-xl border">
               <Table>
@@ -297,7 +307,7 @@ export function BulkFinderPanel() {
                     <TableHead>Name</TableHead>
                     <TableHead>Domain</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Confidence</TableHead>
+                    <TableHead>Score</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead />
                   </TableRow>
@@ -307,12 +317,17 @@ export function BulkFinderPanel() {
                     <TableRow key={r.id}>
                       <TableCell className="font-medium">{r.name}</TableCell>
                       <TableCell className="text-muted-foreground">{r.domain}</TableCell>
-                      <TableCell className="font-medium">{r.email}</TableCell>
-                      <TableCell><ConfidenceBar value={r.confidence} /></TableCell>
+                      <TableCell className={cn("font-medium", !scoreIsMeaningful(r.state) && "text-muted-foreground")}>{r.email}</TableCell>
                       <TableCell>
-                        {r.status === "unverified"
-                          ? <span className="text-xs text-muted-foreground">Unverified</span>
-                          : <StatusBadge status={r.status} />}
+                        {scoreIsMeaningful(r.state)
+                          ? <ScoreBar value={r.score} />
+                          : <span className="text-sm text-muted-foreground">—</span>}
+                      </TableCell>
+                      <TableCell>
+                        <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium", FINDER_STATE_META[r.state].className)}>
+                          {React.createElement(FINDER_STATE_META[r.state].icon, { className: "size-3" })}
+                          {FINDER_STATE_META[r.state].chip}
+                        </span>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
@@ -327,8 +342,8 @@ export function BulkFinderPanel() {
                           >
                             <Copy className="size-4" />
                           </Button>
-                          <Button size="sm" variant="ghost" disabled={r.verifying} onClick={() => verifyRow(r)}>
-                            {r.verifying ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} Verify
+                          <Button size="sm" variant="ghost" disabled={verifyingIds.has(r.id)} onClick={() => verifyRow(r)}>
+                            {verifyingIds.has(r.id) ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} Verify
                           </Button>
                         </div>
                       </TableCell>
@@ -346,7 +361,7 @@ export function BulkFinderPanel() {
 
 /* -------------------------------- helpers -------------------------------- */
 
-function ConfidenceBar({ value }: { value: number }) {
+function ScoreBar({ value }: { value: number }) {
   const tone = value >= 85 ? "bg-[hsl(var(--valid))]" : value >= 60 ? "bg-[hsl(var(--risky))]" : "bg-muted-foreground";
   return (
     <div className="flex items-center gap-2">

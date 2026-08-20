@@ -141,13 +141,17 @@ export interface CreditTransaction {
 export interface FinderResult {
   id: string;
   email: string;
-  confidence: number; // 0-100
+  score: number; // 0-100 — deliverability score returned by the backend
   pattern: string;
   source: string;
   name?: string;
   jobTitle?: string;
   domain: string;
   status: VerificationStatus | "unverified";
+  /** True for the single highest-confidence candidate in a result set. */
+  bestGuess?: boolean;
+  /** Finder verdict for this row (server pipeline results). */
+  state?: FinderState;
 }
 
 export interface FinderSearch {
@@ -156,6 +160,121 @@ export interface FinderSearch {
   query: string;
   createdAt: string;
   results: FinderResult[];
+}
+
+/** High-level verdict of a single-person finder search. */
+export type FinderState =
+  | "verified" // a deliverable mailbox was confirmed
+  | "accept_all" // domain is catch-all; deliverability can't be confirmed
+  | "no_mx" // domain can't receive mail at all
+  | "not_found"; // no candidate pattern was deliverable
+
+/** Result of the server-side finder pipeline: one best email + how we got it. */
+export interface FinderOutcome {
+  result: FinderResult;
+  state: FinderState;
+  smtpCalls: number; // backend verifications actually performed
+  skipped: number; // candidate patterns we did NOT need to check
+  provider: "reacher" | "mock";
+  fromCache: boolean; // domain facts came from cache (0 or few live calls)
+}
+
+/** One person + their finder outcome, from the bulk finder. */
+export interface BulkFinderResult {
+  input: { firstName: string; lastName: string; domain: string };
+  outcome: FinderOutcome;
+}
+
+/** Bulk finder response: per-person outcomes + resource-savings stats. */
+export interface BulkFinderResponse {
+  results: BulkFinderResult[];
+  stats: {
+    people: number;
+    backendCalls: number; // real backend verifications performed
+    naiveCalls: number; // cost of a per-candidate, no-cache approach
+    saved: number; // calls avoided by early-exit + caches
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Enrichment — Clay/Apollo-style enrichment tables                   */
+/* ------------------------------------------------------------------ */
+/*
+ * An enrichment table is a spreadsheet: each ROW is a record the user imported
+ * (a person or a company) and each COLUMN is an enrichment that runs per row
+ * (a "waterfall" that tries providers in order until it finds a value). Each
+ * CELL records status + the winning source + confidence + the providers tried,
+ * exactly like Clay's per-cell enrichment provenance.
+ */
+
+export type EnrichStatus = "queued" | "enriching" | "completed" | "failed";
+export type EnrichRecordType = "people" | "companies";
+
+/** The enrichments a column can run. Availability depends on record type. */
+export const ENRICH_COLUMN_KINDS = [
+  "find_work_email", // people: email pattern/provider waterfall
+  "verify_email", // people: verify an email (from a prior column or import)
+  "find_phone", // people
+  "find_linkedin", // people + companies
+  "enrich_company", // people + companies: firmographics from the domain
+  "company_tech", // people + companies: technographics
+  "generic_emails", // companies: role mailboxes (support@, info@, sales@)
+  "ai_research", // people + companies: AI summary/insight
+] as const;
+export type EnrichColumnKind = (typeof ENRICH_COLUMN_KINDS)[number];
+
+export type EnrichCellStatus = "pending" | "running" | "found" | "not_found" | "error";
+
+/** One provider attempt inside a cell's waterfall. */
+export interface WaterfallStep {
+  source: string; // e.g. "Pattern {first}.{last}", "SMTP verify", "MX cache"
+  result: "hit" | "miss" | "skipped";
+}
+
+export interface EnrichCell {
+  status: EnrichCellStatus;
+  value: string | null; // primary displayed value
+  detail: string | null; // secondary line (e.g. verification verdict, extra facts)
+  source: string | null; // the winning provider
+  confidence: number | null; // 0-100
+  waterfall: WaterfallStep[]; // every provider tried, in order
+  credits: number; // credits this cell consumed
+}
+
+export interface EnrichColumn {
+  id: string;
+  kind: EnrichColumnKind;
+  name: string; // display header, e.g. "Work Email"
+  costPerRow: number;
+}
+
+export interface EnrichRow {
+  id: string;
+  fields: Record<string, string>; // imported (canonical) data
+  cells: Record<string, EnrichCell>; // columnId -> cell
+}
+
+export interface EnrichTableSummary {
+  rows: number;
+  cellsRun: number;
+  cellsFound: number;
+  emailsFound: number;
+  creditsUsed: number;
+}
+
+export interface EnrichmentTable {
+  id: string;
+  name: string;
+  fileName: string;
+  recordType: EnrichRecordType;
+  status: EnrichStatus;
+  importedColumns: string[]; // canonical imported field names, in order
+  identityColumns: string[]; // which imported cols form the record's identity
+  columns: EnrichColumn[]; // enrichment columns, in order
+  progress: number; // 0-100
+  summary: EnrichTableSummary;
+  createdAt: string;
+  completedAt?: string;
 }
 
 /* ------------------------------------------------------------------ */

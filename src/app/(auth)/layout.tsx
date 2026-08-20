@@ -24,7 +24,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             {[
               { icon: ShieldCheck, text: "Multi-signal verification (syntax, MX, SMTP, catch-all)" },
               { icon: Zap, text: "Bulk validation for millions of records" },
-              { icon: Search, text: "Email Finder with confidence scoring" },
+              { icon: Search, text: "Email Finder with deliverability scoring" },
             ].map(({ icon: Icon, text }) => (
               <li key={text} className="flex items-center gap-3">
                 <Icon className="size-5 text-sidebar-accent" />
