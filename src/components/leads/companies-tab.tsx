@@ -92,8 +92,8 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
       qc.invalidateQueries({ queryKey: ["collect-companies", activeId] });
       toast(
         r.checked === 0
-          ? { variant: "info", title: "Nothing to review", description: "All rows already AI-checked." }
-          : { variant: r.mismatch > 0 ? "error" : "success", title: `AI reviewed ${r.checked} companies`, description: `${r.verified} consistent · ${r.mismatch} mismatch · ${r.uncertain} uncertain · ${formatNumber(r.tokens)} tokens` },
+          ? { variant: "info", title: "Nothing to review", description: r.skipped > 0 ? `Skipped ${r.skipped} high-confidence companies (no LLM needed).` : "All rows already AI-checked." }
+          : { variant: r.mismatch > 0 ? "error" : "success", title: `AI reviewed ${r.checked} companies`, description: `${r.verified} consistent · ${r.mismatch} mismatch · ${r.uncertain} uncertain · skipped ${r.skipped} high-conf · ${formatNumber(r.tokens)} tokens` },
       );
     },
     onError: (e) => toast({ variant: "error", title: "AI verify failed", description: e instanceof ApiError && e.code === "LLM_NOT_CONFIGURED" ? "Set DEEPSEEK_API_KEY in the app env." : "Try again." }),

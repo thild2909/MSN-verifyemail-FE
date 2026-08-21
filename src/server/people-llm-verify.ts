@@ -1,7 +1,8 @@
 /**
  * People LLM cross-check — Next.js ORCHESTRATION only. The DeepSeek call runs in
- * the crawler-service (backend crawl). Here we gather the store's unchecked
- * people → forward to the crawler-service → write verdicts back. Opt-in; cached.
+ * the crawler-service. We only forward LOW-confidence / weak-signal people
+ * (missing LinkedIn or confidence below the bar) so high-precision LinkedIn
+ * matches never burn tokens. Opt-in; verdicts cached per person.
  */
 import "server-only";
 import { llmVerifyPeopleViaCrawler, type PersonLlmRecord } from "./crawler-client";
@@ -11,6 +12,7 @@ import * as store from "./people-collect-store";
 export interface LlmPassResult {
   configured: boolean;
   checked: number;
+  skipped: number;
   verified: number;
   mismatch: number;
   uncertain: number;
@@ -19,7 +21,8 @@ export interface LlmPassResult {
 
 export async function llmVerifyPeople(jobId: string, onlyUnverified = true): Promise<LlmPassResult> {
   const targets = store.llmTargets(jobId, onlyUnverified);
-  if (targets.length === 0) return { configured: true, checked: 0, verified: 0, mismatch: 0, uncertain: 0, tokens: 0 };
+  const skipped = store.llmSkippedCount(jobId, onlyUnverified);
+  if (targets.length === 0) return { configured: true, checked: 0, skipped, verified: 0, mismatch: 0, uncertain: 0, tokens: 0 };
 
   const records: PersonLlmRecord[] = targets.map((p) => ({
     id: p.id,
@@ -31,7 +34,7 @@ export async function llmVerifyPeople(jobId: string, onlyUnverified = true): Pro
   }));
 
   const resp = await llmVerifyPeopleViaCrawler(records);
-  if (!resp.configured) return { configured: false, checked: 0, verified: 0, mismatch: 0, uncertain: 0, tokens: 0 };
+  if (!resp.configured) return { configured: false, checked: 0, skipped: 0, verified: 0, mismatch: 0, uncertain: 0, tokens: 0 };
 
   const at = new Date().toISOString();
   let verified = 0, mismatch = 0, uncertain = 0;
@@ -41,5 +44,5 @@ export async function llmVerifyPeople(jobId: string, onlyUnverified = true): Pro
     if (v.status === "verified") verified++; else if (v.status === "mismatch") mismatch++; else uncertain++;
   }
   store.commitLlm(jobId);
-  return { configured: true, checked: resp.verdicts.length, verified, mismatch, uncertain, tokens: resp.tokens };
+  return { configured: true, checked: resp.verdicts.length, skipped, verified, mismatch, uncertain, tokens: resp.tokens };
 }

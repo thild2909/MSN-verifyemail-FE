@@ -418,7 +418,7 @@ export async function verifyCollectedEmails(id: string, all = false): Promise<Ve
   return data;
 }
 
-export interface LlmVerifyResult { configured: boolean; checked: number; verified: number; mismatch: number; uncertain: number; tokens: number }
+export interface LlmVerifyResult { configured: boolean; checked: number; skipped: number; verified: number; mismatch: number; uncertain: number; tokens: number }
 /** LLM (DeepSeek) cross-check of collected companies. `all` re-checks every row. */
 export async function llmVerifyCompanies(id: string, all = false): Promise<LlmVerifyResult> {
   const { data } = await apiPost<LlmVerifyResult>(`/api/v1/leads/collect/${id}/llm-verify${all ? "?all=1" : ""}`, {});

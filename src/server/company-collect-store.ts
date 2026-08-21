@@ -222,9 +222,35 @@ export function setCompanyVerification(jobId: string, companyId: string, ev: Col
   c.emailVerification = ev;
 }
 
-/** Companies worth an LLM cross-check: resolved rows, skipping already-checked. */
+/** Companies worth an LLM cross-check.
+ *  Token-saving rule: ONLY uncertain / low-score rows. Auto-accepted high-
+ *  confidence matches (website + LinkedIn + score ≥ bar) skip the LLM.
+ *  Override bar with LLM_VERIFY_MAX_CONFIDENCE (default 85). */
+const COMPANY_LLM_MAX_CONF = Number(process.env.LLM_VERIFY_MAX_CONFIDENCE ?? 85);
+
+function companyNeedsLlm(c: CollectedCompany): boolean {
+  const conf = c.resolution?.confidence ?? 0;
+  const hasWeb = !!c.website?.value || !!c.domainGuess;
+  const hasLi = !!c.linkedin?.value;
+  const strong = conf >= COMPANY_LLM_MAX_CONF && hasWeb && hasLi;
+  return !strong;
+}
+
 export function llmTargets(jobId: string, onlyUnverified = true): CollectedCompany[] {
-  return (store().companies[jobId] ?? []).filter((c) => c.status === "enriched" && (!onlyUnverified || !c.llmVerification));
+  return (store().companies[jobId] ?? []).filter((c) => {
+    if (c.status !== "enriched") return false;
+    if (onlyUnverified && c.llmVerification) return false;
+    return companyNeedsLlm(c);
+  });
+}
+
+/** High-confidence companies skipped to save tokens. */
+export function llmSkippedCount(jobId: string, onlyUnverified = true): number {
+  return (store().companies[jobId] ?? []).filter((c) => {
+    if (c.status !== "enriched") return false;
+    if (onlyUnverified && c.llmVerification) return false;
+    return !companyNeedsLlm(c);
+  }).length;
 }
 export function setCompanyLlm(jobId: string, companyId: string, v: CollectedCompany["llmVerification"]) {
   const c = store().companies[jobId]?.find((x) => x.id === companyId);

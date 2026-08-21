@@ -250,9 +250,29 @@ export function setPersonVerification(jobId: string, personId: string, ev: Colle
   if (p) p.emailVerification = ev;
 }
 
-/** People worth an LLM founder↔company cross-check, skipping already-checked. */
+/** People worth an LLM founder↔company cross-check.
+ *  Token-saving rule: ONLY low-confidence / weak-signal rows. High-confidence
+ *  LinkedIn+company matches skip the LLM entirely. Override with LLM_VERIFY_MAX_CONFIDENCE. */
+const PEOPLE_LLM_MAX_CONF = Number(process.env.LLM_VERIFY_MAX_CONFIDENCE ?? 80);
+
+function personNeedsLlm(p: CollectedPerson): boolean {
+  const strong = !!p.linkedin && p.confidence >= PEOPLE_LLM_MAX_CONF;
+  return !strong;
+}
+
 export function llmTargets(jobId: string, onlyUnverified = true): CollectedPerson[] {
-  return (store().people[jobId] ?? []).filter((p) => !onlyUnverified || !p.llmVerification);
+  return (store().people[jobId] ?? []).filter((p) => {
+    if (onlyUnverified && p.llmVerification) return false;
+    return personNeedsLlm(p);
+  });
+}
+
+/** High-confidence people that would have been LLM-checked under the old "check all" policy. */
+export function llmSkippedCount(jobId: string, onlyUnverified = true): number {
+  return (store().people[jobId] ?? []).filter((p) => {
+    if (onlyUnverified && p.llmVerification) return false;
+    return !personNeedsLlm(p);
+  }).length;
 }
 export function setPersonLlm(jobId: string, personId: string, v: CollectedPerson["llmVerification"]) {
   const p = store().people[jobId]?.find((x) => x.id === personId);

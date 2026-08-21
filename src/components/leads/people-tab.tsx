@@ -63,8 +63,8 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
       qc.invalidateQueries({ queryKey: ["collect-people", activeId] });
       toast(
         r.checked === 0
-          ? { variant: "info", title: "Nothing to review", description: "All people already AI-checked." }
-          : { variant: r.mismatch > 0 ? "error" : "success", title: `AI reviewed ${r.checked} people`, description: `${r.verified} match · ${r.mismatch} mismatch · ${r.uncertain} uncertain · ${formatNumber(r.tokens)} tokens` },
+          ? { variant: "info", title: "Nothing to review", description: r.skipped > 0 ? `Skipped ${r.skipped} high-confidence people (no LLM needed).` : "All people already AI-checked." }
+          : { variant: r.mismatch > 0 ? "error" : "success", title: `AI reviewed ${r.checked} people`, description: `${r.verified} match · ${r.mismatch} mismatch · ${r.uncertain} uncertain · skipped ${r.skipped} high-conf · ${formatNumber(r.tokens)} tokens` },
       );
     },
     onError: (e) => toast({ variant: "error", title: "AI verify failed", description: e instanceof ApiError && e.code === "LLM_NOT_CONFIGURED" ? "Set DEEPSEEK_API_KEY in the app env." : "Try again." }),
@@ -153,7 +153,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
             const none = c.status === "done" && c.peopleFound === 0;
             const pending = c.status === "pending" || c.status === "collecting";
             return (
-              <span key={i} title={none ? "No public LinkedIn profiles are indexed for this company yet." : undefined}
+              <span key={i} title={none ? "No decision-makers found on LinkedIn search or the company about/team pages." : undefined}
                 className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium",
                   pending ? "bg-muted text-muted-foreground" : none ? "bg-amber-500/12 text-amber-600 dark:text-amber-400" : "bg-[hsl(var(--valid))]/12 text-[hsl(var(--valid))]")}>
                 {pending && <Loader2 className="size-3 animate-spin" />}
