@@ -52,7 +52,7 @@ function scheduleSave() {
 }
 
 function emptySummary(total: number): CollectSummary {
-  return { total, enriched: 0, withWebsite: 0, withEmail: 0, withPhone: 0, withLinkedin: 0, rateLimited: 0, proxyRotations: 0 };
+  return { total, enriched: 0, resolved: 0, withWebsite: 0, withEmail: 0, withPhone: 0, withLinkedin: 0, withLegalEntity: 0, cacheHits: 0, rateLimited: 0, proxyRotations: 0, emailsVerified: 0, emailsValid: 0 };
 }
 
 /* -------------------------------- reads ---------------------------------- */
@@ -67,22 +67,68 @@ export function rawCompanies(jobId: string): CollectedCompany[] {
   return store().companies[jobId] ?? [];
 }
 
-export interface CompaniesQuery { page?: number; pageSize?: number; search?: string; filter?: string }
-export interface CompaniesPage { companies: CollectedCompany[]; total: number; page: number; pageSize: number }
+/** Companies in a job by id (preserves the given id order). */
+export function companiesByIds(jobId: string, ids: string[]): CollectedCompany[] {
+  const list = store().companies[jobId] ?? [];
+  const byId = new Map(list.map((c) => [c.id, c]));
+  return ids.map((id) => byId.get(id)).filter((c): c is CollectedCompany => !!c);
+}
+
+export interface CompaniesQuery {
+  page?: number; pageSize?: number; search?: string;
+  status?: string[]; // enriched | not_found
+  has?: string[]; // website | email | phone | linkedin  (AND — all required)
+  email?: string[]; // valid | bad  (OR)
+  industries?: string[]; // OR
+}
+export interface CompaniesFacets {
+  status: Record<string, number>;
+  has: { website: number; email: number; phone: number; linkedin: number };
+  email: { valid: number; bad: number };
+  industries: { name: string; count: number }[];
+}
+export interface CompaniesPage { companies: CollectedCompany[]; total: number; page: number; pageSize: number; facets: CompaniesFacets }
+
+const isBadEmailCo = (c: CollectedCompany) => c.emailVerification != null && ["invalid", "disposable"].includes(c.emailVerification.status);
+
+function companiesFacets(all: CollectedCompany[]): CompaniesFacets {
+  const status: Record<string, number> = {};
+  const has = { website: 0, email: 0, phone: 0, linkedin: 0 };
+  const email = { valid: 0, bad: 0 };
+  const industryCounts = new Map<string, number>();
+  for (const c of all) {
+    status[c.status] = (status[c.status] ?? 0) + 1;
+    if (c.website) has.website++;
+    if (c.contactEmail) has.email++;
+    if (c.phone) has.phone++;
+    if (c.linkedin) has.linkedin++;
+    if (c.emailVerification?.status === "valid") email.valid++;
+    if (isBadEmailCo(c)) email.bad++;
+    const ind = c.industry?.value ? String(c.industry.value) : "";
+    if (ind) industryCounts.set(ind, (industryCounts.get(ind) ?? 0) + 1);
+  }
+  const industries = [...industryCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 40);
+  return { status, has, email, industries };
+}
 
 export function getCompanies(jobId: string, query: CompaniesQuery = {}): CompaniesPage {
   const all = store().companies[jobId] ?? [];
-  const { page = 1, pageSize = 25, search = "", filter = "all" } = query;
+  const { page = 1, pageSize = 25, search = "", status = [], has = [], email = [], industries = [] } = query;
+  const facets = companiesFacets(all);
+
   let filtered = all;
   const q = search.trim().toLowerCase();
   if (q) filtered = filtered.filter((c) => c.inputName.toLowerCase().includes(q) || c.inputLocation.toLowerCase().includes(q) || (c.domainGuess ?? "").includes(q));
-  if (filter === "enriched") filtered = filtered.filter((c) => c.status === "enriched");
-  else if (filter === "has_email") filtered = filtered.filter((c) => !!(c.contactEmail || c.emailDomain));
-  else if (filter === "has_phone") filtered = filtered.filter((c) => !!c.phone);
-  else if (filter === "not_found") filtered = filtered.filter((c) => c.status === "not_found");
+  if (status.length) filtered = filtered.filter((c) => status.includes(c.status));
+  if (has.length) filtered = filtered.filter((c) => has.every((h) =>
+    h === "website" ? !!c.website : h === "email" ? !!c.contactEmail : h === "phone" ? !!c.phone : h === "linkedin" ? !!c.linkedin : true));
+  if (email.length) filtered = filtered.filter((c) => email.some((e) =>
+    e === "valid" ? c.emailVerification?.status === "valid" : e === "bad" ? isBadEmailCo(c) : false));
+  if (industries.length) filtered = filtered.filter((c) => c.industry?.value != null && industries.includes(String(c.industry.value)));
+
   const total = filtered.length;
   const start = (page - 1) * pageSize;
-  return { companies: filtered.slice(start, start + pageSize), total, page, pageSize };
+  return { companies: filtered.slice(start, start + pageSize), total, page, pageSize, facets };
 }
 
 /* ------------------------------- mutations ------------------------------- */
@@ -110,7 +156,7 @@ export function createCollectJob(input: CreateCollectInput): { job: CompanyColle
   const id = `col_${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`;
   const now = new Date().toISOString();
   const job: CompanyCollectJob = {
-    id, name: input.name, fileName: input.fileName, status: "collecting",
+    id, name: input.name, fileName: input.fileName, status: "collecting", verifyStatus: "idle",
     total: capped.length, progress: 0, summary: emptySummary(capped.length), createdAt: now,
   };
   const s = store();
@@ -123,9 +169,11 @@ export function createCollectJob(input: CreateCollectInput): { job: CompanyColle
 function blankCompany(id: string, jobId: string, name: string, location: string): CollectedCompany {
   return {
     id, jobId, inputName: name, inputLocation: location, domainGuess: "", logoText: "", status: "pending",
+    resolution: null,
     website: null, emailDomain: null, contactEmail: null, phone: null, linkedin: null, twitter: null, facebook: null,
     address: null, mapsRating: null, industry: null, employees: null, revenue: null, founded: null, description: null,
-    technologies: null, collection: [],
+    technologies: null, legalName: null, jurisdiction: null, registrationNumber: null, incorporated: null,
+    emailVerification: null, collection: [],
   };
 }
 
@@ -142,6 +190,55 @@ export function applyCompany(jobId: string, companyId: string, patch: Omit<Colle
   list[idx] = { ...patch, id: companyId, jobId };
   recompute(jobId);
   scheduleSave();
+}
+
+export function setJobVerifyStatus(jobId: string, verifyStatus: CompanyCollectJob["verifyStatus"]) {
+  const job = getCollectJob(jobId);
+  if (!job) return;
+  job.verifyStatus = verifyStatus;
+  scheduleSave();
+}
+
+/**
+ * Contact emails worth verifying: only REAL, website-sourced addresses (the
+ * simulated `info@` from the directory source is mock and not worth a check).
+ * Pass `onlyUnverified` to skip ones already checked.
+ */
+export function emailTargets(jobId: string, onlyUnverified = true): { companyId: string; email: string }[] {
+  const list = store().companies[jobId] ?? [];
+  const out: { companyId: string; email: string }[] = [];
+  for (const c of list) {
+    const f = c.contactEmail;
+    if (!f || f.source !== "website") continue;
+    if (onlyUnverified && c.emailVerification) continue;
+    out.push({ companyId: c.id, email: String(f.value) });
+  }
+  return out;
+}
+
+export function setCompanyVerification(jobId: string, companyId: string, ev: CollectedCompany["emailVerification"]) {
+  const c = store().companies[jobId]?.find((x) => x.id === companyId);
+  if (!c) return;
+  c.emailVerification = ev;
+}
+
+/** Companies worth an LLM cross-check: resolved rows, skipping already-checked. */
+export function llmTargets(jobId: string, onlyUnverified = true): CollectedCompany[] {
+  return (store().companies[jobId] ?? []).filter((c) => c.status === "enriched" && (!onlyUnverified || !c.llmVerification));
+}
+export function setCompanyLlm(jobId: string, companyId: string, v: CollectedCompany["llmVerification"]) {
+  const c = store().companies[jobId]?.find((x) => x.id === companyId);
+  if (c) c.llmVerification = v;
+}
+export function commitLlm(jobId: string) {
+  void jobId;
+  persist(store());
+}
+
+/** Recompute summary + persist after a batch of verification updates. */
+export function commitVerification(jobId: string) {
+  recompute(jobId);
+  persist(store());
 }
 
 export function finalizeCollectJob(jobId: string) {
@@ -163,10 +260,14 @@ function recompute(jobId: string) {
   for (const c of list) {
     if (c.status !== "pending" && c.status !== "collecting") done++;
     if (c.status === "enriched") s.enriched++;
+    if (c.resolution?.website || c.resolution?.linkedin) s.resolved++;
     if (c.website) s.withWebsite++;
-    if (c.contactEmail || c.emailDomain) s.withEmail++;
+    if (c.contactEmail) s.withEmail++;
     if (c.phone) s.withPhone++;
     if (c.linkedin) s.withLinkedin++;
+    if (c.legalName || c.registrationNumber) s.withLegalEntity++;
+    if (c.resolution?.cacheHit || c.collection.some((a) => a.cacheHit)) s.cacheHits++;
+    if (c.emailVerification) { s.emailsVerified++; if (c.emailVerification.status === "valid") s.emailsValid++; }
     for (const a of c.collection) {
       if (a.status === "rate_limited" || a.status === "retried") s.rateLimited++;
       if (a.status === "retried") s.proxyRotations++;

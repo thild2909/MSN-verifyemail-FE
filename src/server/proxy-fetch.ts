@@ -26,6 +26,27 @@ export interface ProxyFetchResult {
 
 const STATUS_MARK = "\n__HTTP_STATUS__";
 
+/**
+ * Fingerprint rotation: real browsers vary their User-Agent / Accept-Language,
+ * and reusing one signature across every request is a fast way to get blocked.
+ * We rotate a small pool of realistic desktop-browser fingerprints, chosen
+ * deterministically from a caller-supplied key so retries can pick a fresh one.
+ */
+const FINGERPRINTS: { ua: string; lang: string }[] = [
+  { ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36", lang: "en-US,en;q=0.9" },
+  { ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15", lang: "en-US,en;q=0.9" },
+  { ua: "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0", lang: "en-GB,en;q=0.8" },
+  { ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0", lang: "en-US,en;q=0.9" },
+  { ua: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36", lang: "en-US,en;q=0.7" },
+];
+
+/** Deterministic fingerprint for a key (0..n-1); `bump` picks the next one on retry. */
+export function pickFingerprint(key: string, bump = 0): { ua: string; lang: string } {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return FINGERPRINTS[((h >>> 0) + bump) % FINGERPRINTS.length];
+}
+
 export function proxyUrl(p: ProxyLike): string {
   const scheme = p.type === "socks5" ? "socks5h" : "http"; // socks5h = resolve DNS on the proxy
   const auth = p.username ? `${encodeURIComponent(p.username)}:${encodeURIComponent(p.password ?? "")}@` : "";
@@ -39,7 +60,7 @@ export function proxyUrl(p: ProxyLike): string {
 export function fetchViaProxy(
   url: string,
   proxy: ProxyLike | null,
-  opts: { timeoutMs?: number; maxBytes?: number } = {},
+  opts: { timeoutMs?: number; maxBytes?: number; fingerprint?: { ua: string; lang: string }; headers?: Record<string, string>; method?: string; body?: string } = {},
 ): Promise<ProxyFetchResult> {
   const timeoutMs = opts.timeoutMs ?? 10_000;
   // Generous cap: real homepages are usually < 1MB. curl appends the status via
@@ -48,13 +69,19 @@ export function fetchViaProxy(
   const maxBytes = opts.maxBytes ?? 1_500_000;
   const start = Date.now();
 
+  const fp = opts.fingerprint ?? FINGERPRINTS[0];
   const args = [
     "-sS", "-L", "--compressed",
     "--connect-timeout", "6",
     "--max-time", String(Math.ceil(timeoutMs / 1000)),
-    "-A", "Mozilla/5.0 (compatible; LeadsCollector/1.0)",
+    "-A", fp.ua,
+    "-H", `Accept-Language: ${fp.lang}`,
+    "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.9,*/*;q=0.8",
     "-w", `${STATUS_MARK}%{http_code}`,
   ];
+  for (const [k, v] of Object.entries(opts.headers ?? {})) args.push("-H", `${k}: ${v}`);
+  if (opts.method && opts.method !== "GET") args.push("-X", opts.method);
+  if (opts.body != null) args.push("--data-binary", opts.body);
   if (proxy) args.push("--proxy", proxyUrl(proxy));
   args.push(url);
 

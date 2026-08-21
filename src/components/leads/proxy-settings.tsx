@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Trash2, Loader2, ShieldCheck, Server, Zap } from "lucide-react";
+import { Plus, Trash2, Loader2, ShieldCheck, Server, Zap, Globe } from "lucide-react";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,17 +43,25 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
   const [rows, setRows] = React.useState<EditProxy[]>([]);
   const [pasteOpen, setPasteOpen] = React.useState(false);
   const [paste, setPaste] = React.useState("");
+  const [rotatingEnabled, setRotatingEnabled] = React.useState(false);
+  const [rotatingEndpoint, setRotatingEndpoint] = React.useState("");
+
+  const rotatingActive = data?.rotating?.active ?? false;
+  const rotatingEditable = data?.rotating?.editable ?? true;
 
   const hydrate = React.useCallback((cfg: ProxyConfig) => {
     setEnabled(cfg.enabled); setRotation(cfg.rotation); setConcurrency(cfg.concurrency);
     setDelayMs(cfg.delayMs); setBackoffMs(cfg.backoffMs); setMaxRetries(cfg.maxRetries);
     setRows(cfg.proxies.map((p) => ({ ...p, username: p.username ?? "", password: "", country: p.country ?? "" })));
+    setRotatingEnabled(cfg.rotating?.active ?? false);
+    setRotatingEndpoint(cfg.rotating?.endpoint ?? "");
   }, []);
   React.useEffect(() => { if (data) hydrate(data); }, [data, hydrate]);
 
   const payload = (): ProxyConfigInput => ({
     enabled, rotation, concurrency, delayMs, backoffMs, maxRetries,
     proxies: rows.map((r) => ({ id: r.id, label: r.label, host: r.host, port: Number(r.port) || 0, type: r.type, username: r.username || undefined, password: r.password || undefined, country: r.country || undefined, enabled: r.enabled })),
+    rotating: { enabled: rotatingEnabled, endpoint: rotatingEndpoint || undefined },
   });
 
   const save = useMutation({ mutationFn: () => setProxyConfig(payload()), onSuccess: (cfg) => { hydrate(cfg); toast({ variant: "success", title: "Proxy settings saved" }); }, onError: () => toast({ variant: "error", title: "Could not save" }) });
@@ -85,6 +93,41 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
         <div className="py-10 text-center text-sm text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></div>
       ) : (
         <div className="max-h-[65vh] space-y-5 overflow-y-auto pr-1">
+          {/* Rotating residential (preferred) */}
+          <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <Globe className="mt-0.5 size-4 shrink-0 text-primary" />
+                <div>
+                  <p className="flex items-center gap-2 text-sm font-semibold">
+                    Rotating residential
+                    {rotatingActive
+                      ? <span className="rounded-full bg-[hsl(var(--valid))]/15 px-2 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]">Active</span>
+                      : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">Off</span>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Fresh residential IP per request (80M+ pool) — never rate-limited. When on, this overrides the static pool below.</p>
+                </div>
+              </div>
+              <Switch checked={rotatingEnabled} disabled={!rotatingEditable} onCheckedChange={setRotatingEnabled} />
+            </div>
+            <Input
+              className="mt-2 font-mono text-xs"
+              value={rotatingEndpoint}
+              disabled={!rotatingEditable}
+              onChange={(e) => setRotatingEndpoint(e.target.value)}
+              placeholder="http://user-rotate:pass@p.webshare.io:80"
+            />
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {rotatingEditable
+                ? "Paste your Webshare rotating/backbone endpoint. Password is masked — leave it to keep the saved one."
+                : "Locked by the CRAWLER_ROTATING_PROXY environment variable."}
+            </p>
+          </div>
+
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Static proxy pool{rotatingActive ? " · fallback (used only when rotating is off)" : ""}
+          </p>
+          <div className={cn("space-y-5", rotatingActive && "opacity-60")}>
           {/* Global toggle + strategy */}
           <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2.5">
             <div className="flex items-center gap-2">
@@ -140,25 +183,31 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
                 {rows.map((r, i) => (
                   <div key={i} className="rounded-lg border p-2.5">
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-12">
+                      {/* Row 1 — connection */}
                       <Input className="sm:col-span-3" placeholder="Label (e.g. us-1)" value={r.label} onChange={(e) => setRow(i, { label: e.target.value })} />
-                      <Input className="sm:col-span-3" placeholder="Host / IP" value={r.host} onChange={(e) => setRow(i, { host: e.target.value })} />
+                      <Input className="sm:col-span-4" placeholder="Host / IP" value={r.host} onChange={(e) => setRow(i, { host: e.target.value })} />
                       <Input className="sm:col-span-2" type="number" placeholder="Port" value={r.port} onChange={(e) => setRow(i, { port: Number(e.target.value) })} />
-                      <Select className="sm:col-span-2" value={r.type} onChange={(e) => setRow(i, { type: e.target.value as ProxyType })}>
-                        {PROXY_TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
-                      </Select>
-                      <div className="flex items-center justify-end gap-2 sm:col-span-2">
-                        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-medium", HEALTH_META[r.status].className)} title={r.exitIp ? `Exit IP ${r.exitIp}` : undefined}>{HEALTH_META[r.status].label}{r.lastLatencyMs ? ` ${r.lastLatencyMs}ms` : ""}{r.exitIp ? ` · ${r.exitIp}` : ""}</span>
-                        <Switch checked={r.enabled} onCheckedChange={(v) => setRow(i, { enabled: v })} />
-                        <button onClick={() => removeRow(i)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Remove"><Trash2 className="size-4" /></button>
+                      {/* Wrap in a grid child so col-span applies (Select puts className on the inner <select>, not the wrapper). */}
+                      <div className="col-span-2 sm:col-span-3">
+                        <Select value={r.type} onChange={(e) => setRow(i, { type: e.target.value as ProxyType })}>
+                          {PROXY_TYPES.map((t) => <option key={t} value={t}>{t.toUpperCase()}</option>)}
+                        </Select>
                       </div>
+                      {/* Row 2 — auth + status + controls */}
                       <Input className="sm:col-span-3" placeholder="Username (optional)" value={r.username} onChange={(e) => setRow(i, { username: e.target.value })} />
                       <Input className="sm:col-span-3" type="password" placeholder={r.hasAuth ? "•••••• (unchanged)" : "Password (optional)"} value={r.password} onChange={(e) => setRow(i, { password: e.target.value })} />
                       <Input className="sm:col-span-2" placeholder="Country" value={r.country} onChange={(e) => setRow(i, { country: e.target.value })} />
+                      <div className="col-span-2 flex min-w-0 items-center justify-end gap-2 sm:col-span-4">
+                        <span className={cn("min-w-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium", HEALTH_META[r.status].className)} title={r.exitIp ? `Exit IP ${r.exitIp}` : undefined}>{HEALTH_META[r.status].label}{r.lastLatencyMs ? ` ${r.lastLatencyMs}ms` : ""}{r.exitIp ? ` · ${r.exitIp}` : ""}</span>
+                        <Switch checked={r.enabled} onCheckedChange={(v) => setRow(i, { enabled: v })} />
+                        <button onClick={() => removeRow(i)} className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Remove"><Trash2 className="size-4" /></button>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             )}
+          </div>
           </div>
         </div>
       )}

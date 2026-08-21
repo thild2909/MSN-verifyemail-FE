@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import * as store from "@/server/proxy-store";
+import { getProxyConfigRemote, setProxyConfigRemote } from "@/server/crawler-client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,11 +24,28 @@ const configSchema = z.object({
   delayMs: z.number().int().min(0),
   backoffMs: z.number().int().min(0),
   maxRetries: z.number().int().min(0).max(5),
-  proxies: z.array(proxySchema).max(100),
+  proxies: z.array(proxySchema).max(200),
 });
 
+function unavailable(err: unknown) {
+  return NextResponse.json(
+    { success: false, error: { code: "CRAWLER_UNAVAILABLE", message: `Crawler service unreachable: ${err instanceof Error ? err.message : "unknown"}` } },
+    { status: 502 },
+  );
+}
+
 export async function GET() {
-  return NextResponse.json({ success: true, data: store.getProxyConfig() });
+  try {
+    return NextResponse.json({ success: true, data: await getProxyConfigRemote() });
+  } catch (err) {
+    // Degrade gracefully so the Proxy settings UI still opens (shows offline)
+    // instead of erroring when the crawler service is momentarily down.
+    return NextResponse.json({
+      success: true,
+      warning: `Crawler service offline: ${err instanceof Error ? err.message : "unreachable"}`,
+      data: { enabled: false, rotation: "round_robin", concurrency: 3, delayMs: 800, backoffMs: 2000, maxRetries: 2, proxies: [] },
+    });
+  }
 }
 
 export async function PUT(req: Request) {
@@ -36,5 +53,9 @@ export async function PUT(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ success: false, error: { code: "INVALID_REQUEST", message: parsed.error.issues[0]?.message ?? "Invalid config." } }, { status: 400 });
   }
-  return NextResponse.json({ success: true, data: store.setProxyConfig(parsed.data) });
+  try {
+    return NextResponse.json({ success: true, data: await setProxyConfigRemote(parsed.data) });
+  } catch (err) {
+    return unavailable(err);
+  }
 }

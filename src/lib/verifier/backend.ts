@@ -58,6 +58,50 @@ export async function verifyWithBackend(email: string): Promise<VerifyOutcome> {
   }
 }
 
+/**
+ * Verify many emails in ONE request via the backend's `/v1/check_email_batch`
+ * endpoint (inline, concurrent). Order is preserved. On any batch-level failure
+ * (backend down, timeout, non-2xx) it falls back to the local mock engine for
+ * every email so the flow never blocks — `provider` flags which answered.
+ */
+export async function verifyEmailsBatch(
+  emails: string[],
+  opts: { timeoutMs?: number; concurrency?: number } = {},
+): Promise<VerifyOutcome[]> {
+  if (emails.length === 0) return [];
+  const timeoutMs = opts.timeoutMs ?? Math.min(TIMEOUT_MS, 30_000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${BACKEND_URL}/v1/check_email_batch`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ to_emails: emails, concurrency: opts.concurrency ?? 5 }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Backend responded ${res.status}: ${body.slice(0, 200)}`);
+    }
+    const json = (await res.json()) as { results: CheckEmailOutput[] };
+    const results = json.results ?? [];
+    return emails.map((email, i) => {
+      const out = results[i];
+      return out
+        ? { result: mapReacherOutput(out), provider: "reacher" as const }
+        : { result: verifyEmailSync(email, { deepScan: true }), provider: "mock" as const, error: "missing result" };
+    });
+  } catch {
+    // The batch endpoint may be unavailable (older backend without it). Fall
+    // back to the single `/v1/check_email` endpoint per email — still the REAL
+    // backend — which itself degrades to the mock engine if unreachable.
+    return Promise.all(emails.map((email) => verifyWithBackend(email)));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Lightweight reachability probe for the backend, used by /api/health. */
 export async function pingBackend(): Promise<{ online: boolean; url: string; error?: string }> {
   const controller = new AbortController();

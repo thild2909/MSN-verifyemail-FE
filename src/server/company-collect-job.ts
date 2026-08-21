@@ -1,14 +1,14 @@
 /**
- * Background runner for company multi-source collection. One ProxyRotator is
- * shared across the whole job so IP rotation is continuous; concurrency comes
- * from the saved ProxyConfig. A small real delay per company animates progress.
+ * Background runner for company collection. Delegates the REAL work to the
+ * standalone crawler-service (resolve → crawl → cross-verify → score); no mock
+ * data is produced here. Concurrency is kept modest because each company is a
+ * live multi-source collection in the service.
  */
 import "server-only";
-import { sleep } from "@/lib/utils";
-import { collectCompany, ProxyRotator } from "./company-collector";
-import { getProxyConfigInternal } from "./proxy-store";
+import { resolveViaCrawler } from "./crawler-client";
 import * as store from "./company-collect-store";
 
+const CONCURRENCY = Math.max(1, Math.min(Number(process.env.CRAWLER_CONCURRENCY ?? 4), 12));
 const running = new Set<string>();
 
 export function startCollectJob(id: string) {
@@ -21,19 +21,15 @@ export function isCollectRunning(id: string) {
 }
 
 async function run(id: string) {
-  const cfg = getProxyConfigInternal();
-  const rotator = new ProxyRotator(cfg);
   const companies = store.rawCompanies(id).filter((c) => c.status === "pending");
-  const concurrency = Math.max(1, Math.min(cfg.concurrency ?? 3, 8));
   let next = 0;
 
   async function worker() {
     while (next < companies.length) {
       const c = companies[next++];
       store.setCompanyCollecting(id, c.id);
-      await sleep(60 + Math.floor(Math.random() * 120)); // brief animate before the real fetch
       try {
-        const { company } = await collectCompany(c.inputName, c.inputLocation, cfg, rotator);
+        const company = await resolveViaCrawler(c.inputName, c.inputLocation);
         store.applyCompany(id, c.id, company);
       } catch {
         store.applyCompany(id, c.id, { ...blankFailed(c.inputName, c.inputLocation) });
@@ -41,15 +37,20 @@ async function run(id: string) {
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, companies.length || 1) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, companies.length || 1) }, () => worker()));
+
+  // NOTE: email verification is NOT run automatically — it is an opt-in step the
+  // user triggers with the "Verify emails" button.
   store.finalizeCollectJob(id);
 }
 
 function blankFailed(name: string, location: string) {
   return {
     inputName: name, inputLocation: location, domainGuess: "", logoText: "", status: "failed" as const,
+    resolution: null,
     website: null, emailDomain: null, contactEmail: null, phone: null, linkedin: null, twitter: null, facebook: null,
     address: null, mapsRating: null, industry: null, employees: null, revenue: null, founded: null, description: null,
-    technologies: null, collection: [],
+    technologies: null, legalName: null, jurisdiction: null, registrationNumber: null, incorporated: null,
+    emailVerification: null, collection: [],
   };
 }

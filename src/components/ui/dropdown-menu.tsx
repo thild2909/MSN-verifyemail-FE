@@ -6,11 +6,13 @@ interface DropdownMenuProps {
   trigger: React.ReactNode;
   children: React.ReactNode;
   align?: "start" | "end";
+  /** Open the menu above the trigger instead of below (for bottom-anchored bars). */
+  up?: boolean;
   className?: string;
 }
 
 /** Lightweight click-to-open menu with outside-click + escape handling. */
-export function DropdownMenu({ trigger, children, align = "end", className }: DropdownMenuProps) {
+export function DropdownMenu({ trigger, children, align = "end", up = false, className }: DropdownMenuProps) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
 
@@ -34,7 +36,8 @@ export function DropdownMenu({ trigger, children, align = "end", className }: Dr
       {open && (
         <div
           className={cn(
-            "absolute z-40 mt-1 min-w-[10rem] animate-fade-in overflow-hidden rounded-lg border bg-popover p-1 shadow-lg",
+            "absolute z-40 min-w-[10rem] animate-fade-in overflow-hidden rounded-lg border bg-popover p-1 shadow-lg",
+            up ? "bottom-full mb-1" : "mt-1",
             align === "end" ? "right-0" : "left-0",
             className,
           )}

@@ -16,6 +16,24 @@ interface Parsed { fileName: string; columns: string[]; rows: string[][] }
 const COMPANY_RE = /company|organi|account|business|name/i;
 const LOCATION_RE = /location|city|country|region|address|hq|state/i;
 
+/**
+ * Pick the best-fitting column for a role. Among columns whose name matches
+ * `re`, choose the one with the most non-empty cells (so a populated `City`
+ * beats a mostly-blank `State`); ties keep left-to-right order. `exclude` skips
+ * a column already claimed by another role. Returns undefined if none match.
+ */
+function bestColumn(cols: string[], rows: string[][], re: RegExp, exclude?: string): string | undefined {
+  let best: string | undefined;
+  let bestFill = -1;
+  cols.forEach((c, i) => {
+    if (c === exclude || !re.test(c)) return;
+    let fill = 0;
+    for (const r of rows) if ((r[i] ?? "").trim()) fill++;
+    if (fill > bestFill) { bestFill = fill; best = c; }
+  });
+  return best;
+}
+
 export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (jobId: string) => void }) {
   const [parsed, setParsed] = React.useState<Parsed | null>(null);
   const [name, setName] = React.useState("");
@@ -30,18 +48,44 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
     const finish = (columns: string[], data: string[][]) => {
       const cols = columns.length ? columns : ["company", "location"];
       setParsed({ fileName: file.name, columns: cols, rows: data });
-      setMap({ company: cols.find((c) => COMPANY_RE.test(c)) ?? cols[0] ?? "", location: cols.find((c) => LOCATION_RE.test(c)) ?? cols[1] ?? "" });
+      // Auto-pick the DENSEST column whose name matches, not just the first name
+      // match — e.g. a file with both `State` (sparse) and `City` (populated)
+      // must map location to `City`, else rows with a blank `State` get dropped.
+      const company = bestColumn(cols, data, COMPANY_RE) ?? cols[0] ?? "";
+      const location = bestColumn(cols, data, LOCATION_RE, company) ?? cols.find((c) => c !== company) ?? "";
+      setMap({ company, location });
       setName(file.name.replace(/\.[^.]+$/, ""));
     };
-    if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) {
-      Papa.parse(file, { skipEmptyLines: true, complete: (res) => {
-        const data = res.data as string[][];
-        if (!data.length) return finish(["company", "location"], sample());
-        const header = data[0].map((h) => String(h).trim());
-        const looks = header.some((h) => COMPANY_RE.test(h) || LOCATION_RE.test(h));
-        looks ? finish(header, data.slice(1)) : finish(["company", "location"], data);
-      }, error: () => finish(["company", "location"], sample()) });
-    } else finish(["company", "location"], sample());
+    const fail = (message = "Use a .csv or .xlsx with Company Name and Location columns.") =>
+      toast({ variant: "error", title: "Could not read file", description: message });
+    // Turn a raw array-of-rows into columns + data, detecting whether the first
+    // row is a header. Shared by the CSV and XLSX paths.
+    const ingest = (rows: string[][]) => {
+      if (!rows.length) return fail("The file is empty.");
+      const header = rows[0].map((h) => String(h).trim());
+      const looks = header.some((h) => COMPANY_RE.test(h) || LOCATION_RE.test(h));
+      looks ? finish(header, rows.slice(1)) : finish(["company", "location"], rows);
+    };
+
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith(".csv") || lower.endsWith(".txt")) {
+      Papa.parse(file, {
+        skipEmptyLines: true,
+        complete: (res) => ingest(res.data as string[][]),
+        error: () => fail(),
+      });
+    } else if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+      file.arrayBuffer()
+        .then(async (buf) => {
+          const XLSX = await import("xlsx");
+          const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          if (!ws) return fail("No sheet found in the workbook.");
+          const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false, defval: "" });
+          ingest(aoa.map((r) => (Array.isArray(r) ? r : []).map((c) => (c == null ? "" : String(c)))));
+        })
+        .catch(() => fail());
+    } else fail("Unsupported file type. Upload a .csv or .xlsx file.");
   };
 
   const built = React.useMemo(() => {
@@ -112,10 +156,6 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
   );
 }
 
-function sample(): string[][] {
-  const co = [["Solara Health", "Sydney, Australia"], ["FinTech Labs", "Melbourne, Australia"], ["Northwind", "Berlin, Germany"], ["Cloudpeak", "London, UK"], ["DataForge", "Singapore"]];
-  return co;
-}
 function downloadExample() {
   const csv = "company,location\nSolara Health,Sydney Australia\nFinTech Labs,Melbourne Australia\nNorthwind,Berlin Germany\n";
   const blob = new Blob([csv], { type: "text/csv" });

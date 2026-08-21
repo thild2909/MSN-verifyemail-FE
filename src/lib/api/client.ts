@@ -27,10 +27,6 @@ import type {
   BulkFinderResponse,
   EmailList,
   EmailRecord,
-  EnrichmentTable,
-  EnrichRow,
-  EnrichColumnKind,
-  EnrichRecordType,
   FinderOutcome,
   FinderResult,
   Integration,
@@ -48,7 +44,14 @@ import type {
   RotationStrategy,
   CompanyCollectJob,
   CollectedCompany,
+  CompaniesFacets,
 } from "../leads/collect-types";
+import type {
+  CollectedPerson,
+  PeopleCollectJob,
+  PeopleSeedInput,
+  PeopleFacets,
+} from "../leads/people-types";
 
 /* --------------------------- Verification -------------------------- */
 
@@ -339,103 +342,6 @@ export async function getFinderSearches() {
   return MOCK_FINDER_SEARCHES;
 }
 
-/* --------------------- Enrichment tables (Clay-style) -------------------- */
-
-export async function getEnrichTables(): Promise<EnrichmentTable[]> {
-  return apiGet<EnrichmentTable[]>("/api/v1/enrich");
-}
-
-export async function getEnrichTable(id: string): Promise<EnrichmentTable | undefined> {
-  try {
-    return await apiGet<EnrichmentTable>(`/api/v1/enrich/${id}`);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return undefined;
-    throw err;
-  }
-}
-
-export interface CreateEnrichInput {
-  name: string;
-  fileName: string;
-  recordType: EnrichRecordType;
-  importedColumns: string[];
-  identityColumns: string[];
-  rows: Record<string, string>[];
-  columns: EnrichColumnKind[];
-}
-
-/** Create an enrichment table; it kicks off the background enrichment run. */
-export async function createEnrichTable(input: CreateEnrichInput): Promise<{ table: EnrichmentTable; truncated: number }> {
-  const { data, raw } = await apiPost<EnrichmentTable>("/api/v1/enrich", input);
-  return { table: data, truncated: raw.truncated ?? 0 };
-}
-
-export interface RowsQuery {
-  page?: number;
-  pageSize?: number;
-  search?: string;
-  filter?: string; // "all" | "has_email" | "no_email" | "enriched" | "pending"
-}
-
-export interface RowsPage {
-  rows: EnrichRow[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
-export async function getEnrichRows(id: string, query: RowsQuery = {}): Promise<RowsPage> {
-  const params = new URLSearchParams();
-  if (query.page) params.set("page", String(query.page));
-  if (query.pageSize) params.set("pageSize", String(query.pageSize));
-  if (query.search) params.set("search", query.search);
-  if (query.filter) params.set("filter", query.filter);
-  return apiGet<RowsPage>(`/api/v1/enrich/${id}/rows?${params.toString()}`);
-}
-
-export async function addEnrichColumn(id: string, kind: EnrichColumnKind): Promise<EnrichmentTable> {
-  const { data } = await apiPost<EnrichmentTable>(`/api/v1/enrich/${id}/columns`, { kind });
-  return data;
-}
-
-export async function removeEnrichColumn(id: string, colId: string): Promise<EnrichmentTable> {
-  const res = await fetch(`/api/v1/enrich/${id}/columns?colId=${encodeURIComponent(colId)}`, { method: "DELETE" });
-  const json = await res.json();
-  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Remove failed", res.status);
-  return json.data as EnrichmentTable;
-}
-
-export async function renameEnrichTable(id: string, name: string): Promise<EnrichmentTable> {
-  const res = await fetch(`/api/v1/enrich/${id}`, {
-    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
-  });
-  const json = await res.json();
-  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Rename failed", res.status);
-  return json.data as EnrichmentTable;
-}
-
-export async function deleteEnrichTable(id: string): Promise<void> {
-  const res = await fetch(`/api/v1/enrich/${id}`, { method: "DELETE" });
-  const json = await res.json();
-  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
-}
-
-export async function runEnrichTable(id: string): Promise<EnrichmentTable> {
-  const { data } = await apiPost<EnrichmentTable>(`/api/v1/enrich/${id}/run`, {});
-  return data;
-}
-
-/** URL for the server-generated export (download via an anchor). */
-export function enrichExportUrl(id: string, format: "csv" | "xlsx"): string {
-  return `/api/v1/enrich/${id}/export?${new URLSearchParams({ format }).toString()}`;
-}
-
-/** Loop-closer: create a Verification List from a table's discovered emails. */
-export async function pushEnrichToVerification(id: string): Promise<{ listId: string; count: number }> {
-  const { data } = await apiPost<{ listId: string; count: number }>(`/api/v1/enrich/${id}/push-to-verification`, {});
-  return data;
-}
-
 /* ---------------- Company collection + proxy config ---------------- */
 
 export async function getProxyConfig(): Promise<ProxyConfig> {
@@ -461,6 +367,7 @@ export interface ProxyConfigInput {
   backoffMs: number;
   maxRetries: number;
   proxies: ProxyEntryInput[];
+  rotating?: { enabled: boolean; endpoint?: string };
 }
 
 export async function setProxyConfig(cfg: ProxyConfigInput): Promise<ProxyConfig> {
@@ -504,16 +411,95 @@ export async function deleteCollectJob(id: string): Promise<void> {
   if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
 }
 
-export interface CollectCompaniesQuery { page?: number; pageSize?: number; search?: string; filter?: string }
-export interface CollectCompaniesPage { companies: CollectedCompany[]; total: number; page: number; pageSize: number }
+export interface VerifyEmailsResult { verified: number; valid: number; provider: "reacher" | "mock" | "mixed" | "none" }
+/** Verify collected contact emails via the backend. `all` re-checks every email. */
+export async function verifyCollectedEmails(id: string, all = false): Promise<VerifyEmailsResult> {
+  const { data } = await apiPost<VerifyEmailsResult>(`/api/v1/leads/collect/${id}/verify-emails${all ? "?all=1" : ""}`, {});
+  return data;
+}
+
+export interface LlmVerifyResult { configured: boolean; checked: number; verified: number; mismatch: number; uncertain: number; tokens: number }
+/** LLM (DeepSeek) cross-check of collected companies. `all` re-checks every row. */
+export async function llmVerifyCompanies(id: string, all = false): Promise<LlmVerifyResult> {
+  const { data } = await apiPost<LlmVerifyResult>(`/api/v1/leads/collect/${id}/llm-verify${all ? "?all=1" : ""}`, {});
+  return data;
+}
+
+export interface CollectCompaniesQuery {
+  page?: number; pageSize?: number; search?: string;
+  status?: string[]; has?: string[]; email?: string[]; industries?: string[];
+}
+export interface CollectCompaniesPage { companies: CollectedCompany[]; total: number; page: number; pageSize: number; facets: CompaniesFacets }
 
 export async function getCollectedCompanies(id: string, query: CollectCompaniesQuery = {}): Promise<CollectCompaniesPage> {
   const params = new URLSearchParams();
   if (query.page) params.set("page", String(query.page));
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
   if (query.search) params.set("search", query.search);
-  if (query.filter) params.set("filter", query.filter);
+  if (query.status?.length) params.set("status", query.status.join(","));
+  if (query.has?.length) params.set("has", query.has.join(","));
+  if (query.email?.length) params.set("email", query.email.join(","));
+  if (query.industries?.length) params.set("industries", query.industries.join(","));
   return apiGet<CollectCompaniesPage>(`/api/v1/leads/collect/${id}/companies?${params.toString()}`);
+}
+
+/* ------------------------------- people ---------------------------------- */
+
+export async function getPeopleJobs(): Promise<PeopleCollectJob[]> {
+  return apiGet<PeopleCollectJob[]>("/api/v1/leads/people");
+}
+
+export async function getPeopleJob(id: string): Promise<PeopleCollectJob | undefined> {
+  try {
+    return await apiGet<PeopleCollectJob>(`/api/v1/leads/people/${id}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return undefined;
+    throw err;
+  }
+}
+
+export type CreatePeopleInput =
+  | { name: string; seeds: PeopleSeedInput[] }
+  | { name: string; fromCompanyJob: string; companyIds?: string[]; allMatching?: boolean; search?: string; filter?: string };
+
+export async function createPeopleJob(input: CreatePeopleInput): Promise<{ job: PeopleCollectJob; truncated: number }> {
+  const { data, raw } = await apiPost<PeopleCollectJob>("/api/v1/leads/people", input);
+  return { job: data, truncated: raw.truncated ?? 0 };
+}
+
+export async function deletePeopleJob(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/leads/people/${id}`, { method: "DELETE" });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
+}
+
+export async function verifyPeopleEmails(id: string, all = false): Promise<VerifyEmailsResult> {
+  const { data } = await apiPost<VerifyEmailsResult>(`/api/v1/leads/people/${id}/verify-emails${all ? "?all=1" : ""}`, {});
+  return data;
+}
+
+/** LLM (DeepSeek) founder↔company cross-check. `all` re-checks every person. */
+export async function llmVerifyPeople(id: string, all = false): Promise<LlmVerifyResult> {
+  const { data } = await apiPost<LlmVerifyResult>(`/api/v1/leads/people/${id}/llm-verify${all ? "?all=1" : ""}`, {});
+  return data;
+}
+
+export interface CollectPeopleQuery {
+  page?: number; pageSize?: number; search?: string;
+  seniority?: string[]; email?: string[]; linkedin?: boolean; companies?: string[];
+}
+export interface CollectPeoplePage { people: CollectedPerson[]; total: number; page: number; pageSize: number; facets: PeopleFacets }
+
+export async function getCollectedPeople(id: string, query: CollectPeopleQuery = {}): Promise<CollectPeoplePage> {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  if (query.search) params.set("search", query.search);
+  if (query.seniority?.length) params.set("seniority", query.seniority.join(","));
+  if (query.email?.length) params.set("email", query.email.join(","));
+  if (query.linkedin) params.set("linkedin", "1");
+  if (query.companies?.length) params.set("companies", query.companies.join(","));
+  return apiGet<CollectPeoplePage>(`/api/v1/leads/people/${id}/people?${params.toString()}`);
 }
 
 /* --------------------------- API / webhooks ------------------------ */

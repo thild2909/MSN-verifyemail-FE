@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swa
 
 export const metadata: Metadata = {
   title: {
-    default: "Verifly — Email Verification & Finder",
+    default: "Verifly · Email Verification & Finder",
     template: "%s · Verifly",
   },
   description:
