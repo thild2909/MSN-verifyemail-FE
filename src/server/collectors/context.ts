@@ -24,7 +24,7 @@ export interface Cfg {
 
 /** Confidence each source's fields carry before any agreement boost. */
 export const SOURCE_CONFIDENCE: Record<CollectionSource, number> = {
-  search: 88, website: 95, opencorporates: 92, linkedin: 90, google_maps: 80, directory: 78, social: 70, other: 65,
+  search: 88, website: 95, opencorporates: 92, linkedin: 90, google_maps: 80, directory: 78, social: 70, llm: 60, other: 65,
 };
 
 /* -------------------------------- rotation ------------------------------- */

@@ -52,6 +52,12 @@ import type {
   PeopleSeedInput,
   PeopleFacets,
 } from "../leads/people-types";
+import type {
+  CollectedJob,
+  JobCollectJob,
+  JobSource,
+  JobSourceCoverage,
+} from "../leads/job-collect-types";
 
 /* --------------------------- Verification -------------------------- */
 
@@ -377,9 +383,23 @@ export async function setProxyConfig(cfg: ProxyConfigInput): Promise<ProxyConfig
   return json.data as ProxyConfig;
 }
 
-export async function testProxies(id?: string): Promise<ProxyConfig> {
-  const { data } = await apiPost<ProxyConfig>("/api/v1/proxies/test", id ? { id } : {});
-  return data;
+export async function testProxies(opts?: { id?: string; all?: boolean; onProgress?: (p: import("@/lib/leads/collect-types").ProxyTestProgress) => void }): Promise<ProxyConfig> {
+  const all = opts?.all ?? !opts?.id;
+  const { data: started } = await apiPost<ProxyConfig>("/api/v1/proxies/test", opts?.id ? { id: opts.id, all } : { all });
+  if (!all || !started.testProgress?.running) return started;
+
+  let cfg = started;
+  if (started.testProgress) opts?.onProgress?.(started.testProgress);
+  while (cfg.testProgress?.running) {
+    await new Promise((r) => setTimeout(r, 1200));
+    cfg = await apiGet<ProxyConfig>("/api/v1/proxies/test/status");
+    if (cfg.testProgress) opts?.onProgress?.(cfg.testProgress);
+  }
+  return cfg;
+}
+
+export async function getProxyTestStatus(): Promise<ProxyConfig> {
+  return apiGet<ProxyConfig>("/api/v1/proxies/test/status");
 }
 
 export async function getCollectJobs(): Promise<CompanyCollectJob[]> {
@@ -411,22 +431,32 @@ export async function deleteCollectJob(id: string): Promise<void> {
   if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
 }
 
-export interface VerifyEmailsResult { verified: number; valid: number; provider: "reacher" | "mock" | "mixed" | "none" }
+export async function retryFailedCollect(id: string): Promise<{ reset: number; started: boolean }> {
+  const res = await fetch(`/api/v1/leads/collect/${id}/retry-failed`, { method: "POST" });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Retry failed", res.status);
+  return json.data;
+}
+
+export interface VerifyEmailsResult { verified: number; valid: number; found?: number; provider: "reacher" | "mock" | "mixed" | "none" }
 /** Verify collected contact emails via the backend. `all` re-checks every email. */
 export async function verifyCollectedEmails(id: string, all = false): Promise<VerifyEmailsResult> {
   const { data } = await apiPost<VerifyEmailsResult>(`/api/v1/leads/collect/${id}/verify-emails${all ? "?all=1" : ""}`, {});
   return data;
 }
 
-export interface LlmVerifyResult { configured: boolean; checked: number; skipped: number; verified: number; mismatch: number; uncertain: number; tokens: number }
-/** LLM (DeepSeek) cross-check of collected companies. `all` re-checks every row. */
-export async function llmVerifyCompanies(id: string, all = false): Promise<LlmVerifyResult> {
-  const { data } = await apiPost<LlmVerifyResult>(`/api/v1/leads/collect/${id}/llm-verify${all ? "?all=1" : ""}`, {});
+export interface LlmVerifyResult { configured: boolean; checked: number; skipped: number; verified: number; mismatch: number; uncertain: number; corrected?: number; cleared?: number; tokens: number }
+/** Company "AI verify": audit fields (checked/…) + knowledge-fill failed/not-found rows (targeted/filled/notFound). */
+export interface LlmCompanyResult extends LlmVerifyResult { targeted: number; filled: number; notFound: number }
+/** LLM (DeepSeek) audit + knowledge-fill of collected companies. `all` re-runs every row. */
+export async function llmVerifyCompanies(id: string, all = false): Promise<LlmCompanyResult> {
+  const { data } = await apiPost<LlmCompanyResult>(`/api/v1/leads/collect/${id}/llm-verify${all ? "?all=1" : ""}`, {});
   return data;
 }
 
 export interface CollectCompaniesQuery {
   page?: number; pageSize?: number; search?: string;
+  company?: string[]; locations?: string[]; employees?: string[]; technologies?: string[];
   status?: string[]; has?: string[]; email?: string[]; industries?: string[];
 }
 export interface CollectCompaniesPage { companies: CollectedCompany[]; total: number; page: number; pageSize: number; facets: CompaniesFacets }
@@ -436,10 +466,14 @@ export async function getCollectedCompanies(id: string, query: CollectCompaniesQ
   if (query.page) params.set("page", String(query.page));
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
   if (query.search) params.set("search", query.search);
+  if (query.company?.length) params.set("company", query.company.join(","));
+  if (query.locations?.length) params.set("locations", query.locations.join(","));
+  if (query.employees?.length) params.set("employees", query.employees.join(","));
+  if (query.industries?.length) params.set("industries", query.industries.join(","));
+  if (query.technologies?.length) params.set("technologies", query.technologies.join(","));
   if (query.status?.length) params.set("status", query.status.join(","));
   if (query.has?.length) params.set("has", query.has.join(","));
   if (query.email?.length) params.set("email", query.email.join(","));
-  if (query.industries?.length) params.set("industries", query.industries.join(","));
   return apiGet<CollectCompaniesPage>(`/api/v1/leads/collect/${id}/companies?${params.toString()}`);
 }
 
@@ -473,33 +507,129 @@ export async function deletePeopleJob(id: string): Promise<void> {
   if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
 }
 
-export async function verifyPeopleEmails(id: string, all = false): Promise<VerifyEmailsResult> {
-  const { data } = await apiPost<VerifyEmailsResult>(`/api/v1/leads/people/${id}/verify-emails${all ? "?all=1" : ""}`, {});
+/**
+ * Find & verify a people job's emails. Default is incremental: saved verdicts
+ * (including Not found) are kept; only unchecked people are looked up.
+ * Pass `{ keep: false }` to wipe caches + prior results and re-search everyone.
+ */
+export async function verifyPeopleEmails(id: string, opts: { keep?: boolean } = {}): Promise<VerifyEmailsResult> {
+  const q = opts.keep === false ? "?fresh=1" : "?keep=1";
+  const { data } = await apiPost<VerifyEmailsResult>(`/api/v1/leads/people/${id}/verify-emails${q}`, {});
   return data;
 }
 
-/** LLM (DeepSeek) founder↔company cross-check. `all` re-checks every person. */
-export async function llmVerifyPeople(id: string, all = false): Promise<LlmVerifyResult> {
-  const { data } = await apiPost<LlmVerifyResult>(`/api/v1/leads/people/${id}/llm-verify${all ? "?all=1" : ""}`, {});
+/** Per-row "Access email": find + verify a SINGLE person's email on demand. */
+export interface SinglePersonVerifyResult {
+  ok: boolean;
+  status: "valid" | "invalid" | "risky" | "unknown" | "disposable" | "catch_all" | "role" | "not_found" | null;
+  email: string | null;
+  found: boolean;
+  valid: boolean;
+  provider: "reacher" | "mock" | "none";
+}
+export async function verifyPersonEmail(jobId: string, personId: string): Promise<SinglePersonVerifyResult> {
+  const { data } = await apiPost<SinglePersonVerifyResult>(`/api/v1/leads/people/${jobId}/verify-email`, { personId });
+  return data;
+}
+
+/** "Retry failed" (People tab): re-crawl coverage-gap companies (0 people found). */
+export async function retryPeopleGaps(jobId: string): Promise<{ reset: number; started: boolean }> {
+  const { data } = await apiPost<{ reset: number; started: boolean }>(`/api/v1/leads/people/${jobId}/retry-gaps`, {});
+  return data;
+}
+
+/** People "AI verify": audit weak-signal people (checked/…) + exec-fill the
+ *  coverage-gap companies (gapCompanies/proposed/filled/dropped). */
+export interface LlmPeopleResult extends LlmVerifyResult { gapCompanies: number; proposed: number; filled: number; dropped: number }
+/** LLM (DeepSeek) founder↔company cross-check + exec-fill. `all` re-runs every row. */
+export async function llmVerifyPeople(id: string, all = false): Promise<LlmPeopleResult> {
+  const { data } = await apiPost<LlmPeopleResult>(`/api/v1/leads/people/${id}/llm-verify${all ? "?all=1" : ""}`, {});
   return data;
 }
 
 export interface CollectPeopleQuery {
   page?: number; pageSize?: number; search?: string;
-  seniority?: string[]; email?: string[]; linkedin?: boolean; companies?: string[];
+  email?: string[]; titles?: string[]; seniority?: string[]; linkedin?: boolean;
+  companies?: string[]; locations?: string[]; employees?: string[]; industries?: string[]; minScore?: number;
 }
-export interface CollectPeoplePage { people: CollectedPerson[]; total: number; page: number; pageSize: number; facets: PeopleFacets }
+export interface CollectPeoplePage {
+  people: CollectedPerson[];
+  total: number;
+  page: number;
+  pageSize: number;
+  facets: PeopleFacets;
+  verifyingPersonIds?: string[];
+}
 
 export async function getCollectedPeople(id: string, query: CollectPeopleQuery = {}): Promise<CollectPeoplePage> {
   const params = new URLSearchParams();
   if (query.page) params.set("page", String(query.page));
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
   if (query.search) params.set("search", query.search);
-  if (query.seniority?.length) params.set("seniority", query.seniority.join(","));
   if (query.email?.length) params.set("email", query.email.join(","));
+  if (query.titles?.length) params.set("titles", query.titles.join(","));
+  if (query.seniority?.length) params.set("seniority", query.seniority.join(","));
   if (query.linkedin) params.set("linkedin", "1");
   if (query.companies?.length) params.set("companies", query.companies.join(","));
+  if (query.locations?.length) params.set("locations", query.locations.join(","));
+  if (query.employees?.length) params.set("employees", query.employees.join(","));
+  if (query.industries?.length) params.set("industries", query.industries.join(","));
+  if (query.minScore) params.set("minScore", String(query.minScore));
   return apiGet<CollectPeoplePage>(`/api/v1/leads/people/${id}/people?${params.toString()}`);
+}
+
+/* -------------------------------- jobs ----------------------------------- */
+
+export async function getJobSearches(): Promise<JobCollectJob[]> {
+  return apiGet<JobCollectJob[]>("/api/v1/leads/jobs");
+}
+
+export async function getJobSearch(id: string): Promise<(JobCollectJob & { coverage: JobSourceCoverage[] }) | undefined> {
+  try {
+    return await apiGet<JobCollectJob & { coverage: JobSourceCoverage[] }>(`/api/v1/leads/jobs/${id}`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return undefined;
+    throw err;
+  }
+}
+
+export interface CreateJobSearchInput {
+  name: string;
+  sources: JobSource[];
+  keywords: string;
+  location?: string;
+  maxPages?: number;
+}
+export async function createJobSearch(input: CreateJobSearchInput): Promise<JobCollectJob> {
+  const { data } = await apiPost<JobCollectJob>("/api/v1/leads/jobs", input);
+  return data;
+}
+
+export async function deleteJobSearch(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/leads/jobs/${id}`, { method: "DELETE" });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
+}
+
+export interface CrawledJobsQuery {
+  page?: number; pageSize?: number; search?: string;
+  sources?: string[]; companies?: string[]; locations?: string[]; workModes?: string[]; postedWithinDays?: number;
+}
+export interface CrawledJobsPage {
+  jobs: CollectedJob[]; total: number; page: number; pageSize: number;
+  facets: { sources: Record<string, number>; workModes: Record<string, number>; companies: { name: string; count: number }[] };
+}
+export async function getCrawledJobs(id: string, query: CrawledJobsQuery = {}): Promise<CrawledJobsPage> {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  if (query.search) params.set("search", query.search);
+  if (query.sources?.length) params.set("sources", query.sources.join(","));
+  if (query.companies?.length) params.set("companies", query.companies.join(","));
+  if (query.locations?.length) params.set("locations", query.locations.join(","));
+  if (query.workModes?.length) params.set("workModes", query.workModes.join(","));
+  if (query.postedWithinDays) params.set("postedWithinDays", String(query.postedWithinDays));
+  return apiGet<CrawledJobsPage>(`/api/v1/leads/jobs/${id}/results?${params.toString()}`);
 }
 
 /* --------------------------- API / webhooks ------------------------ */

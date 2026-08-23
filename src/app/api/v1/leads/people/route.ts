@@ -32,6 +32,10 @@ const createSchema = z.union([
     companyIds: z.array(z.string()).max(500).optional(),
     allMatching: z.boolean().optional(),
     search: z.string().optional(),
+    company: z.array(z.string()).optional(),
+    locations: z.array(z.string()).optional(),
+    employees: z.array(z.string()).optional(),
+    technologies: z.array(z.string()).optional(),
     status: z.array(z.string()).optional(),
     has: z.array(z.string()).optional(),
     email: z.array(z.string()).optional(),
@@ -48,6 +52,10 @@ function seedFromCompany(c: CollectedCompany): PeopleSeedInput {
     domain: c.domainGuess || (c.website?.value ? String(c.website.value) : null),
     website: c.website?.value ? String(c.website.value) : null,
     linkedin: c.linkedin?.value ? String(c.linkedin.value) : null,
+    companyEmployees: c.employees?.value != null ? String(c.employees.value) : null,
+    companyIndustry: c.industry?.value != null ? String(c.industry.value) : null,
+    companyPhone: c.phone?.value != null ? String(c.phone.value) : null,
+    companyEmail: c.contactEmail?.value != null ? String(c.contactEmail.value) : null,
   };
 }
 
@@ -65,7 +73,7 @@ export async function POST(req: Request) {
   if ("seeds" in parsed.data) {
     seeds = parsed.data.seeds;
   } else {
-    const { fromCompanyJob, companyIds, allMatching, search, status, has, email, industries } = parsed.data;
+    const { fromCompanyJob, companyIds, allMatching, search, company, locations, employees, technologies, status, has, email, industries } = parsed.data;
     if (!companyStore.getCollectJob(fromCompanyJob)) {
       return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Source company job not found." } }, { status: 404 });
     }
@@ -74,7 +82,7 @@ export async function POST(req: Request) {
       companies = companyStore.companiesByIds(fromCompanyJob, companyIds);
     } else {
       // All companies matching the current search + filters (Select all N).
-      companies = companyStore.getCompanies(fromCompanyJob, { search, status, has, email, industries, page: 1, pageSize: 100000 }).companies;
+      companies = companyStore.getCompanies(fromCompanyJob, { search, company, locations, employees, technologies, status, has, email, industries, page: 1, pageSize: 100000 }).companies;
     }
     // Only companies that actually resolved can yield people.
     seeds = companies.filter((c) => c.status === "enriched").map(seedFromCompany);

@@ -24,7 +24,8 @@ const configSchema = z.object({
   delayMs: z.number().int().min(0),
   backoffMs: z.number().int().min(0),
   maxRetries: z.number().int().min(0).max(5),
-  proxies: z.array(proxySchema).max(200),
+  proxies: z.array(proxySchema).max(2000),
+  rotating: z.object({ enabled: z.boolean(), endpoint: z.string().optional() }).optional(),
 });
 
 function unavailable(err: unknown) {

@@ -38,14 +38,14 @@ export function FindLeads() {
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       {/* Header */}
-      <div className="space-y-2 border-b px-5 py-3">
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Find Leads</span>
+      <div className="space-y-2 border-b px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="hidden text-xs font-bold uppercase tracking-widest text-muted-foreground sm:inline">Find Leads</span>
           <LeadsTabs active={tab} onChange={setTab} />
         </div>
         <div>
-          <h1 className="text-lg font-bold tracking-tight">{TAB_TITLE[tab]}</h1>
-          <p className="text-sm text-muted-foreground">{TAB_SUB[tab]}</p>
+          <h1 className="text-base font-bold tracking-tight sm:text-lg">{TAB_TITLE[tab]}</h1>
+          <p className="hidden text-sm text-muted-foreground sm:block">{TAB_SUB[tab]}</p>
         </div>
       </div>
 
@@ -55,7 +55,7 @@ export function FindLeads() {
       ) : tab === "companies" ? (
         <CompaniesTab onNavigatePeople={(jobId) => { setPeopleJobId(jobId); setTab("people"); }} />
       ) : (
-        <JobsTab filtersVisible search="" />
+        <JobsTab />
       )}
     </div>
   );

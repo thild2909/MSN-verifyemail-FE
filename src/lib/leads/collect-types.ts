@@ -17,7 +17,7 @@ import type { VerificationStatus } from "@/lib/types";
 // `search` (the resolver) runs first to find the REAL domain; `website` is the
 // real crawl and takes precedence over the simulated sources for shared fields.
 export const COLLECTION_SOURCES = [
-  "search", "website", "opencorporates", "linkedin", "google_maps", "directory", "social", "other",
+  "search", "website", "opencorporates", "linkedin", "google_maps", "directory", "social", "llm", "other",
 ] as const;
 export type CollectionSource = (typeof COLLECTION_SOURCES)[number];
 
@@ -41,7 +41,7 @@ export interface SourcedField<T = string> {
  */
 export interface EmailVerification {
   email: string;
-  status: VerificationStatus;
+  status: VerificationStatus | "not_found";
   score: number; // 0-100
   provider: "reacher" | "mock";
   verifiedAt: string; // ISO
@@ -170,13 +170,54 @@ export interface CompanyCollectJob {
 
 /** Faceted filter state for the Companies table sidebar. */
 export interface CompanyFilters {
+  company: string[]; // company-name contains any (OR)
+  locations: string[]; // location contains any (OR)
+  employees: string[]; // size buckets, see EMPLOYEE_BUCKETS (OR)
+  industries: string[]; // (OR)
+  technologies: string[]; // tech stack contains any (OR)
   status: string[]; // enriched | not_found
   has: string[]; // website | email | phone | linkedin (all required)
   email: string[]; // valid | bad
-  industries: string[];
 }
 
-export const EMPTY_COMPANY_FILTERS: CompanyFilters = { status: [], has: [], email: [], industries: [] };
+export const EMPTY_COMPANY_FILTERS: CompanyFilters = {
+  company: [], locations: [], employees: [], industries: [], technologies: [], status: [], has: [], email: [],
+};
+
+/** Total number of active filter constraints — kept here so the panel and the
+ *  table badge never drift out of sync. */
+export const countCompanyFilters = (f: CompanyFilters): number =>
+  f.company.length + f.locations.length + f.employees.length + f.industries.length +
+  f.technologies.length + f.status.length + f.has.length + f.email.length;
+
+/** Employee-size buckets. `min`/`max` are inclusive head-count bounds. */
+export const EMPLOYEE_BUCKETS: { value: string; label: string; min: number; max: number }[] = [
+  { value: "1-10", label: "1–10", min: 1, max: 10 },
+  { value: "11-50", label: "11–50", min: 11, max: 50 },
+  { value: "51-200", label: "51–200", min: 51, max: 200 },
+  { value: "201-1000", label: "201–1,000", min: 201, max: 1000 },
+  { value: "1001-5000", label: "1,001–5,000", min: 1001, max: 5000 },
+  { value: "5000+", label: "5,000+", min: 5001, max: Number.POSITIVE_INFINITY },
+];
+
+/** Best integer for bucketing: upper end of a range, else the sole count. */
+export function employeeCount(value: unknown): number | null {
+  if (value == null) return null;
+  const s = String(value).replace(/,/g, "");
+  const range = s.match(/(\d+)\s*[-–]\s*(\d+)/);
+  if (range) return Number(range[2]);
+  const plus = s.match(/(\d+)\+/);
+  if (plus) return Number(plus[1]);
+  const m = s.match(/\d+/);
+  return m ? Number(m[0]) : null;
+}
+
+/** Map a free-text employees value to a bucket key, or null if unparseable. */
+export function employeeBucket(value: unknown): string | null {
+  const n = employeeCount(value);
+  if (n == null) return null;
+  return EMPLOYEE_BUCKETS.find((b) => n >= b.min && n <= b.max)?.value ?? null;
+}
 
 /** Facet counts (over all companies in the job) for the sidebar. */
 export interface CompaniesFacets {
@@ -184,6 +225,8 @@ export interface CompaniesFacets {
   has: { website: number; email: number; phone: number; linkedin: number };
   email: { valid: number; bad: number };
   industries: { name: string; count: number }[];
+  technologies: { name: string; count: number }[];
+  employees: Record<string, number>; // bucket value -> count
 }
 
 /* --------------------------------- proxies ------------------------------- */
@@ -217,6 +260,40 @@ export interface RotatingProxy {
   source: "env" | "config" | "none";
   editable: boolean; // false when locked by an env var
   endpoint: string; // masked (password hidden)
+  status?: ProxyHealth;
+  lastLatencyMs?: number;
+  exitIp?: string;
+  error?: string;
+}
+
+/** Webshare list download pool (CRAWLER_PROXY_LIST_URL). */
+export interface ProxyPoolList {
+  active: boolean;
+  source: "env" | "none";
+  count: number;
+  lastLoadedAt?: number;
+  error?: string;
+}
+
+/** Static residential pool — retry-only fallback after datacenter IPs fail. */
+export interface ProxyRetryPool {
+  active: boolean;
+  source: "env" | "none";
+  count: number;
+  lastLoadedAt?: number;
+  error?: string;
+}
+
+export interface ProxyTestProgress {
+  running: boolean;
+  total: number;
+  done: number;
+  healthy: number;
+  slow: number;
+  dead: number;
+  currentHost?: string;
+  startedAt?: number;
+  finishedAt?: number;
 }
 
 export interface ProxyConfig {
@@ -228,6 +305,9 @@ export interface ProxyConfig {
   maxRetries: number;
   proxies: ProxyEntry[];
   rotating?: RotatingProxy;
+  poolList?: ProxyPoolList;
+  retryPool?: ProxyRetryPool;
+  testProgress?: ProxyTestProgress;
 }
 
 export const DEFAULT_PROXY_CONFIG: ProxyConfig = {

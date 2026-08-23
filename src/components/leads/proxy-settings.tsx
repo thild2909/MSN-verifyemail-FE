@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { getProxyConfig, setProxyConfig, testProxies, type ProxyConfigInput } from "@/lib/api/client";
-import { PROXY_TYPES, ROTATION_STRATEGIES, type ProxyConfig, type ProxyHealth, type ProxyType, type RotationStrategy } from "@/lib/leads/collect-types";
+import { PROXY_TYPES, ROTATION_STRATEGIES, type ProxyConfig, type ProxyHealth, type ProxyTestProgress, type ProxyType, type RotationStrategy } from "@/lib/leads/collect-types";
 
 interface EditProxy {
   id?: string; label: string; host: string; port: number; type: ProxyType;
@@ -45,6 +45,7 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
   const [paste, setPaste] = React.useState("");
   const [rotatingEnabled, setRotatingEnabled] = React.useState(false);
   const [rotatingEndpoint, setRotatingEndpoint] = React.useState("");
+  const [testProgress, setTestProgress] = React.useState<ProxyTestProgress | null>(null);
 
   const rotatingActive = data?.rotating?.active ?? false;
   const rotatingEditable = data?.rotating?.editable ?? true;
@@ -58,18 +59,57 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
   }, []);
   React.useEffect(() => { if (data) hydrate(data); }, [data, hydrate]);
 
+  const poolListActive = data?.poolList?.active ?? false;
+
   const payload = (): ProxyConfigInput => ({
     enabled, rotation, concurrency, delayMs, backoffMs, maxRetries,
-    proxies: rows.map((r) => ({ id: r.id, label: r.label, host: r.host, port: Number(r.port) || 0, type: r.type, username: r.username || undefined, password: r.password || undefined, country: r.country || undefined, enabled: r.enabled })),
+    // Env-managed Webshare list — don't POST 500 rows (UI cap + validation); server keeps the pool.
+    proxies: poolListActive ? [] : rows.map((r) => ({ id: r.id, label: r.label, host: r.host, port: Number(r.port) || 0, type: r.type, username: r.username || undefined, password: r.password || undefined, country: r.country || undefined, enabled: r.enabled })),
     rotating: { enabled: rotatingEnabled, endpoint: rotatingEndpoint || undefined },
   });
 
-  const save = useMutation({ mutationFn: () => setProxyConfig(payload()), onSuccess: (cfg) => { hydrate(cfg); toast({ variant: "success", title: "Proxy settings saved" }); }, onError: () => toast({ variant: "error", title: "Could not save" }) });
+  const save = useMutation({ mutationFn: () => setProxyConfig(payload()), onSuccess: (cfg) => { hydrate(cfg); toast({ variant: "success", title: "Proxy settings saved" }); }, onError: (e) => toast({ variant: "error", title: "Could not save", description: e instanceof Error ? e.message : undefined }) });
   const test = useMutation({
-    mutationFn: async () => { await setProxyConfig(payload()); return testProxies(); },
-    onSuccess: (cfg) => { hydrate(cfg); const healthy = cfg.proxies.filter((p) => p.status === "healthy").length; toast({ variant: "success", title: "Proxies tested", description: `${healthy}/${cfg.proxies.length} healthy.` }); },
-    onError: () => toast({ variant: "error", title: "Test failed" }),
+    mutationFn: async () => {
+      setTestProgress(null);
+      if (!poolListActive) await setProxyConfig(payload());
+      return testProxies({ all: true, onProgress: setTestProgress });
+    },
+    onSuccess: (cfg) => {
+      setTestProgress(null);
+      hydrate(cfg);
+      const rot = cfg.rotating;
+      const pool = cfg.poolList;
+      const tp = cfg.testProgress;
+      if (pool?.active && !pool.error) {
+        const healthy = tp?.healthy ?? cfg.proxies.filter((p) => p.status === "healthy").length;
+        const dead = tp?.dead ?? cfg.proxies.filter((p) => p.status === "dead").length;
+        const slow = tp?.slow ?? cfg.proxies.filter((p) => p.status === "slow").length;
+        const total = tp?.total ?? pool.count;
+        toast({
+          variant: healthy > 0 ? "success" : "error",
+          title: healthy > 0 ? "Full pool verified" : "Proxy pool test failed",
+          description: `${healthy} healthy · ${slow} slow · ${dead} dead — ${total} tested sequentially`,
+        });
+        return;
+      }
+      if (rot?.active) {
+        if (rot.status === "healthy" || rot.status === "slow") {
+          toast({ variant: "success", title: "Rotating proxy OK", description: `Exit IP ${rot.exitIp ?? "—"} · ${rot.lastLatencyMs ?? "—"} ms` });
+          return;
+        }
+        toast({ variant: "error", title: "Rotating proxy failed", description: rot.error ?? "Could not connect through Webshare endpoint." });
+        return;
+      }
+      const healthy = cfg.proxies.filter((p) => p.status === "healthy").length;
+      toast({ variant: "success", title: "Proxies tested", description: `${healthy}/${cfg.proxies.length} healthy.` });
+    },
+    onError: (e) => { setTestProgress(null); toast({ variant: "error", title: "Test failed", description: e instanceof Error ? e.message : "Crawler unreachable." }); },
   });
+
+  const testing = test.isPending || !!testProgress?.running;
+  const prog = testProgress;
+  const pct = prog && prog.total > 0 ? Math.round((prog.done / prog.total) * 100) : 0;
 
   const addRow = () => setRows((r) => [...r, { label: "", host: "", port: 8080, type: "http", username: "", password: "", country: "", enabled: true, status: "untested" }]);
   const addPasted = () => {
@@ -93,6 +133,25 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
         <div className="py-10 text-center text-sm text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></div>
       ) : (
         <div className="max-h-[65vh] space-y-5 overflow-y-auto pr-1">
+          {testing && prog && (
+            <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="font-medium">Testing proxies sequentially…</span>
+                <span className="text-xs text-muted-foreground">{prog.done}/{prog.total} ({pct}%)</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full bg-primary transition-all duration-300" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {prog.currentHost ? <>Current: <code>{prog.currentHost}</code> · </> : null}
+                <span className="text-[hsl(var(--valid))]">{prog.healthy} OK</span>
+                {" · "}
+                <span className="text-[hsl(var(--risky))]">{prog.slow} slow</span>
+                {" · "}
+                <span className="text-[hsl(var(--invalid))]">{prog.dead} dead</span>
+              </p>
+            </div>
+          )}
           {/* Rotating residential (preferred) */}
           <div className="rounded-lg border-2 border-primary/30 bg-primary/5 p-3">
             <div className="flex items-center justify-between gap-3">
@@ -122,6 +181,35 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
                 ? "Paste your Webshare rotating/backbone endpoint. Password is masked — leave it to keep the saved one."
                 : "Locked by the CRAWLER_ROTATING_PROXY environment variable."}
             </p>
+            {rotatingActive && data?.rotating && (
+              <div className={cn("mt-2 rounded-md border px-2.5 py-2 text-xs", data.rotating.status === "dead" ? "border-[hsl(var(--invalid))]/40 bg-[hsl(var(--invalid))]/8 text-[hsl(var(--invalid))]" : data.rotating.status === "healthy" || data.rotating.status === "slow" ? "border-[hsl(var(--valid))]/30 bg-[hsl(var(--valid))]/8" : "border-input bg-muted/30 text-muted-foreground")}>
+                {data.rotating.status === "healthy" || data.rotating.status === "slow" ? (
+                  <span>Tested · exit IP <strong>{data.rotating.exitIp ?? "—"}</strong> · {data.rotating.lastLatencyMs ?? "—"} ms</span>
+                ) : data.rotating.error ? (
+                  <span>{data.rotating.error}</span>
+                ) : (
+                  <span>Click <strong>Test all</strong> to verify the rotating endpoint.</span>
+                )}
+              </div>
+            )}
+            {data?.poolList?.active && (
+              <div className={cn("mt-2 rounded-md border px-2.5 py-2 text-xs", data.poolList.error ? "border-[hsl(var(--invalid))]/40 bg-[hsl(var(--invalid))]/8 text-[hsl(var(--invalid))]" : "border-[hsl(var(--valid))]/30 bg-[hsl(var(--valid))]/8")}>
+                {data.poolList.error ? (
+                  <span>{data.poolList.error}</span>
+                ) : (
+                  <span>Webshare list loaded · <strong>{data.poolList.count}</strong> datacenter IPs · rotates per request (env <code className="text-[10px]">CRAWLER_PROXY_LIST_URL</code>)</span>
+                )}
+              </div>
+            )}
+            {data?.retryPool?.active && (
+              <div className={cn("mt-2 rounded-md border px-2.5 py-2 text-xs", data.retryPool.error ? "border-[hsl(var(--invalid))]/40 bg-[hsl(var(--invalid))]/8 text-[hsl(var(--invalid))]" : "border-primary/30 bg-primary/5")}>
+                {data.retryPool.error ? (
+                  <span>{data.retryPool.error}</span>
+                ) : (
+                  <span>Retry pool · <strong>{data.retryPool.count}</strong> static residential IPs · used after datacenter fails (<code className="text-[10px]">CRAWLER_PROXY_RETRY_LIST_URL</code>)</span>
+                )}
+              </div>
+            )}
           </div>
 
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -214,7 +302,10 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
 
       <DialogFooter>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>Close</Button>
-        <Button variant="outline" disabled={test.isPending || save.isPending} onClick={() => test.mutate()}>{test.isPending ? <Loader2 className="size-4 animate-spin" /> : <Zap className="size-4" />} Save & test</Button>
+        <Button variant="outline" disabled={testing || save.isPending} onClick={() => test.mutate()}>
+          {testing ? <Loader2 className="size-4 animate-spin" /> : <Zap className="size-4" />}
+          {testing ? `Testing ${prog?.done ?? 0}/${prog?.total ?? "…"}` : "Test all sequentially"}
+        </Button>
         <Button disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending ? <Loader2 className="size-4 animate-spin" /> : "Save"}</Button>
       </DialogFooter>
     </Dialog>

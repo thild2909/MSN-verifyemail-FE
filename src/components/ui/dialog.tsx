@@ -38,7 +38,7 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
         role="dialog"
         aria-modal="true"
         className={cn(
-          "relative z-10 w-full max-w-lg animate-fade-in rounded-xl border bg-card p-6 shadow-xl",
+          "relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto animate-fade-in rounded-xl border bg-card p-4 shadow-xl sm:p-6",
           className,
         )}
       >
@@ -66,5 +66,5 @@ export function DialogDescription({ className, ...props }: React.HTMLAttributes<
   return <p className={cn("text-sm text-muted-foreground", className)} {...props} />;
 }
 export function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("mt-6 flex justify-end gap-2", className)} {...props} />;
+  return <div className={cn("mt-6 flex flex-wrap justify-end gap-2", className)} {...props} />;
 }

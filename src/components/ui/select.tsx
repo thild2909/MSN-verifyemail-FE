@@ -163,7 +163,11 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
     };
 
     return (
-      <div className="relative">
+      // The width/layout class from the caller (e.g. `w-full sm:w-56`) must size
+      // the WRAPPER — it's the flex item — otherwise it collapses to content
+      // width and `w-full` never takes on mobile. The button then fills it, and
+      // the chevron (positioned against the wrapper) stays glued to the edge.
+      <div className={cn("relative", className)}>
         <button
           {...(rest as React.ButtonHTMLAttributes<HTMLButtonElement>)}
           ref={triggerRef}

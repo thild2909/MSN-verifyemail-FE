@@ -14,7 +14,8 @@ import { getLists, createList, addToList, saveToSaved, type LeadListItem } from 
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
 import { Sourced, COLLECT_STATUS_META, VerificationBadge, CompanyLogo, LlmBadge } from "./collect-ui";
 import { CompanyFilterPanel } from "./company-filter-panel";
-import { EMPTY_COMPANY_FILTERS, type CompanyFilters, type CollectedCompany } from "@/lib/leads/collect-types";
+import { MobileFilterDrawer, openFiltersFor } from "./filter-drawer";
+import { EMPTY_COMPANY_FILTERS, countCompanyFilters, type CompanyFilters, type CollectedCompany } from "@/lib/leads/collect-types";
 
 const PAGE_SIZE = 25;
 
@@ -62,6 +63,7 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
   const [search, setSearch] = React.useState("");
   const [filters, setFilters] = React.useState<CompanyFilters>(EMPTY_COMPANY_FILTERS);
   const [showFilters, setShowFilters] = React.useState(true);
+  const [mobileFilters, setMobileFilters] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [debounced, setDebounced] = React.useState("");
   React.useEffect(() => { const t = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(t); }, [search]);
@@ -83,7 +85,7 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
 
   const rows = data?.companies ?? [];
   const facets = data?.facets;
-  const filtersActive = filters.status.length + filters.has.length + filters.email.length + filters.industries.length;
+  const filtersActive = countCompanyFilters(filters);
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageIds = rows.map((r) => r.id);
@@ -167,14 +169,17 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
           <CompanyFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_COMPANY_FILTERS)} />
         </aside>
       )}
+      <MobileFilterDrawer open={mobileFilters} onClose={() => setMobileFilters(false)}>
+        <CompanyFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_COMPANY_FILTERS)} />
+      </MobileFilterDrawer>
       <div className="relative flex min-w-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-        <div className="relative min-w-[200px] flex-1">
+        <div className="relative w-full min-w-[200px] sm:w-auto sm:flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search company or location…" className="h-9 pl-9" />
         </div>
         <span className="text-sm text-muted-foreground"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> companies</span>
-        <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => setShowFilters((v) => !v)}>
+        <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="ml-auto h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
           <SlidersHorizontal className="size-4" /> Filters{filtersActive > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{filtersActive}</span>}
         </Button>
       </div>
@@ -248,7 +253,7 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
                       <td className="px-3 py-2"><Sourced field={c.linkedin} /></td>
                       <td className="px-3 py-2"><Sourced field={c.industry} /></td>
                       <td className="px-3 py-2">{c.address ? <Sourced field={c.address} /> : <span className="text-xs text-muted-foreground">{c.inputLocation}</span>}</td>
-                      <td className="px-3 py-2"><Sourced field={c.employees} /></td>
+                      <td className="px-3 py-2"><Sourced field={c.employees} showConfidence /></td>
                       <td className="px-3 py-2">
                         {c.status === "collecting"
                           ? <span className="inline-flex items-center gap-1 text-xs font-medium text-[hsl(var(--risky))]"><Loader2 className="size-3 animate-spin" /> Collecting</span>
@@ -278,7 +283,7 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
       {/* Floating selection bar — same treatment as the Jobs tab. */}
       {someSelected && (
         <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
+          <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
             <span className="flex items-center gap-2 pr-1 text-sm font-semibold">
               <span className="rounded-md bg-primary px-2 py-0.5 text-primary-foreground tabular-nums">{formatNumber(effectiveCount)}</span> selected
             </span>

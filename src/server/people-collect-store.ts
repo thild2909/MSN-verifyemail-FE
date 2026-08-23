@@ -8,6 +8,7 @@ import "server-only";
 import fs from "fs";
 import path from "path";
 import { initials } from "@/lib/utils";
+import { employeeBucket } from "@/lib/leads/collect-types";
 import type { CrawledPerson } from "./crawler-client";
 import type {
   CollectedPerson,
@@ -22,6 +23,7 @@ export const MAX_PEOPLE_SEEDS = Number(process.env.APP_MAX_PEOPLE_SEEDS ?? 200);
 interface PeopleSeed extends PeopleSeedInput {
   status: "pending" | "collecting" | "done" | "failed";
   peopleFound: number;
+  llmEnriched?: boolean; // AI exec-fill fallback already attempted for this seed
 }
 
 interface PeopleStoreData {
@@ -90,26 +92,45 @@ export function getSeedCoverage(jobId: string): { company: string; status: strin
 
 export interface PeopleQuery {
   page?: number; pageSize?: number; search?: string;
-  seniority?: string[]; // founder | c_level | president | vp | other
   email?: string[]; // has | valid | bad
+  titles?: string[]; // title contains  (OR)
+  seniority?: string[]; // founder | c_level | president | vp | other
   linkedin?: boolean; // must have a LinkedIn URL
   companies?: string[]; // filter to these company names
+  locations?: string[]; // person location contains  (OR)
+  employees?: string[]; // employer size buckets  (OR)
+  industries?: string[]; // employer industry  (OR)
+  minScore?: number; // minimum match confidence 0-100
 }
 export interface PeopleFacets {
   seniority: Record<string, number>;
   email: { has: number; valid: number; bad: number };
   linkedin: { has: number };
   companies: { name: string; count: number }[];
+  industries: { name: string; count: number }[];
+  employees: Record<string, number>;
 }
-export interface PeoplePage { people: CollectedPerson[]; total: number; page: number; pageSize: number; facets: PeopleFacets }
+export interface PeoplePage {
+  people: CollectedPerson[];
+  total: number;
+  page: number;
+  pageSize: number;
+  facets: PeopleFacets;
+  verifyingPersonIds: string[];
+}
 
-const isBadEmail = (p: CollectedPerson) => p.emailVerification != null && ["invalid", "disposable"].includes(p.emailVerification.status);
+const isBadEmail = (p: CollectedPerson) =>
+  p.emailVerification != null &&
+  p.emailKind === "found" &&
+  ["invalid", "disposable"].includes(p.emailVerification.status);
 
 function peopleFacets(all: CollectedPerson[]): PeopleFacets {
   const seniority: Record<string, number> = {};
   const email = { has: 0, valid: 0, bad: 0 };
   const linkedin = { has: 0 };
+  const employees: Record<string, number> = {};
   const companyCounts = new Map<string, number>();
+  const industryCounts = new Map<string, number>();
   for (const p of all) {
     seniority[p.seniority] = (seniority[p.seniority] ?? 0) + 1;
     if (p.email) email.has++;
@@ -117,15 +138,31 @@ function peopleFacets(all: CollectedPerson[]): PeopleFacets {
     if (isBadEmail(p)) email.bad++;
     if (p.linkedin) linkedin.has++;
     companyCounts.set(p.company, (companyCounts.get(p.company) ?? 0) + 1);
+    const eb = employeeBucket(p.companyEmployees);
+    if (eb) employees[eb] = (employees[eb] ?? 0) + 1;
+    const ind = p.companyIndustry ? String(p.companyIndustry).trim() : "";
+    if (ind) industryCounts.set(ind, (industryCounts.get(ind) ?? 0) + 1);
   }
-  const companies = [...companyCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 40);
-  return { seniority, email, linkedin, companies };
+  const byCountDesc = (a: { count: number }, b: { count: number }) => b.count - a.count;
+  const companies = [...companyCounts.entries()].map(([name, count]) => ({ name, count })).sort(byCountDesc).slice(0, 40);
+  const industries = [...industryCounts.entries()].map(([name, count]) => ({ name, count })).sort(byCountDesc).slice(0, 40);
+  return { seniority, email, linkedin, companies, industries, employees };
 }
 
 export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
+  dedupePeople(jobId); // self-heal any duplicate rows (incl. jobs stored before dedup landed)
+  sealMissedEmailLookups(jobId);
   const all = store().people[jobId] ?? [];
-  const { page = 1, pageSize = 25, search = "", seniority = [], email = [], linkedin = false, companies = [] } = query;
+  const {
+    page = 1, pageSize = 25, search = "",
+    email = [], titles = [], seniority = [], linkedin = false,
+    companies = [], locations = [], employees = [], industries = [], minScore = 0,
+  } = query;
   const facets = peopleFacets(all);
+
+  const lower = (arr: string[]) => arr.map((s) => s.toLowerCase());
+  const titleTerms = lower(titles);
+  const locationTerms = lower(locations);
 
   let filtered = all;
   const q = search.trim().toLowerCase();
@@ -133,15 +170,28 @@ export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
     p.name.toLowerCase().includes(q) ||
     p.company.toLowerCase().includes(q) ||
     (p.title?.value ? String(p.title.value).toLowerCase().includes(q) : false));
-  if (seniority.length) filtered = filtered.filter((p) => seniority.includes(p.seniority));
   if (email.length) filtered = filtered.filter((p) => email.some((e) =>
     e === "has" ? !!p.email : e === "valid" ? p.emailVerification?.status === "valid" : e === "bad" ? isBadEmail(p) : false));
+  if (titleTerms.length) filtered = filtered.filter((p) => { const t = (p.title?.value ? String(p.title.value) : "").toLowerCase(); return titleTerms.some((x) => t.includes(x)); });
+  if (seniority.length) filtered = filtered.filter((p) => seniority.includes(p.seniority));
   if (linkedin) filtered = filtered.filter((p) => !!p.linkedin);
   if (companies.length) filtered = filtered.filter((p) => companies.includes(p.company));
+  if (locationTerms.length) filtered = filtered.filter((p) => { const loc = (p.location ?? "").toLowerCase(); return locationTerms.some((x) => loc.includes(x)); });
+  if (employees.length) filtered = filtered.filter((p) => { const b = employeeBucket(p.companyEmployees); return b != null && employees.includes(b); });
+  if (industries.length) filtered = filtered.filter((p) => p.companyIndustry != null && industries.includes(String(p.companyIndustry)));
+  if (minScore > 0) filtered = filtered.filter((p) => p.confidence >= minScore);
 
   const total = filtered.length;
   const start = (page - 1) * pageSize;
-  return { people: filtered.slice(start, start + pageSize), total, page, pageSize, facets };
+  const job = getPeopleJob(jobId);
+  return {
+    people: filtered.slice(start, start + pageSize),
+    total,
+    page,
+    pageSize,
+    facets,
+    verifyingPersonIds: job?.verifyingPersonIds ?? [],
+  };
 }
 
 /* ------------------------------- mutations ------------------------------- */
@@ -173,6 +223,7 @@ export function createPeopleJob(input: CreatePeopleJobInput): { job: PeopleColle
   const now = new Date().toISOString();
   const job: PeopleCollectJob = {
     id, name: input.name, mode, status: "collecting", verifyStatus: "idle",
+    verifyingPersonIds: [],
     totalCompanies: capped.length, processedCompanies: 0, progress: 0,
     summary: emptySummary(capped.length), createdAt: now,
   };
@@ -207,10 +258,15 @@ export function applySeedPeople(jobId: string, index: number, crawled: CrawledPe
       jobId,
       companyId: seed.companyId ?? null,
       companyLogoText: initials(cp.company),
+      companyEmployees: seed.companyEmployees ?? null,
+      companyIndustry: seed.companyIndustry ?? null,
+      companyPhone: seed.companyPhone ?? null,
+      companyEmail: seed.companyEmail ?? null,
     });
   });
   seed.status = "done";
   seed.peopleFound = crawled.length;
+  s.people[jobId] = dedupePeopleList(s.people[jobId] ?? []);
   recompute(jobId);
   scheduleSave();
 }
@@ -226,7 +282,26 @@ export function setJobVerifyStatus(jobId: string, verifyStatus: PeopleCollectJob
   const job = getPeopleJob(jobId);
   if (!job) return;
   job.verifyStatus = verifyStatus;
+  job.verifyingPersonIds = [];
   scheduleSave();
+}
+
+/** Mark / unmark a person as currently in a verify worker. Persists immediately so the table poll can show a spinner on that row. */
+export function markPersonVerifying(jobId: string, personId: string, on: boolean) {
+  const job = getPeopleJob(jobId);
+  if (!job) return;
+  const cur = new Set(job.verifyingPersonIds ?? []);
+  if (on) cur.add(personId);
+  else cur.delete(personId);
+  job.verifyingPersonIds = [...cur];
+  persist(store());
+}
+
+export function setVerifyingPersonIds(jobId: string, ids: string[]) {
+  const job = getPeopleJob(jobId);
+  if (!job) return;
+  job.verifyingPersonIds = ids;
+  persist(store());
 }
 
 /**
@@ -248,6 +323,104 @@ export function emailTargets(jobId: string, onlyUnverified = true): { personId: 
 export function setPersonVerification(jobId: string, personId: string, ev: CollectedPerson["emailVerification"]) {
   const p = store().people[jobId]?.find((x) => x.id === personId);
   if (p) p.emailVerification = ev;
+}
+
+/**
+ * Dev/reset utility: clear every person's email-verification verdict so the
+ * "Find & verify" pass re-runs from scratch. Scoped to one job, or all jobs when
+ * `jobId` is omitted. Returns how many people were reset.
+ */
+export function resetPeopleVerification(jobId?: string): number {
+  const s = store();
+  const ids = jobId ? [jobId] : Object.keys(s.people);
+  let reset = 0;
+  for (const id of ids) {
+    for (const p of s.people[id] ?? []) {
+      if (p.emailVerification) { p.emailVerification = null; reset++; }
+    }
+    const job = getPeopleJob(id);
+    if (job) {
+      job.verifyStatus = "idle";
+      job.verifyingPersonIds = [];
+    }
+    recompute(id); // zeroes emailsVerified / emailsValid in the summary
+  }
+  persist(s);
+  return reset;
+}
+
+/**
+ * After Find & verify finished, any row still missing a verdict is a confirmed
+ * miss — persist `not_found` so Access email never comes back on reload.
+ * No-op unless this job already completed a verify pass.
+ */
+export function sealMissedEmailLookups(jobId: string): number {
+  const job = getPeopleJob(jobId);
+  if (job?.verifyStatus !== "done") return 0;
+  const list = store().people[jobId] ?? [];
+  const now = new Date().toISOString();
+  let n = 0;
+  for (const p of list) {
+    if (p.emailVerification) continue;
+    p.email = null;
+    p.emailKind = "none";
+    p.emailVerification = { email: "", status: "not_found", score: 0, provider: "reacher", verifiedAt: now };
+    n++;
+  }
+  if (n) {
+    recompute(jobId);
+    scheduleSave();
+  }
+  return n;
+}
+
+/**
+ * Full context for the finder-backed verify pass: the person's name + a domain
+ * (from the resolved company, else parsed from an existing email) so the finder
+ * can DISCOVER the real deliverable address — not just re-check the one guess.
+ * A person is a target if it has a domain to search OR an email to re-check.
+ */
+export interface PersonVerifyTarget {
+  personId: string;
+  name: string;
+  company: string;
+  firstName: string;
+  lastName: string;
+  domain: string | null;
+  email: string | null;
+  emailKind: CollectedPerson["emailKind"];
+  title: string | null;
+}
+function toVerifyTarget(p: CollectedPerson): PersonVerifyTarget {
+  let domain = p.companyDomain;
+  if (!domain && p.email) domain = String(p.email.value).split("@")[1] || null;
+  return {
+    personId: p.id,
+    name: p.name,
+    company: p.company,
+    firstName: p.firstName,
+    lastName: p.lastName,
+    domain,
+    email: p.email ? String(p.email.value) : null,
+    emailKind: p.emailKind,
+    title: p.title?.value ? String(p.title.value) : null,
+  };
+}
+
+export function peopleVerifyTargets(jobId: string, onlyUnverified = true): PersonVerifyTarget[] {
+  const list = store().people[jobId] ?? [];
+  const out: PersonVerifyTarget[] = [];
+  for (const p of list) {
+    if (onlyUnverified && p.emailVerification) continue;
+    out.push(toVerifyTarget(p));
+  }
+  return out;
+}
+
+/** Build a verify target for ONE person (per-row "Access email" action). */
+export function personVerifyTarget(jobId: string, personId: string): PersonVerifyTarget | null {
+  const p = store().people[jobId]?.find((x) => x.id === personId);
+  return p ? toVerifyTarget(p) : null;
 }
 
 /** People worth an LLM founder↔company cross-check.
@@ -274,9 +447,80 @@ export function llmSkippedCount(jobId: string, onlyUnverified = true): number {
     return !personNeedsLlm(p);
   }).length;
 }
+/**
+ * Coverage-gap company seeds worth an AI exec-fill: discover-mode seeds the
+ * crawl finished with ZERO people. `onlyUnattempted` skips seeds already tried
+ * by the LLM fill. Returns the seed plus its index (people are keyed by index).
+ */
+export function peopleEnrichTargets(jobId: string, onlyUnattempted = true): { index: number; seed: PeopleSeed }[] {
+  return (store().seeds[jobId] ?? [])
+    .map((seed, index) => ({ index, seed }))
+    .filter(({ seed }) => {
+      if (seed.firstName || seed.lastName) return false; // enrich-mode rows aren't company gaps
+      if (seed.status !== "done" && seed.status !== "failed") return false;
+      if (seed.peopleFound > 0) return false;
+      if (onlyUnattempted && seed.llmEnriched) return false;
+      return true;
+    });
+}
+
+/** Mark a seed's AI exec-fill as attempted (whether or not anyone verified). */
+export function markSeedLlmEnriched(jobId: string, index: number) {
+  const seed = store().seeds[jobId]?.[index];
+  if (seed) seed.llmEnriched = true;
+}
+
+/**
+ * Append AI-sourced people to a coverage-gap seed (crawl-confirmed when
+ * possible, DeepSeek knowledge-fill otherwise). Additive to peopleFound.
+ */
+export function applyLlmPeople(jobId: string, index: number, verified: CrawledPerson[]) {
+  const s = store();
+  const seed = s.seeds[jobId]?.[index];
+  if (!seed) return;
+  const list = s.people[jobId] ?? (s.people[jobId] = []);
+  verified.forEach((cp, i) => {
+    list.push({
+      ...cp,
+      id: `${jobId}_${index}_llm_${i}`,
+      jobId,
+      companyId: seed.companyId ?? null,
+      companyLogoText: initials(cp.company),
+      companyEmployees: seed.companyEmployees ?? null,
+      companyIndustry: seed.companyIndustry ?? null,
+      companyPhone: seed.companyPhone ?? null,
+      companyEmail: seed.companyEmail ?? null,
+    });
+  });
+  seed.llmEnriched = true;
+  seed.peopleFound += verified.length;
+  if (verified.length > 0 && seed.status === "failed") seed.status = "done";
+  s.people[jobId] = dedupePeopleList(s.people[jobId] ?? []);
+  recompute(jobId);
+  scheduleSave();
+}
+
 export function setPersonLlm(jobId: string, personId: string, v: CollectedPerson["llmVerification"]) {
   const p = store().people[jobId]?.find((x) => x.id === personId);
   if (p) p.llmVerification = v;
+}
+
+/**
+ * Patch a person's resolved identity fields after an AI-verify correction —
+ * re-resolving a mismatched / LinkedIn-less row to the CORRECT live profile (or
+ * stripping a confirmed-wrong LinkedIn). Recomputes the summary so the
+ * with-LinkedIn / seniority counts stay accurate.
+ */
+export function updatePersonResolved(
+  jobId: string,
+  personId: string,
+  patch: Partial<Pick<CollectedPerson, "linkedin" | "title" | "seniority" | "confidence" | "email" | "emailKind" | "location" | "emailVerification" | "collection">>,
+) {
+  const p = store().people[jobId]?.find((x) => x.id === personId);
+  if (!p) return;
+  Object.assign(p, patch);
+  recompute(jobId);
+  scheduleSave();
 }
 export function commitLlm(jobId: string) {
   void jobId;
@@ -298,6 +542,115 @@ export function finalizePeopleJob(jobId: string) {
   persist(store());
 }
 
+/**
+ * Re-queue the coverage-gap company seeds — discover-mode seeds that finished with
+ * ZERO people — back to `pending` so "Retry failed" re-crawls them. Returns how
+ * many were queued (0 → nothing to retry). Enrich-mode (per-person) rows are left
+ * alone; a genuinely people-less company is the only "gap" a re-crawl can fix.
+ */
+export function resetGapSeeds(jobId: string): number {
+  const s = store();
+  const seeds = s.seeds[jobId];
+  if (!seeds) return 0;
+  let n = 0;
+  for (const seed of seeds) {
+    const isDiscover = !seed.firstName && !seed.lastName;
+    if (isDiscover && (seed.status === "done" || seed.status === "failed") && seed.peopleFound === 0) {
+      seed.status = "pending";
+      n++;
+    }
+  }
+  const job = getPeopleJob(jobId);
+  if (job && n > 0) {
+    job.status = "collecting";
+    job.completedAt = undefined;
+    recompute(jobId);
+    persist(s);
+  }
+  return n;
+}
+
+/* ------------------------------ dedup ------------------------------------ */
+
+const normKey = (s: string) =>
+  (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const liSlug = (u: string | null | undefined) => {
+  const m = String(u ?? "").match(/linkedin\.com\/in\/([^/?#]+)/i);
+  return m ? m[1].toLowerCase() : "";
+};
+const SENIORITY_RANK: Record<string, number> = { founder: 5, c_level: 4, president: 3, vp: 2, other: 1 };
+const personFieldScore = (p: CollectedPerson) =>
+  (p.linkedin ? 1 : 0) + (p.email ? 1 : 0) + (p.title?.value ? 1 : 0) +
+  (p.emailVerification?.status === "valid" ? 2 : 0) + (p.location ? 1 : 0);
+
+/** Collapse duplicate rows for the SAME person into one, keeping the most senior /
+ *  highest-confidence record and back-filling any fields it is missing. */
+function mergePeople(group: CollectedPerson[]): CollectedPerson {
+  const sorted = [...group].sort((a, b) =>
+    (SENIORITY_RANK[b.seniority] ?? 0) - (SENIORITY_RANK[a.seniority] ?? 0) ||
+    b.confidence - a.confidence ||
+    personFieldScore(b) - personFieldScore(a));
+  const primary = { ...sorted[0] };
+  for (const o of sorted.slice(1)) {
+    if (!primary.linkedin && o.linkedin) primary.linkedin = o.linkedin;
+    if (!primary.email && o.email) { primary.email = o.email; primary.emailKind = o.emailKind; }
+    if (!primary.emailVerification && o.emailVerification) primary.emailVerification = o.emailVerification;
+    if ((!primary.title || !primary.title.value) && o.title?.value) primary.title = o.title;
+    if (!primary.location && o.location) primary.location = o.location;
+    if (!primary.companyPhone && o.companyPhone) primary.companyPhone = o.companyPhone;
+    if (!primary.companyEmail && o.companyEmail) primary.companyEmail = o.companyEmail;
+  }
+  return primary;
+}
+
+/**
+ * De-duplicate a job's people. Group by normalized name + company; within a group,
+ * merge into ONE record — UNLESS members carry different non-empty LinkedIn slugs
+ * (distinct real profiles → genuinely different people, kept separate). Records
+ * with no slug are treated as the same person as the group (the common case: a
+ * founder surfaced twice under two titles, e.g. "Co-Founder" + "Chief … Officer").
+ */
+function dedupePeopleList(list: CollectedPerson[]): CollectedPerson[] {
+  const groups = new Map<string, CollectedPerson[]>();
+  const order: string[] = [];
+  for (const p of list) {
+    const key = `${normKey(p.name)}|${normKey(p.company)}`;
+    let g = groups.get(key);
+    if (!g) { g = []; groups.set(key, g); order.push(key); }
+    g.push(p);
+  }
+  const out: CollectedPerson[] = [];
+  for (const key of order) {
+    const g = groups.get(key)!;
+    if (g.length === 1) { out.push(g[0]); continue; }
+    const slugs = new Set(g.map((p) => liSlug(p.linkedin?.value)).filter(Boolean));
+    if (slugs.size <= 1) { out.push(mergePeople(g)); continue; }
+    // Multiple distinct LinkedIn profiles → different people: merge per slug, and
+    // keep any slug-less rows as-is (can't safely attribute them to one profile).
+    const bySlug = new Map<string, CollectedPerson[]>();
+    for (const p of g) {
+      const s = liSlug(p.linkedin?.value);
+      if (!s) { out.push(p); continue; }
+      const arr = bySlug.get(s); if (arr) arr.push(p); else bySlug.set(s, [p]);
+    }
+    for (const arr of bySlug.values()) out.push(mergePeople(arr));
+  }
+  return out;
+}
+
+/** Collapse duplicate people in place (job-wide) and refresh the summary. */
+export function dedupePeople(jobId: string) {
+  const s = store();
+  const list = s.people[jobId];
+  if (!list) return;
+  const deduped = dedupePeopleList(list);
+  if (deduped.length !== list.length) {
+    s.people[jobId] = deduped;
+    recompute(jobId);
+    scheduleSave();
+  }
+}
+
 function recompute(jobId: string) {
   const job = getPeopleJob(jobId);
   const seeds = store().seeds[jobId];
@@ -314,7 +667,10 @@ function recompute(jobId: string) {
     if (p.seniority === "vp" || p.seniority === "president") s.vps++;
     if (p.email) s.withEmail++;
     if (p.linkedin) s.withLinkedin++;
-    if (p.emailVerification) { s.emailsVerified++; if (p.emailVerification.status === "valid") s.emailsValid++; }
+    if (p.emailVerification && p.emailVerification.status !== "not_found") {
+      s.emailsVerified++;
+      if (p.emailVerification.status === "valid") s.emailsValid++;
+    }
     companiesWith.add(p.companyId ?? p.company);
   }
   s.companiesWithPeople = companiesWith.size;

@@ -5,7 +5,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./leads-ui";
 import { CompanyLogo, VerificationBadge, LlmBadge } from "./collect-ui";
-import { SENIORITY_LABEL, type CollectedPerson } from "@/lib/leads/people-types";
+import { SENIORITY_LABEL, isUnconfirmedEmail, type CollectedPerson } from "@/lib/leads/people-types";
 
 const linkedinHref = (v: string) => (/^https?:\/\//i.test(v) ? v : `https://${v}`);
 
@@ -47,7 +47,9 @@ export function PersonDetailDrawer({ person, open, onOpenChange }: { person: Col
           {/* Contact */}
           <Section title="Contact">
             <Row icon={Mail} label="Email">
-              {person.email ? (
+              {isUnconfirmedEmail(person) ? (
+                <span className="text-muted-foreground">Not found</span>
+              ) : person.email ? (
                 <div className="flex flex-col items-end gap-1">
                   <span className="font-medium">{String(person.email.value)}</span>
                   <div className="flex items-center gap-1.5">

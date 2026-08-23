@@ -64,3 +64,39 @@ export function setCached(name: string, location: string, company: CachedCompany
   store()[keyFor(name, location)] = { at: Date.now(), company, rateLimited };
   scheduleSave();
 }
+
+function flushNow() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify(store()));
+  } catch { /* best-effort */ }
+}
+
+/** Remove one cached collection row (in-memory + disk). */
+export function deleteCached(name: string, location: string): boolean {
+  const k = keyFor(name, location);
+  const map = store();
+  if (!(k in map)) return false;
+  delete map[k];
+  flushNow();
+  return true;
+}
+
+/** Remove many cached collection rows. Returns count removed. */
+export function deleteCachedMany(entries: { name: string; location: string }[]): number {
+  const map = store();
+  let removed = 0;
+  for (const { name, location } of entries) {
+    const k = keyFor(name, location);
+    if (k in map) {
+      delete map[k];
+      removed++;
+    }
+  }
+  if (removed) flushNow();
+  return removed;
+}

@@ -1,21 +1,22 @@
 "use client";
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Search, Inbox, Loader2, ChevronRight, Linkedin, ChevronDown, Bookmark, ListPlus, Download, X, Plus, SlidersHorizontal } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Search, Inbox, Loader2, ChevronRight, Linkedin, ChevronDown, Bookmark, ListPlus, Download, X, Plus, SlidersHorizontal, MailCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
-import { getCollectedPeople } from "@/lib/api/client";
+import { getCollectedPeople, verifyPersonEmail } from "@/lib/api/client";
 import { formatNumber, cn } from "@/lib/utils";
 import { getLists, createList, addToList, saveToSaved, type LeadListItem } from "@/lib/leads/lists-store";
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
 import { Avatar } from "./leads-ui";
 import { CompanyLogo, VerificationBadge, LlmBadge } from "./collect-ui";
 import { PeopleFilterPanel } from "./people-filter-panel";
-import { SENIORITY_LABEL, EMPTY_PEOPLE_FILTERS, type PeopleFilters, type CollectedPerson, type PersonSeniority } from "@/lib/leads/people-types";
+import { MobileFilterDrawer, openFiltersFor } from "./filter-drawer";
+import { SENIORITY_LABEL, EMPTY_PEOPLE_FILTERS, countPeopleFilters, isUnconfirmedEmail, type PeopleFilters, type CollectedPerson, type PersonSeniority } from "@/lib/leads/people-types";
 
 const PAGE_SIZE = 25;
 
@@ -44,11 +45,42 @@ function Check({ checked, indeterminate, onChange }: { checked: boolean; indeter
 
 const linkedinHref = (v: string) => (/^https?:\/\//i.test(v) ? v : `https://${v}`);
 
-export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: string; live: boolean; onOpenPerson: (p: CollectedPerson) => void }) {
+export function CollectedPeopleTable({
+  jobId,
+  live,
+  bulkVerifying = false,
+  verifyingPersonIds: jobVerifyingIds,
+  onOpenPerson,
+}: {
+  jobId: string;
+  live: boolean;
+  bulkVerifying?: boolean;
+  verifyingPersonIds?: string[];
+  onOpenPerson: (p: CollectedPerson) => void;
+}) {
   const { toast } = useToast();
+  const qc = useQueryClient();
+
+  // Per-row "Access email": find + verify ONE person on demand.
+  const [verifyingId, setVerifyingId] = React.useState<string | null>(null);
+  const verifyOne = useMutation({
+    mutationFn: (personId: string) => verifyPersonEmail(jobId, personId),
+    onMutate: (personId: string) => setVerifyingId(personId),
+    onSettled: () => setVerifyingId(null),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["collect-people", jobId] });
+      qc.invalidateQueries({ queryKey: ["people-job", jobId] });
+      if (r.status === "not_found") toast({ variant: "info", title: "Email not found", description: "Saved as Not found. Access email will not run again for this person." });
+      else if (!r.ok) { toast({ variant: "info", title: "No email to verify", description: "Couldn't find or check an address for this person." }); return; }
+      else if (r.status === "valid") toast({ variant: "success", title: "Email verified", description: `${r.email ?? ""} · deliverable` });
+      else toast({ variant: r.status === "invalid" || r.status === "disposable" ? "error" : "info", title: r.found ? "Email found" : "Email checked", description: `${r.email ?? ""} · ${r.status ?? "unknown"}` });
+    },
+    onError: () => toast({ variant: "error", title: "Verify failed" }),
+  });
   const [search, setSearch] = React.useState("");
   const [filters, setFilters] = React.useState<PeopleFilters>(EMPTY_PEOPLE_FILTERS);
   const [showFilters, setShowFilters] = React.useState(true);
+  const [mobileFilters, setMobileFilters] = React.useState(false);
   const [page, setPage] = React.useState(1);
   const [debounced, setDebounced] = React.useState("");
   React.useEffect(() => { const t = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(t); }, [search]);
@@ -67,8 +99,16 @@ export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: str
   });
 
   const rows = data?.people ?? [];
+  const inflightIds = React.useMemo(() => {
+    const s = new Set<string>([
+      ...(jobVerifyingIds ?? []),
+      ...(data?.verifyingPersonIds ?? []),
+    ]);
+    if (verifyingId) s.add(verifyingId);
+    return s;
+  }, [jobVerifyingIds, data?.verifyingPersonIds, verifyingId]);
   const facets = data?.facets;
-  const filtersActive = filters.seniority.length + filters.email.length + filters.companies.length + (filters.linkedin ? 1 : 0);
+  const filtersActive = countPeopleFilters(filters);
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pageIds = rows.map((r) => r.id);
@@ -97,14 +137,32 @@ export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: str
   const onExport = async () => {
     setBusy("export");
     try {
-      const sel = await resolveSelected();
-      const headers = ["Name", "Title", "Seniority", "Company", "Email", "Email type", "Email status", "LinkedIn", "Location", "Confidence"];
+      const all = await resolveSelected();
+      // Export ONLY valid records: a deliverable (verified-valid) email.
+      const sel = all.filter((p) => p.emailVerification?.status === "valid");
+      if (sel.length === 0) {
+        toast({
+          variant: "info",
+          title: "Nothing to export",
+          description: all.length > 0
+            ? `${formatNumber(all.length)} selected, but none have a deliverable email. Run "Verify emails" first.`
+            : "No people selected.",
+        });
+        return;
+      }
+      const headers = ["Name", "Title", "Seniority", "Company", "Company phone", "Company email", "Company employees", "Company industry", "Email", "Email type", "Email status", "LinkedIn", "Location", "Confidence"];
       const csv = toCsv(headers, sel.map((p) => [
-        p.name, p.title?.value ?? "", SENIORITY_LABEL[p.seniority], p.company, p.email?.value ?? "",
-        p.emailKind, p.emailVerification?.status ?? "", p.linkedin?.value ?? "", p.location ?? "", p.confidence,
+        p.name, p.title?.value ?? "", SENIORITY_LABEL[p.seniority], p.company,
+        p.companyPhone ?? "", p.companyEmail ?? "", p.companyEmployees ?? "", p.companyIndustry ?? "",
+        p.email?.value ?? "", p.emailKind, p.emailVerification?.status ?? "", p.linkedin?.value ?? "", p.location ?? "", p.confidence,
       ]));
       downloadCsv(`people-${jobId}`, csv);
-      toast({ variant: "success", title: `Exported ${formatNumber(sel.length)} people` });
+      const excluded = all.length - sel.length;
+      toast({
+        variant: "success",
+        title: `Exported ${formatNumber(sel.length)} valid ${sel.length === 1 ? "person" : "people"}`,
+        description: excluded > 0 ? `Skipped ${formatNumber(excluded)} without a deliverable email` : undefined,
+      });
     } catch { toast({ variant: "error", title: "Export failed" }); }
     finally { setBusy(null); }
   };
@@ -131,14 +189,17 @@ export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: str
           <PeopleFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_PEOPLE_FILTERS)} />
         </aside>
       )}
+      <MobileFilterDrawer open={mobileFilters} onClose={() => setMobileFilters(false)}>
+        <PeopleFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_PEOPLE_FILTERS)} />
+      </MobileFilterDrawer>
       <div className="relative flex min-w-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-        <div className="relative min-w-[200px] flex-1">
+        <div className="relative w-full min-w-[200px] sm:w-auto sm:flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, title or company…" className="h-9 pl-9" />
         </div>
         <span className="text-sm text-muted-foreground"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
-        <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => setShowFilters((v) => !v)}>
+        <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="ml-auto h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
           <SlidersHorizontal className="size-4" /> Filters{filtersActive > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{filtersActive}</span>}
         </Button>
       </div>
@@ -167,6 +228,10 @@ export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: str
                   <th className="px-3 py-2.5 font-medium">Title</th>
                   <th className="px-3 py-2.5 font-medium">Seniority</th>
                   <th className="px-3 py-2.5 font-medium">Company</th>
+                  <th className="px-3 py-2.5 font-medium">Company phone</th>
+                  <th className="px-3 py-2.5 font-medium">Company email</th>
+                  <th className="px-3 py-2.5 font-medium">Company employees</th>
+                  <th className="px-3 py-2.5 font-medium">Company industry</th>
                   <th className="px-3 py-2.5 font-medium">Email</th>
                   <th className="px-3 py-2.5 font-medium">LinkedIn</th>
                   <th className="px-3 py-2.5 font-medium">Location</th>
@@ -176,6 +241,7 @@ export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: str
               <tbody>
                 {rows.map((p) => {
                   const selected = rowChecked(p.id);
+                  const finding = inflightIds.has(p.id);
                   return (
                     <tr key={p.id} onClick={() => onOpenPerson(p)} className={cn("cursor-pointer border-b hover:bg-muted/30", selected && "bg-primary/[0.04]")}>
                       <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(p.id)} /></td>
@@ -194,15 +260,37 @@ export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: str
                           <span className="line-clamp-1">{p.company}</span>
                         </div>
                       </td>
-                      <td className="px-3 py-2">
-                        {p.email ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="truncate text-xs">{String(p.email.value)}</span>
-                            {p.emailVerification ? <VerificationBadge ev={p.emailVerification} /> : (
-                              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{p.emailKind === "found" ? "Found" : "Pattern"}</span>
-                            )}
-                          </div>
-                        ) : <span className="text-xs text-muted-foreground">—</span>}
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                        {p.companyPhone ? <a href={`tel:${p.companyPhone}`} className="hover:text-primary">{p.companyPhone}</a> : <span className="text-xs">—</span>}
+                      </td>
+                      <td className="max-w-[200px] px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                        {p.companyEmail ? <a href={`mailto:${p.companyEmail}`} className="line-clamp-1 hover:text-primary">{p.companyEmail}</a> : <span className="text-xs">—</span>}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.companyEmployees || <span className="text-xs">—</span>}</td>
+                      <td className="max-w-[180px] px-3 py-2 text-muted-foreground"><span className="line-clamp-1">{p.companyIndustry || "—"}</span></td>
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                        {p.emailVerification ? (
+                          isUnconfirmedEmail(p) ? (
+                            <span className="text-xs text-muted-foreground">Not found</span>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate text-xs">{String(p.email?.value ?? p.emailVerification.email)}</span>
+                              <VerificationBadge ev={p.emailVerification} />
+                            </div>
+                          )
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1.5 px-2 text-xs"
+                            disabled={finding || bulkVerifying}
+                            onClick={() => verifyOne.mutate(p.id)}
+                            title={finding ? "Finding email…" : "Find & verify this person's email"}
+                          >
+                            {finding ? <Loader2 className="size-3.5 animate-spin" /> : <MailCheck className="size-3.5" />}
+                            {finding ? "Finding…" : "Access email"}
+                          </Button>
+                        )}
                       </td>
                       <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                         {p.linkedin ? (
@@ -234,7 +322,7 @@ export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: str
       {/* Floating selection bar — same treatment as the Jobs tab. */}
       {someSelected && (
         <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
+          <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
             <span className="flex items-center gap-2 pr-1 text-sm font-semibold">
               <span className="rounded-md bg-primary px-2 py-0.5 text-primary-foreground tabular-nums">{formatNumber(effectiveCount)}</span> selected
             </span>
@@ -248,7 +336,7 @@ export function CollectedPeopleTable({ jobId, live, onOpenPerson }: { jobId: str
               {lists.length > 0 && <DropdownSeparator />}
               <DropdownItem onClick={() => { const l = createList(`List ${lists.length + 1}`); addSelectedToList(l.id, l.name); }}><Plus /> New list</DropdownItem>
             </DropdownMenu>
-            <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null}>{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
+            <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null} title="Exports only valid records — people with a deliverable (verified-valid) email.">{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
             <button onClick={clearSelection} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
           </div>
         </div>

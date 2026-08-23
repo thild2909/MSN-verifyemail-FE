@@ -1,8 +1,11 @@
 "use client";
 import * as React from "react";
 import { SlidersHorizontal } from "lucide-react";
-import { FilterSection, CheckboxList, type Option } from "./filter-primitives";
-import type { CompanyFilters, CompaniesFacets } from "@/lib/leads/collect-types";
+import { FilterSection, CheckboxList, TokenList, type Option } from "./filter-primitives";
+import {
+  EMPLOYEE_BUCKETS, countCompanyFilters,
+  type CompanyFilters, type CompaniesFacets,
+} from "@/lib/leads/collect-types";
 
 const toggle = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
 
@@ -14,7 +17,14 @@ export function CompanyFilterPanel({ filters, facets, onChange, onClear }: {
   onChange: (next: CompanyFilters) => void;
   onClear: () => void;
 }) {
-  const active = filters.status.length + filters.has.length + filters.email.length + filters.industries.length;
+  const active = countCompanyFilters(filters);
+
+  const employeeOpts: Option[] = EMPLOYEE_BUCKETS.map((b) => ({
+    value: b.value, label: b.label, hint: String(facets?.employees?.[b.value] ?? 0),
+  })).filter((o) => o.hint !== "0" || filters.employees.includes(o.value));
+
+  const industryOpts: Option[] = (facets?.industries ?? []).map((i) => ({ value: i.name, label: i.name, hint: String(i.count) }));
+  const techOpts: Option[] = (facets?.technologies ?? []).map((t) => ({ value: t.name, label: t.name, hint: String(t.count) }));
 
   const statusOpts: Option[] = Object.entries(facets?.status ?? {})
     .filter(([, n]) => n > 0)
@@ -32,8 +42,6 @@ export function CompanyFilterPanel({ filters, facets, onChange, onClear }: {
     { value: "bad", label: "Verified bad", hint: String(facets?.email.bad ?? 0) },
   ];
 
-  const industryOpts: Option[] = (facets?.industries ?? []).map((i) => ({ value: i.name, label: i.name, hint: String(i.count) }));
-
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
@@ -41,20 +49,34 @@ export function CompanyFilterPanel({ filters, facets, onChange, onClear }: {
         {active > 0 && <button onClick={onClear} className="text-xs font-medium text-primary hover:underline">Clear</button>}
       </div>
       <div className="scrollbar-thin flex-1 overflow-y-auto">
-        <FilterSection title="Status" defaultOpen count={filters.status.length}>
-          <CheckboxList options={statusOpts} selected={filters.status} onToggle={(v) => onChange({ ...filters, status: toggle(filters.status, v) })} />
+        <FilterSection title="Company" defaultOpen count={filters.company.length} onClear={() => onChange({ ...filters, company: [] })}>
+          <TokenList values={filters.company} onChange={(v) => onChange({ ...filters, company: v })} placeholder="Company name contains…" />
         </FilterSection>
-        <FilterSection title="Data present" defaultOpen count={filters.has.length}>
-          <CheckboxList options={hasOpts} selected={filters.has} onToggle={(v) => onChange({ ...filters, has: toggle(filters.has, v) })} />
+        <FilterSection title="Location" count={filters.locations.length} onClear={() => onChange({ ...filters, locations: [] })}>
+          <TokenList values={filters.locations} onChange={(v) => onChange({ ...filters, locations: v })} placeholder="City, region or country…" />
         </FilterSection>
-        <FilterSection title="Email" count={filters.email.length}>
-          <CheckboxList options={emailOpts} selected={filters.email} onToggle={(v) => onChange({ ...filters, email: toggle(filters.email, v) })} />
+        <FilterSection title="Employees" count={filters.employees.length} onClear={() => onChange({ ...filters, employees: [] })}>
+          <CheckboxList options={employeeOpts} selected={filters.employees} onToggle={(v) => onChange({ ...filters, employees: toggle(filters.employees, v) })} />
         </FilterSection>
         {industryOpts.length > 0 && (
-          <FilterSection title="Industry" count={filters.industries.length}>
+          <FilterSection title="Industry" count={filters.industries.length} onClear={() => onChange({ ...filters, industries: [] })}>
             <CheckboxList options={industryOpts} selected={filters.industries} onToggle={(v) => onChange({ ...filters, industries: toggle(filters.industries, v) })} />
           </FilterSection>
         )}
+        {techOpts.length > 0 && (
+          <FilterSection title="Technologies" count={filters.technologies.length} onClear={() => onChange({ ...filters, technologies: [] })}>
+            <CheckboxList options={techOpts} selected={filters.technologies} onToggle={(v) => onChange({ ...filters, technologies: toggle(filters.technologies, v) })} />
+          </FilterSection>
+        )}
+        <FilterSection title="Status" defaultOpen count={filters.status.length} onClear={() => onChange({ ...filters, status: [] })}>
+          <CheckboxList options={statusOpts} selected={filters.status} onToggle={(v) => onChange({ ...filters, status: toggle(filters.status, v) })} />
+        </FilterSection>
+        <FilterSection title="Data present" count={filters.has.length} onClear={() => onChange({ ...filters, has: [] })}>
+          <CheckboxList options={hasOpts} selected={filters.has} onToggle={(v) => onChange({ ...filters, has: toggle(filters.has, v) })} />
+        </FilterSection>
+        <FilterSection title="Email" count={filters.email.length} onClear={() => onChange({ ...filters, email: [] })}>
+          <CheckboxList options={emailOpts} selected={filters.email} onToggle={(v) => onChange({ ...filters, email: toggle(filters.email, v) })} />
+        </FilterSection>
       </div>
     </div>
   );

@@ -15,7 +15,7 @@ export function BulkActionBar({
   if (count === 0) return null;
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
-      <div className="pointer-events-auto flex items-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
+      <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
         <span className="flex items-center gap-2 pr-1 text-sm font-semibold">
           <span className="rounded-md bg-primary px-2 py-0.5 text-primary-foreground tabular-nums">{formatNumber(count)}</span>
           selected

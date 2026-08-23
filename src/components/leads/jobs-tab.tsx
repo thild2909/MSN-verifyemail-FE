@@ -1,16 +1,22 @@
 "use client";
 import * as React from "react";
-import { X, Bookmark, ListPlus, Workflow, Download } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Radar, Trash2, Loader2, Server, ShieldCheck, ShieldOff, Globe, Briefcase, Building2, Ban, Layers, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
+import { Progress } from "@/components/ui/progress";
+import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
-import { formatNumber } from "@/lib/utils";
-import { queryJobs } from "@/lib/leads/data";
-import { DEFAULT_JOB_FILTERS, type Job, type JobFilters, type SortState } from "@/lib/leads/types";
-import { JobFilterSidebar } from "./job-filter-sidebar";
-import { JobsTable, type JobAction } from "./jobs-table";
-import { JobDetailDrawer } from "./job-detail-drawer";
-
-const PAGE_SIZE = 25;
+import { formatNumber, formatDate, cn } from "@/lib/utils";
+import { getJobSearches, getJobSearch, deleteJobSearch, getProxyConfig } from "@/lib/api/client";
+import { DEFAULT_JOB_FILTERS, type JobFilters } from "@/lib/leads/types";
+import { JOB_SOURCE_LABEL, type JobCollectJob, type JobSourceCoverage } from "@/lib/leads/job-collect-types";
+import { WORK_MODE_LABEL } from "./leads-ui";
+import { CollectedJobsTable } from "./collected-jobs-table";
+import { JobCrawlDialog, type CrawlSeed } from "./job-crawl-dialog";
+import { ProxySettings } from "./proxy-settings";
+import { StatsBar } from "./stats-bar";
+import type { CrawledJobsQuery } from "@/lib/api/client";
 
 function countActive(f: JobFilters): number {
   let n = f.titles.length + f.workModes.length + f.employmentTypes.length + f.seniority.length + f.technologies.length + f.companySizes.length + f.hiringSignals.length;
@@ -20,92 +26,178 @@ function countActive(f: JobFilters): number {
   return n;
 }
 
-export function JobsTab({ filtersVisible, search }: { filtersVisible: boolean; search: string }) {
+/** Map the (client) filter state onto the crawled-results query. Only the
+ *  filters that map onto real crawled fields are applied; the rest still seed
+ *  the crawl (titles → keywords, country → location) via the crawl dialog. */
+function toQuery(f: JobFilters): Omit<CrawledJobsQuery, "page" | "pageSize" | "search"> {
+  return {
+    workModes: f.workModes.map((m) => WORK_MODE_LABEL[m]),
+    locations: f.country !== "all" ? [f.country] : [],
+    postedWithinDays: f.postedWithinDays > 0 ? f.postedWithinDays : undefined,
+  };
+}
+
+function seedFromFilters(f: JobFilters): CrawlSeed {
+  return {
+    keywords: f.titles.join(" ").trim() || f.search.trim(),
+    location: f.country !== "all" ? f.country : "",
+  };
+}
+
+export function JobsTab() {
+  const qc = useQueryClient();
   const { toast } = useToast();
   const [filters, setFilters] = React.useState<JobFilters>(DEFAULT_JOB_FILTERS);
-  const [sort, setSort] = React.useState<SortState | null>(null);
-  const [page, setPage] = React.useState(1);
-  const [selected, setSelected] = React.useState<Set<string>>(new Set());
-  const [drawer, setDrawer] = React.useState<Job | null>(null);
+  const [activeId, setActiveId] = React.useState<string | null>(null);
+  const [crawlOpen, setCrawlOpen] = React.useState(false);
+  const [proxyOpen, setProxyOpen] = React.useState(false);
 
-  React.useEffect(() => { setPage(1); }, [filters, sort, search]);
+  const { data: jobs } = useQuery({
+    queryKey: ["job-searches"],
+    queryFn: getJobSearches,
+    refetchInterval: (q) => (q.state.data as JobCollectJob[] | undefined)?.some((j) => j.status === "collecting") ? 2000 : false,
+  });
+  const { data: proxy } = useQuery({ queryKey: ["proxy-config"], queryFn: getProxyConfig });
 
-  const result = React.useMemo(() => queryJobs({ ...filters, search }, sort, page, PAGE_SIZE), [filters, search, sort, page]);
-  const totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
-  const pageIds = result.rows.map((r) => r.id);
-  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  React.useEffect(() => { if (!activeId && jobs && jobs.length) setActiveId(jobs[0].id); }, [jobs, activeId]);
+
+  const { data: active } = useQuery({
+    queryKey: ["job-search", activeId],
+    queryFn: () => getJobSearch(activeId!),
+    enabled: !!activeId,
+    refetchInterval: (q) => ((q.state.data as JobCollectJob | undefined)?.status === "collecting" ? 1500 : false),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => deleteJobSearch(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["job-searches"] }); setActiveId(null); toast({ variant: "success", title: "Crawl deleted" }); },
+    onError: () => toast({ variant: "error", title: "Could not delete" }),
+  });
 
   const patch = (p: Partial<JobFilters>) => setFilters((f) => ({ ...f, ...p }));
   const clear = () => setFilters(DEFAULT_JOB_FILTERS);
-  const onSort = (key: string) => setSort((s) => (s?.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "posted" ? "asc" : "asc" }));
-  const toggleRow = (id: string) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleAllPage = () => setSelected((s) => { const n = new Set(s); allPageSelected ? pageIds.forEach((id) => n.delete(id)) : pageIds.forEach((id) => n.add(id)); return n; });
 
-  const ACTION_LABEL: Record<JobAction, string> = { save: "Saved job", find_decision_makers: "Finding decision makers", view_company: "Opening company", add_workflow: "Added to workflow" };
-  const onAction = (a: JobAction, j: Job) => toast({ variant: a === "save" ? "success" : "info", title: ACTION_LABEL[a], description: `${j.title} · ${j.company}` });
-  const onBulk = (label: string) => toast({ variant: "success", title: `${label} — ${formatNumber(selected.size)} jobs` });
+  const enabledProxies = proxy?.proxies.filter((p) => p.enabled).length ?? 0;
+  const rotatingActive = proxy?.rotating?.active ?? false;
+  const live = active?.status === "collecting";
+  const s = active?.summary;
 
-  const activeCount = countActive(filters);
+  const modals = (
+    <>
+      <JobCrawlDialog
+        open={crawlOpen}
+        onOpenChange={setCrawlOpen}
+        seed={seedFromFilters(filters)}
+        onCreated={(id) => { qc.invalidateQueries({ queryKey: ["job-searches"] }); setActiveId(id); }}
+      />
+      <ProxySettings open={proxyOpen} onOpenChange={(o) => { setProxyOpen(o); if (!o) qc.invalidateQueries({ queryKey: ["proxy-config"] }); }} />
+    </>
+  );
+
+  if (!jobs || jobs.length === 0) {
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center p-8">
+        <EmptyState
+          icon={Briefcase}
+          title="Track hiring signals — live from the job boards"
+          description="Pick your filters, then crawl the job boards — Seek, Indeed, Reed, Dice, CTgoodjobs, Foundit, Glassdoor, MyCareersFuture, Wellfound and more — for matching open roles through your proxy pool. Every role is tagged with the source it came from."
+          action={
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> Crawl job boards</Button>
+              <Button variant="outline" onClick={() => setProxyOpen(true)}><Server className="size-4" /> Proxy settings</Button>
+            </div>
+          }
+        />
+        {modals}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      {filtersVisible && (
-        <aside className="hidden w-[280px] shrink-0 overflow-hidden border-r bg-muted/20 md:block">
-          <JobFilterSidebar filters={filters} onChange={patch} activeCount={activeCount} onClear={clear} />
-        </aside>
-      )}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b px-4 py-2 text-sm">
-          <span className="text-muted-foreground">
-            <span className="font-semibold text-foreground tabular-nums">{formatNumber(result.total)}</span> jobs
-            {selected.size > 0 && <> · <span className="font-medium text-primary">{formatNumber(selected.size)} selected</span></>}
-          </span>
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" className="h-8" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
-            <span className="text-xs tabular-nums text-muted-foreground">Page {page} / {totalPages}</span>
-            <Button size="sm" variant="outline" className="h-8" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1">
-          {result.total === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="text-base font-semibold">No jobs match your filters</p>
-              <p className="text-sm text-muted-foreground">Try widening a filter or clearing the search.</p>
-              <Button variant="outline" size="sm" className="mt-2" onClick={clear}>Clear filters</Button>
-            </div>
-          ) : (
-            <JobsTable
-              rows={result.rows}
-              sort={sort}
-              onSort={onSort}
-              selectedIds={selected}
-              onToggleRow={toggleRow}
-              onToggleAllPage={toggleAllPage}
-              allPageSelected={allPageSelected}
-              onOpenJob={setDrawer}
-              onAction={onAction}
-            />
-          )}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 md:py-2.5">
+        <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 w-full sm:w-64">
+          {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
+        </Select>
+        {active && <span className="text-xs text-muted-foreground">{formatNumber(active.summary.jobs)} roles · {active.sources.map((x) => JOB_SOURCE_LABEL[x]).join(", ")}</span>}
+        <div className="ml-auto flex max-w-full items-center gap-2 overflow-x-auto scrollbar-thin [&>*]:shrink-0 sm:overflow-visible">
+          <button onClick={() => setProxyOpen(true)} className={cn("inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted", rotatingActive || proxy?.enabled ? "border-[hsl(var(--valid))]/40 text-[hsl(var(--valid))]" : "border-input text-muted-foreground")}>
+            {rotatingActive ? <Globe className="size-3.5" /> : proxy?.enabled ? <ShieldCheck className="size-3.5" /> : <ShieldOff className="size-3.5" />}
+            {rotatingActive ? "Rotating residential" : proxy?.enabled ? `Proxies on · ${enabledProxies}` : "Proxies off"}
+          </button>
+          <Button size="sm" onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> New crawl</Button>
+          {active && <button onClick={() => remove.mutate(active.id)} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete crawl">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
         </div>
       </div>
 
-      {/* Jobs bulk bar */}
-      {selected.size > 0 && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
-            <span className="flex items-center gap-2 pr-1 text-sm font-semibold"><span className="rounded-md bg-primary px-2 py-0.5 text-primary-foreground tabular-nums">{formatNumber(selected.size)}</span> selected</span>
-            <div className="h-6 w-px bg-border" />
-            <Button size="sm" variant="ghost" onClick={() => onBulk("Saved")}><Bookmark className="size-4" /> Save</Button>
-            <Button size="sm" variant="ghost" onClick={() => onBulk("Added to list")}><ListPlus className="size-4" /> Add to list</Button>
-            <Button size="sm" variant="ghost" onClick={() => onBulk("Added to workflow")}><Workflow className="size-4" /> Workflow</Button>
-            <Button size="sm" variant="outline" onClick={() => onBulk("Exported")}><Download className="size-4" /> Export</Button>
-            <button onClick={() => setSelected(new Set())} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
-          </div>
+      {/* Stats */}
+      {s && (
+        <StatsBar live={!!live} summary={`${formatNumber(s.jobs)} roles · ${formatNumber(s.sourcesDone)}/${formatNumber(s.sources)} sources`}>
+          <Stat icon={Briefcase} label="Roles" value={formatNumber(s.jobs)} />
+          <Stat icon={Layers} label="Sources" value={`${formatNumber(s.sourcesDone)}/${formatNumber(s.sources)}`} />
+          <Stat icon={Building2} label="Employers" value={formatNumber(s.companies)} />
+          <Stat icon={RotateCw} label="Pages" value={formatNumber(s.pagesCrawled)} />
+          <Stat icon={RotateCw} label="Proxy rotations" value={formatNumber(s.proxyRotations)} />
+          {s.blocked > 0 && <Stat icon={Ban} label="Blocked" value={formatNumber(s.blocked)} tone="risky" />}
+          {live && (
+            <div className="flex min-w-[160px] flex-1 items-center gap-2">
+              <Progress value={active.progress} className="flex-1" /><span className="tabular-nums text-muted-foreground">{active.progress}%</span>
+            </div>
+          )}
+        </StatsBar>
+      )}
+
+      {/* Per-source coverage */}
+      {active?.coverage && active.coverage.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin border-b bg-muted/10 px-4 py-2 text-xs [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
+          {active.coverage.map((c) => <CoverageChip key={c.source} c={c} />)}
         </div>
       )}
 
-      <JobDetailDrawer job={drawer} open={!!drawer} onOpenChange={(o) => !o && setDrawer(null)} onAction={onAction} />
+      {/* Body — the table owns its filter sidebar + toolbar, matching the
+          People / Companies tabs. */}
+      {activeId && (
+        <CollectedJobsTable
+          jobId={activeId}
+          live={!!live}
+          query={toQuery(filters)}
+          filters={filters}
+          onChangeFilters={patch}
+          onClearFilters={clear}
+          activeFilterCount={countActive(filters)}
+        />
+      )}
+
+      {modals}
+    </div>
+  );
+}
+
+const COVERAGE_META: Record<JobSourceCoverage["status"], { className: string; label: (c: JobSourceCoverage) => string; spin?: boolean }> = {
+  pending: { className: "bg-muted text-muted-foreground", label: () => "queued" },
+  collecting: { className: "bg-muted text-muted-foreground", label: () => "crawling…", spin: true },
+  done: { className: "bg-valid/12 text-[hsl(var(--valid))]", label: (c) => `${c.jobsFound} found` },
+  blocked: { className: "bg-amber-500/12 text-amber-600 dark:text-amber-400", label: (c) => (c.jobsFound ? `${c.jobsFound} · blocked` : "blocked") },
+  failed: { className: "bg-invalid/12 text-[hsl(var(--invalid))]", label: () => "failed" },
+};
+
+function CoverageChip({ c }: { c: JobSourceCoverage }) {
+  const m = COVERAGE_META[c.status];
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium", m.className)}>
+      {m.spin && <Loader2 className="size-3 animate-spin" />}
+      {JOB_SOURCE_LABEL[c.source]} · {m.label(c)}
+    </span>
+  );
+}
+
+function Stat({ icon: Icon, label, value, tone }: { icon: React.ElementType; label: string; value: string; tone?: "risky" }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Icon className={cn("size-3.5", tone === "risky" ? "text-[hsl(var(--risky))]" : "text-muted-foreground")} />
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={cn("text-sm font-semibold tabular-nums", tone === "risky" && "text-[hsl(var(--risky))]")}>{value}</span>
     </div>
   );
 }

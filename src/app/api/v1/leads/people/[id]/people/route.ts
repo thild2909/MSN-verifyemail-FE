@@ -14,10 +14,15 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     page: num("page"),
     pageSize: num("pageSize"),
     search: url.searchParams.get("search") ?? "",
-    seniority: list("seniority"),
     email: list("email"),
+    titles: list("titles"),
+    seniority: list("seniority"),
     linkedin: url.searchParams.get("linkedin") === "1",
     companies: list("companies"),
+    locations: list("locations"),
+    employees: list("employees"),
+    industries: list("industries"),
+    minScore: num("minScore"),
   });
   return NextResponse.json({ success: true, data });
 }

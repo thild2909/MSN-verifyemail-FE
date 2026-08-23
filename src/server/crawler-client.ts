@@ -16,7 +16,7 @@ import type {
 } from "@/lib/leads/collect-types";
 
 const BASE = process.env.CRAWLER_SERVICE_URL ?? "http://localhost:8090";
-const TIMEOUT_MS = Number(process.env.CRAWLER_TIMEOUT_MS ?? 120_000);
+const TIMEOUT_MS = Number(process.env.CRAWLER_TIMEOUT_MS ?? 240_000);
 
 interface CanonField {
   value: string | number;
@@ -33,7 +33,7 @@ interface CanonicalCompany {
   country: string | null;
   match_score: number;
   confidence: number;
-  status: "accepted" | "needs_review" | "not_found";
+  status: "accepted" | "needs_review" | "not_found" | "failed";
   verification: CompanyVerification;
   fields: Record<string, CanonField>;
   log: { step: string; status: string; ms: number; detail?: string }[];
@@ -51,7 +51,7 @@ const hostOf = (u: string | null): string => {
 
 // The crawler emits sources ("search" | "website" | "opencorporates") that are
 // already valid CollectionSource values.
-const asSource = (s: string): CollectionSource => (["search", "website", "opencorporates", "linkedin", "google_maps", "directory", "social", "other"].includes(s) ? (s as CollectionSource) : "other");
+const asSource = (s: string): CollectionSource => (["search", "website", "opencorporates", "linkedin", "google_maps", "directory", "social", "llm", "other"].includes(s) ? (s as CollectionSource) : "other");
 
 function field(f: CanonField | undefined): SourcedField | null {
   if (!f) return null;
@@ -94,7 +94,7 @@ function mapCanonical(c: CanonicalCompany): Omit<CollectedCompany, "id" | "jobId
     inputLocation: c.input_location,
     domainGuess: hostOf(c.website),
     logoText: initials(c.company_name || c.input_company_name),
-    status: c.status === "not_found" ? "not_found" : "enriched",
+    status: c.status === "failed" ? "failed" : c.status === "not_found" ? "not_found" : "enriched",
     resolution,
     website: field(f.website),
     emailDomain: field(f.emailDomain),
@@ -294,9 +294,101 @@ async function llmFetch(path: string, records: unknown[]): Promise<LlmVerifyResp
   }
 }
 
+export interface EmailFindRecord { id: string; name: string; company: string; domain: string | null; title?: string | null }
+export interface LlmEmailFindResponse { configured: boolean; results: { id: string; emails: string[] }[]; tokens: number; model: string }
+/** LLM fallback: propose likely email addresses (caller verifies each). Throws on transport error. */
+export async function llmFindEmailsViaCrawler(records: EmailFindRecord[]): Promise<LlmEmailFindResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/llm/find-emails`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /llm/find-emails responded ${res.status}`);
+    return (await res.json()) as LlmEmailFindResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** DeepSeek cross-check runs in the crawler-service (backend). Throws on transport error. */
 export function llmVerifyCompaniesViaCrawler(records: CompanyLlmRecord[]): Promise<LlmVerifyResponse> {
   return llmFetch("/llm/verify-companies", records);
+}
+
+/* ------------------- LLM knowledge-based enrichment ---------------------- */
+
+export interface CompanySeedRecord { id: string; name: string; location?: string | null }
+export interface LlmEnrichmentOut {
+  id: string;
+  found: boolean;
+  confidence: number;
+  website?: string | null;
+  linkedin?: string | null;
+  industry?: string | null;
+  location?: string | null;
+  employees?: string | null;
+  description?: string | null;
+  founded?: number | null;
+}
+export interface LlmEnrichResponse { configured: boolean; enrichments: LlmEnrichmentOut[]; tokens: number; model: string }
+
+/**
+ * DeepSeek knowledge-fill for companies the crawl could not resolve
+ * (failed / not-found rows). Runs in the crawler-service. Throws on transport error.
+ */
+export async function llmEnrichCompaniesViaCrawler(records: CompanySeedRecord[]): Promise<LlmEnrichResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/llm/enrich-companies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /llm/enrich-companies responded ${res.status}`);
+    return (await res.json()) as LlmEnrichResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ------------------- LLM people (executive) enrichment ------------------- */
+
+export interface PeopleEnrichSeedRecord { id: string; name: string; location?: string | null; website?: string | null; linkedin?: string | null }
+export interface LlmProposedPersonOut { name: string; title: string; linkedin?: string | null; source?: string | null; confidence: number }
+export interface LlmPeopleEnrichmentOut { id: string; people: LlmProposedPersonOut[] }
+export interface LlmPeopleEnrichResponse { configured: boolean; results: LlmPeopleEnrichmentOut[]; tokens: number; model: string }
+
+/**
+ * DeepSeek knowledge-fill for companies the people crawl found nobody at.
+ * Returns candidate executives per company. The caller tries a live `/person`
+ * resolve, then still inserts high-confidence knowledge-fill rows when the
+ * crawl cannot confirm (coverage-gap companies already failed the people crawl).
+ * Throws on transport error.
+ */
+export async function llmEnrichPeopleViaCrawler(records: PeopleEnrichSeedRecord[]): Promise<LlmPeopleEnrichResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/llm/enrich-people`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /llm/enrich-people responded ${res.status}`);
+    return (await res.json()) as LlmPeopleEnrichResponse;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 export function llmVerifyPeopleViaCrawler(records: PersonLlmRecord[]): Promise<LlmVerifyResponse> {
   return llmFetch("/llm/verify-people", records);
@@ -323,8 +415,15 @@ export function getProxyConfigRemote(): Promise<unknown> {
 export function setProxyConfigRemote(cfg: unknown): Promise<unknown> {
   return proxyFetch("/proxies", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
 }
-export function testProxiesRemote(id?: string): Promise<unknown> {
-  return proxyFetch("/proxies/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(id ? { id } : {}) });
+export function testProxiesRemote(opts?: { id?: string; all?: boolean }): Promise<unknown> {
+  return proxyFetch("/proxies/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts?.id ? { id: opts.id, all: opts.all } : { all: opts?.all ?? true }),
+  });
+}
+export function getProxyTestStatusRemote(): Promise<unknown> {
+  return proxyFetch("/proxies/test/status");
 }
 
 /** Reachability probe for the crawler service. */

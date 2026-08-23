@@ -5,7 +5,7 @@
 import "server-only";
 import fs from "fs";
 import path from "path";
-import type { CollectSummary, CollectedCompany, CompanyCollectJob } from "@/lib/leads/collect-types";
+import { employeeBucket, type CollectSummary, type CollectedCompany, type CompanyCollectJob, type SourcedField } from "@/lib/leads/collect-types";
 
 export const MAX_COLLECT_COMPANIES = Number(process.env.APP_MAX_COLLECT_COMPANIES ?? 200);
 
@@ -76,16 +76,22 @@ export function companiesByIds(jobId: string, ids: string[]): CollectedCompany[]
 
 export interface CompaniesQuery {
   page?: number; pageSize?: number; search?: string;
+  company?: string[]; // company-name contains  (OR)
+  locations?: string[]; // location contains  (OR)
+  employees?: string[]; // size buckets  (OR)
+  industries?: string[]; // OR
+  technologies?: string[]; // tech stack contains  (OR)
   status?: string[]; // enriched | not_found
   has?: string[]; // website | email | phone | linkedin  (AND — all required)
   email?: string[]; // valid | bad  (OR)
-  industries?: string[]; // OR
 }
 export interface CompaniesFacets {
   status: Record<string, number>;
   has: { website: number; email: number; phone: number; linkedin: number };
   email: { valid: number; bad: number };
   industries: { name: string; count: number }[];
+  technologies: { name: string; count: number }[];
+  employees: Record<string, number>;
 }
 export interface CompaniesPage { companies: CollectedCompany[]; total: number; page: number; pageSize: number; facets: CompaniesFacets }
 
@@ -95,7 +101,9 @@ function companiesFacets(all: CollectedCompany[]): CompaniesFacets {
   const status: Record<string, number> = {};
   const has = { website: 0, email: 0, phone: 0, linkedin: 0 };
   const email = { valid: 0, bad: 0 };
+  const employees: Record<string, number> = {};
   const industryCounts = new Map<string, number>();
+  const techCounts = new Map<string, number>();
   for (const c of all) {
     status[c.status] = (status[c.status] ?? 0) + 1;
     if (c.website) has.website++;
@@ -104,27 +112,51 @@ function companiesFacets(all: CollectedCompany[]): CompaniesFacets {
     if (c.linkedin) has.linkedin++;
     if (c.emailVerification?.status === "valid") email.valid++;
     if (isBadEmailCo(c)) email.bad++;
+    const eb = employeeBucket(c.employees?.value);
+    if (eb) employees[eb] = (employees[eb] ?? 0) + 1;
     const ind = c.industry?.value ? String(c.industry.value) : "";
     if (ind) industryCounts.set(ind, (industryCounts.get(ind) ?? 0) + 1);
+    for (const t of c.technologies?.value ?? []) {
+      const name = String(t).trim();
+      if (name) techCounts.set(name, (techCounts.get(name) ?? 0) + 1);
+    }
   }
-  const industries = [...industryCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 40);
-  return { status, has, email, industries };
+  const byCountDesc = (a: { count: number }, b: { count: number }) => b.count - a.count;
+  const industries = [...industryCounts.entries()].map(([name, count]) => ({ name, count })).sort(byCountDesc).slice(0, 40);
+  const technologies = [...techCounts.entries()].map(([name, count]) => ({ name, count })).sort(byCountDesc).slice(0, 40);
+  return { status, has, email, industries, technologies, employees };
 }
 
 export function getCompanies(jobId: string, query: CompaniesQuery = {}): CompaniesPage {
   const all = store().companies[jobId] ?? [];
-  const { page = 1, pageSize = 25, search = "", status = [], has = [], email = [], industries = [] } = query;
+  const {
+    page = 1, pageSize = 25, search = "",
+    company = [], locations = [], employees = [], industries = [], technologies = [],
+    status = [], has = [], email = [],
+  } = query;
   const facets = companiesFacets(all);
+
+  const lower = (arr: string[]) => arr.map((s) => s.toLowerCase());
+  const companyTerms = lower(company);
+  const locationTerms = lower(locations);
+  const techTerms = lower(technologies);
+
+  const companyLocation = (c: CollectedCompany) =>
+    (c.address?.value ? String(c.address.value) : c.inputLocation).toLowerCase();
 
   let filtered = all;
   const q = search.trim().toLowerCase();
   if (q) filtered = filtered.filter((c) => c.inputName.toLowerCase().includes(q) || c.inputLocation.toLowerCase().includes(q) || (c.domainGuess ?? "").includes(q));
+  if (companyTerms.length) filtered = filtered.filter((c) => { const n = c.inputName.toLowerCase(); return companyTerms.some((t) => n.includes(t)); });
+  if (locationTerms.length) filtered = filtered.filter((c) => { const loc = companyLocation(c); return locationTerms.some((t) => loc.includes(t)); });
+  if (employees.length) filtered = filtered.filter((c) => { const b = employeeBucket(c.employees?.value); return b != null && employees.includes(b); });
+  if (industries.length) filtered = filtered.filter((c) => c.industry?.value != null && industries.includes(String(c.industry.value)));
+  if (techTerms.length) filtered = filtered.filter((c) => { const techs = (c.technologies?.value ?? []).map((x) => String(x).toLowerCase()); return techTerms.some((t) => techs.includes(t)); });
   if (status.length) filtered = filtered.filter((c) => status.includes(c.status));
   if (has.length) filtered = filtered.filter((c) => has.every((h) =>
     h === "website" ? !!c.website : h === "email" ? !!c.contactEmail : h === "phone" ? !!c.phone : h === "linkedin" ? !!c.linkedin : true));
   if (email.length) filtered = filtered.filter((c) => email.some((e) =>
     e === "valid" ? c.emailVerification?.status === "valid" : e === "bad" ? isBadEmailCo(c) : false));
-  if (industries.length) filtered = filtered.filter((c) => c.industry?.value != null && industries.includes(String(c.industry.value)));
 
   const total = filtered.length;
   const start = (page - 1) * pageSize;
@@ -256,6 +288,78 @@ export function setCompanyLlm(jobId: string, companyId: string, v: CollectedComp
   const c = store().companies[jobId]?.find((x) => x.id === companyId);
   if (c) c.llmVerification = v;
 }
+
+/* ------------------- LLM knowledge-based enrichment ---------------------- */
+
+/** Rows the crawler could not resolve — candidates for a DeepSeek knowledge
+ *  fill. `onlyUnattempted` skips rows already tried by the LLM (token-saving). */
+export function llmEnrichTargets(jobId: string, onlyUnattempted = true): CollectedCompany[] {
+  return (store().companies[jobId] ?? []).filter((c) => {
+    if (c.status !== "failed" && c.status !== "not_found") return false;
+    if (onlyUnattempted && c.llmVerification) return false;
+    return true;
+  });
+}
+
+export interface LlmEnrichmentInput {
+  id: string;
+  found: boolean;
+  confidence: number;
+  website?: string | null;
+  linkedin?: string | null;
+  industry?: string | null;
+  location?: string | null;
+  employees?: string | null;
+  description?: string | null;
+  founded?: number | null;
+}
+
+/**
+ * Apply one DeepSeek knowledge-fill to a failed/not-found row. When the model
+ * knew the company, fields are written with source "llm" and the row is
+ * promoted to "enriched"; otherwise only an AI verdict is recorded so the row
+ * is not retried on the next click. Returns whether the row was filled.
+ */
+export function applyLlmEnrichment(jobId: string, e: LlmEnrichmentInput, model: string, at: string): boolean {
+  const c = store().companies[jobId]?.find((x) => x.id === e.id);
+  if (!c) return false;
+  const conf = Math.max(0, Math.min(100, Math.round(e.confidence)));
+  const mk = <T,>(value: T | null | undefined): SourcedField<T> | null =>
+    value == null || value === "" ? null : { value, source: "llm", confidence: conf };
+
+  const filled = e.found && !!(e.website || e.linkedin || e.industry || e.employees || e.description || e.founded);
+  if (filled) {
+    if (e.website) { const w = mk(e.website); if (w) { c.website = w; c.domainGuess = String(e.website); c.emailDomain = c.emailDomain ?? w; } }
+    if (e.linkedin) c.linkedin = mk(e.linkedin) ?? c.linkedin;
+    if (e.industry) c.industry = mk(e.industry) ?? c.industry;
+    if (e.location) c.address = mk(e.location) ?? c.address;
+    if (e.employees) c.employees = mk(e.employees) ?? c.employees;
+    if (e.description) c.description = mk(e.description) ?? c.description;
+    if (e.founded) c.founded = mk(e.founded) ?? c.founded;
+    if (!c.logoText) c.logoText = c.inputName.slice(0, 2).toUpperCase();
+    c.status = "enriched";
+    c.resolution = {
+      website: e.website ?? null,
+      linkedin: e.linkedin ?? null,
+      confidence: conf,
+      provider: "deepseek",
+      query: `AI knowledge fill · ${c.inputName}`,
+      cacheHit: false,
+    };
+    c.collection = [
+      ...c.collection,
+      { source: "llm", status: "ok", proxy: null, ms: 0, fieldsFound: 1, detail: `AI enrichment (${model})`, simulated: false },
+    ];
+  }
+  c.llmVerification = {
+    status: filled ? "verified" : "uncertain",
+    confidence: conf,
+    reason: filled ? "Filled from AI knowledge (crawl found nothing)." : "AI has no reliable public data for this company.",
+    model,
+    verifiedAt: at,
+  };
+  return filled;
+}
 export function commitLlm(jobId: string) {
   void jobId;
   persist(store());
@@ -311,4 +415,24 @@ export function deleteCollectJob(id: string): boolean {
   delete s.companies[id];
   if (s.jobs.length < before) { persist(s); return true; }
   return false;
+}
+
+/** Reset failed rows to pending so the collect job can retry them. */
+export function resetFailedCompanies(jobId: string): number {
+  const list = store().companies[jobId];
+  if (!list) return 0;
+  let n = 0;
+  for (const c of list) {
+    if (c.status === "failed") {
+      c.status = "pending";
+      n++;
+    }
+  }
+  const job = getCollectJob(jobId);
+  if (job && n > 0) {
+    job.status = "collecting";
+    job.completedAt = undefined;
+    persist(store());
+  }
+  return n;
 }

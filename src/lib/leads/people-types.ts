@@ -49,9 +49,29 @@ export interface CollectedPerson {
   emailKind: "found" | "pattern" | "none";
   location: string | null;
   confidence: number; // 0-100
+  // Company context copied from the source company at seed time, so people can
+  // be filtered and displayed alongside their employer's data (all null for
+  // CSV-imported enrich seeds, which have no resolved company behind them).
+  companyEmployees?: string | null;
+  companyIndustry?: string | null;
+  companyPhone?: string | null;
+  companyEmail?: string | null;
   emailVerification: EmailVerification | null;
   llmVerification?: LlmVerdict | null; // DeepSeek founder↔company cross-check (opt-in)
   collection: CollectionAttempt[];
+}
+
+/** Find + verify already ran for this row (including a persisted miss). Hide Access email. */
+export function emailLookupDone(p: CollectedPerson): boolean {
+  return p.emailVerification != null;
+}
+
+/** Pattern/LLM guess that never confirmed a mailbox — show "Not found", not the fabricated address. */
+export function isUnconfirmedEmail(p: CollectedPerson): boolean {
+  const s = p.emailVerification?.status;
+  if (s === "not_found") return true;
+  if (s === "invalid" && p.emailKind !== "found") return true;
+  return false;
 }
 
 export interface PeopleSummary {
@@ -90,6 +110,8 @@ export interface PeopleCollectJob {
   coverage?: PeopleSeedCoverage[]; // filled on the job-detail read
   status: PeopleCollectStatus;
   verifyStatus: VerifyStatus;
+  /** Person ids a verify worker is actively handling right now (bulk or single). */
+  verifyingPersonIds?: string[];
   totalCompanies: number;
   processedCompanies: number;
   progress: number; // 0-100
@@ -100,13 +122,26 @@ export interface PeopleCollectJob {
 
 /** Faceted filter state for the People table sidebar. */
 export interface PeopleFilters {
+  email: string[]; // Email Status: has | valid | bad
+  titles: string[]; // Job Titles: title contains any (OR)
   seniority: string[]; // founder | c_level | president | vp | other
-  email: string[]; // has | valid | bad
   linkedin: boolean; // must have a LinkedIn URL
-  companies: string[]; // company names to include
+  companies: string[]; // company names to include (OR)
+  locations: string[]; // person location contains any (OR)
+  employees: string[]; // employer size buckets, see EMPLOYEE_BUCKETS (OR)
+  industries: string[]; // employer industry (OR)
+  minScore: number; // minimum match confidence 0-100 (0 = off)
 }
 
-export const EMPTY_PEOPLE_FILTERS: PeopleFilters = { seniority: [], email: [], linkedin: false, companies: [] };
+export const EMPTY_PEOPLE_FILTERS: PeopleFilters = {
+  email: [], titles: [], seniority: [], linkedin: false, companies: [], locations: [], employees: [], industries: [], minScore: 0,
+};
+
+/** Total number of active constraints — shared so the panel badge and the
+ *  toolbar badge stay in sync. */
+export const countPeopleFilters = (f: PeopleFilters): number =>
+  f.email.length + f.titles.length + f.seniority.length + (f.linkedin ? 1 : 0) +
+  f.companies.length + f.locations.length + f.employees.length + f.industries.length + (f.minScore > 0 ? 1 : 0);
 
 /** Facet counts (over all people in the job) for the sidebar. */
 export interface PeopleFacets {
@@ -114,6 +149,8 @@ export interface PeopleFacets {
   email: { has: number; valid: number; bad: number };
   linkedin: { has: number };
   companies: { name: string; count: number }[];
+  industries: { name: string; count: number }[];
+  employees: Record<string, number>; // bucket value -> count
 }
 
 /**
@@ -130,4 +167,8 @@ export interface PeopleSeedInput {
   domain?: string | null;
   website?: string | null;
   linkedin?: string | null;
+  companyEmployees?: string | null; // employer size, carried from the source company
+  companyIndustry?: string | null; // employer industry, carried from the source company
+  companyPhone?: string | null; // employer phone, carried from the source company
+  companyEmail?: string | null; // employer contact email, carried from the source company
 }

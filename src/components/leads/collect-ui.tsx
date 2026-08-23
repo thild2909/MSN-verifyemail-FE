@@ -4,7 +4,7 @@
  * status chips, and a sourced-field renderer (value + which source found it).
  */
 import * as React from "react";
-import { Linkedin, Globe, MapPin, Share2, Boxes, Search, Landmark, BookText, FlaskConical, ShieldCheck, ShieldX, ShieldAlert, ShieldQuestion, Sparkles, type LucideIcon } from "lucide-react";
+import { Linkedin, Globe, MapPin, Share2, Boxes, Search, Landmark, BookText, FlaskConical, ShieldCheck, ShieldX, ShieldAlert, ShieldQuestion, Sparkles, Brain, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SIMULATED_SOURCES, type CollectStatus, type CollectionSource, type SourcedField, type EmailVerification, type LlmVerdict } from "@/lib/leads/collect-types";
 
@@ -16,6 +16,7 @@ export const SOURCE_META: Record<CollectionSource, { label: string; icon: Lucide
   google_maps: { label: "Google Maps", icon: MapPin, className: "bg-emerald-100 text-emerald-700" },
   directory: { label: "Directory", icon: BookText, className: "bg-amber-100 text-amber-700" },
   social: { label: "Social", icon: Share2, className: "bg-violet-100 text-violet-700" },
+  llm: { label: "AI (DeepSeek)", icon: Brain, className: "bg-fuchsia-100 text-fuchsia-700" },
   other: { label: "Other", icon: Boxes, className: "bg-amber-100 text-amber-700" },
 };
 
@@ -62,11 +63,16 @@ export function SourceBadge({ source, showLabel = false }: { source: CollectionS
 }
 
 /** A collected field: its value plus a small badge for the source that found it. */
-export function Sourced({ field, mono }: { field: SourcedField<React.ReactNode> | null; mono?: boolean }) {
+export function Sourced({ field, mono, showConfidence }: { field: SourcedField<React.ReactNode> | null; mono?: boolean; showConfidence?: boolean }) {
   if (!field) return <span className="text-xs text-muted-foreground">—</span>;
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={cn("truncate text-[13px]", mono && "font-mono text-xs")}>{field.value}</span>
+      {showConfidence && field.confidence > 0 && (
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title="Confidence score">
+          {field.confidence}%
+        </span>
+      )}
       <SourceBadge source={field.source} />
     </span>
   );
@@ -82,6 +88,7 @@ const VERIFY_META: Record<string, { label: string; className: string; icon: Luci
   role: { label: "Role", className: "bg-[hsl(var(--risky))]/12 text-[hsl(var(--risky))]", icon: ShieldAlert },
   risky: { label: "Risky", className: "bg-[hsl(var(--risky))]/12 text-[hsl(var(--risky))]", icon: ShieldAlert },
   unknown: { label: "Unknown", className: "bg-muted text-muted-foreground", icon: ShieldQuestion },
+  not_found: { label: "Not found", className: "bg-muted text-muted-foreground", icon: ShieldQuestion },
 };
 
 /** Deliverability badge for a collected contact email. */

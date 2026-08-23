@@ -10,10 +10,11 @@ import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
-import { getCollectJobs, getCollectJob, deleteCollectJob, getProxyConfig, verifyCollectedEmails, createPeopleJob, llmVerifyCompanies, ApiError } from "@/lib/api/client";
+import { getCollectJobs, getCollectJob, deleteCollectJob, retryFailedCollect, getProxyConfig, verifyCollectedEmails, createPeopleJob, llmVerifyCompanies, ApiError } from "@/lib/api/client";
 import { CompanyImportFlow } from "./company-import-flow";
 import { ProxySettings } from "./proxy-settings";
 import { CollectedCompaniesTable, type FindPeoplePayload } from "./collected-companies-table";
+import { StatsBar } from "./stats-bar";
 import { CompanyCollectDrawer } from "./company-collect-drawer";
 import type { CollectedCompany, CompanyCollectJob } from "@/lib/leads/collect-types";
 
@@ -48,6 +49,21 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
     mutationFn: (id: string) => deleteCollectJob(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["collect-jobs"] }); setActiveId(null); toast({ variant: "success", title: "Collection deleted" }); },
     onError: () => toast({ variant: "error", title: "Could not delete" }),
+  });
+
+  const retryFailed = useMutation({
+    mutationFn: (id: string) => retryFailedCollect(id),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["collect-jobs"] });
+      qc.invalidateQueries({ queryKey: ["collect-job", activeId] });
+      qc.invalidateQueries({ queryKey: ["collect-companies", activeId] });
+      toast(
+        r.reset
+          ? { variant: "success", title: "Retrying failed rows", description: `${r.reset} companies queued with fresh proxy IPs.` }
+          : { variant: "info", title: "Nothing to retry", description: "No failed companies in this collection." },
+      );
+    },
+    onError: () => toast({ variant: "error", title: "Retry failed" }),
   });
 
   // Verify only emails not yet checked (resource-saving); this is user-triggered,
@@ -85,23 +101,35 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
     onError: (e) => toast({ variant: "error", title: "Couldn't start", description: e instanceof Error ? e.message : "Try again." }),
   });
 
-  // LLM (DeepSeek) cross-check of the collected companies — opt-in, batched.
+  // "AI verify" (DeepSeek) — one click: audit enriched rows + knowledge-fill
+  // the failed / not-found rows. Opt-in, batched (merged prompts, tokens saved).
   const llmVerify = useMutation({
     mutationFn: (id: string) => llmVerifyCompanies(id, false),
     onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["collect-job", activeId] });
       qc.invalidateQueries({ queryKey: ["collect-companies", activeId] });
-      toast(
-        r.checked === 0
-          ? { variant: "info", title: "Nothing to review", description: r.skipped > 0 ? `Skipped ${r.skipped} high-confidence companies (no LLM needed).` : "All rows already AI-checked." }
-          : { variant: r.mismatch > 0 ? "error" : "success", title: `AI reviewed ${r.checked} companies`, description: `${r.verified} consistent · ${r.mismatch} mismatch · ${r.uncertain} uncertain · skipped ${r.skipped} high-conf · ${formatNumber(r.tokens)} tokens` },
-      );
+      if (r.checked === 0 && r.targeted === 0) {
+        toast({ variant: "info", title: "Nothing to do", description: r.skipped > 0 ? `Skipped ${r.skipped} high-confidence companies (no LLM needed).` : "All rows already AI-processed." });
+        return;
+      }
+      const parts: string[] = [];
+      if (r.targeted > 0) parts.push(`filled ${r.filled}/${r.targeted} unresolved`);
+      if (r.checked > 0) parts.push(`${r.verified} consistent · ${r.mismatch} mismatch · ${r.uncertain} uncertain`);
+      parts.push(`${formatNumber(r.tokens)} tokens`);
+      toast({
+        variant: r.mismatch > 0 ? "error" : "success",
+        title: r.filled > 0 ? `AI filled ${r.filled} + reviewed ${r.checked}` : `AI reviewed ${r.checked} companies`,
+        description: parts.join(" · "),
+      });
     },
     onError: (e) => toast({ variant: "error", title: "AI verify failed", description: e instanceof ApiError && e.code === "LLM_NOT_CONFIGURED" ? "Set DEEPSEEK_API_KEY in the app env." : "Try again." }),
   });
 
   const enabledProxies = proxy?.proxies.filter((p) => p.enabled).length ?? 0;
+  const poolListActive = (proxy?.poolList?.active ?? false) && (proxy?.poolList?.count ?? 0) > 0;
   const rotatingActive = proxy?.rotating?.active ?? false;
-  const proxyLayerOn = rotatingActive || (proxy?.enabled ?? false);
+  const rotatingBroken = rotatingActive && (proxy?.rotating?.status === "dead" || !!proxy?.rotating?.error);
+  const proxyLayerOn = poolListActive || (rotatingActive && !rotatingBroken) || (proxy?.enabled ?? false);
   const verifying = active?.verifyStatus === "verifying" || verify.isPending;
   const live = active?.status === "collecting" || verifying;
 
@@ -137,15 +165,15 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Tab toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5">
-        <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 w-56">
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 md:py-2.5">
+        <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 w-full sm:w-56">
           {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
         </Select>
         {active && <span className="text-xs text-muted-foreground">{formatNumber(active.total)} companies</span>}
-        <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => setProxyOpen(true)} className={cn("inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted", proxyLayerOn ? "border-[hsl(var(--valid))]/40 text-[hsl(var(--valid))]" : "border-input text-muted-foreground")}>
-            {rotatingActive ? <Globe className="size-3.5" /> : proxy?.enabled ? <ShieldCheck className="size-3.5" /> : <ShieldOff className="size-3.5" />}
-            {rotatingActive ? "Rotating residential" : proxy?.enabled ? `Proxies on · ${enabledProxies}` : "Proxies off"}
+        <div className="ml-auto flex max-w-full items-center gap-2 overflow-x-auto scrollbar-thin [&>*]:shrink-0 sm:overflow-visible">
+          <button onClick={() => setProxyOpen(true)} className={cn("inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted", rotatingBroken ? "border-[hsl(var(--invalid))]/50 text-[hsl(var(--invalid))]" : proxyLayerOn ? "border-[hsl(var(--valid))]/40 text-[hsl(var(--valid))]" : "border-input text-muted-foreground")} title={rotatingBroken ? proxy?.rotating?.error : proxy?.poolList?.error}>
+            {rotatingBroken || proxy?.poolList?.error ? <AlertTriangle className="size-3.5" /> : poolListActive ? <RotateCw className="size-3.5" /> : rotatingActive ? <Globe className="size-3.5" /> : proxy?.enabled ? <ShieldCheck className="size-3.5" /> : <ShieldOff className="size-3.5" />}
+            {rotatingBroken ? "Proxy quota exceeded" : poolListActive ? `Pool rotate · ${proxy?.poolList?.count ?? enabledProxies}` : rotatingActive ? "Rotating residential" : proxy?.enabled ? `Proxies on · ${enabledProxies}` : "Proxies off"}
           </button>
           {active && (
             <Button size="sm" variant="outline" onClick={() => verify.mutate(active.id)} disabled={verifying}>
@@ -161,13 +189,19 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
           )}
           <Button size="sm" variant="outline" onClick={() => setProxyOpen(true)}><Server className="size-4" /> Proxy settings</Button>
           <Button size="sm" onClick={() => setImportOpen(true)}><Upload className="size-4" /> Import</Button>
+          {active && (
+            <Button size="sm" variant="outline" onClick={() => retryFailed.mutate(active.id)} disabled={retryFailed.isPending || active.status === "collecting"}>
+              {retryFailed.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />}
+              Retry failed
+            </Button>
+          )}
           {active && <button onClick={() => remove.mutate(active.id)} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete collection">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
         </div>
       </div>
 
       {/* Stats */}
       {s && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b px-4 py-2.5 text-sm">
+        <StatsBar live={!!live} summary={`${formatNumber(s.enriched)}/${formatNumber(s.total)} enriched · ${formatNumber(s.withEmail)} emails`}>
           <Stat icon={Building2} label="Enriched" value={`${formatNumber(s.enriched)}/${formatNumber(s.total)}`} />
           <Stat icon={Search} label="Resolved" value={formatNumber(s.resolved)} />
           <Stat icon={Globe} label="Website" value={formatNumber(s.withWebsite)} />
@@ -186,7 +220,7 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
                 : <><Progress value={active.progress} className="flex-1" /><span className="tabular-nums text-muted-foreground">{active.progress}%</span></>}
             </div>
           )}
-        </div>
+        </StatsBar>
       )}
 
       {/* Table */}
