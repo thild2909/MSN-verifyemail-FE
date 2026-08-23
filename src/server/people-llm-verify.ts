@@ -175,6 +175,18 @@ const splitName = (full: string): { firstName: string; lastName: string } => {
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
 };
 
+/** Drop org/domain strings the LLM sometimes returns as a "person" name. */
+function looksLikePersonName(s: string): boolean {
+  const t = s.trim();
+  if (!t || t.length < 4 || t.length > 48 || /\d/.test(t)) return false;
+  if (/\.[a-z]{2,8}\b/i.test(t) || /@/.test(t)) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 4) return false;
+  const stop = /^(investor|network|capital|ventures?|holdings?|group|partners?|fund|llc|inc|ltd|pte|corp|company|co|limited|technologies|technology|solutions|services?|studio|labs?|global|international|digital|media|consulting)$/i;
+  if (words.some((w) => stop.test(w.replace(/\.$/, "")))) return false;
+  return words.every((w) => /^[\p{L}][\p{L}'.\-]*$/u.test(w));
+}
+
 /**
  * DeepSeek exec-fill for coverage-gap companies (discover-mode seeds the crawl
  * found NOBODY at). The LLM proposes founders/directors/C-level from its own
@@ -218,6 +230,7 @@ export async function llmEnrichPeople(jobId: string, onlyUnattempted = true): Pr
         result.people.map((cand, i) => async (): Promise<CrawledPerson | null> => {
           const { firstName, lastName } = splitName(cand.name);
           if (!firstName) return null;
+          if (!looksLikePersonName(cand.name)) return null;
           if (i < crawlN) {
             try {
               const r = await resolvePersonViaCrawler({
