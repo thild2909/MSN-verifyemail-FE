@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Linkedin, Mail, MapPin, Building2, BadgeCheck, ExternalLink } from "lucide-react";
+import { Linkedin, Mail, MapPin, Building2, BadgeCheck, ExternalLink, Phone, Twitter, Facebook, Briefcase, Users, Globe } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./leads-ui";
@@ -20,7 +20,8 @@ export function PersonDetailDrawer({ person, open, onOpenChange }: { person: Col
               <Avatar name={person.name} seed={person.id} className="size-12 text-base" />
               <div className="min-w-0">
                 <h2 className="text-lg font-bold leading-tight">{person.name}</h2>
-                <p className="text-sm text-muted-foreground">{person.title?.value ?? SENIORITY_LABEL[person.seniority]}</p>
+                <p className="text-sm text-muted-foreground">{person.title?.value ?? person.headline ?? SENIORITY_LABEL[person.seniority]}</p>
+                {person.department && <p className="text-xs text-muted-foreground/80">{person.department}</p>}
                 <div className="mt-1.5 flex items-center gap-2 text-sm">
                   <CompanyLogo domain={person.companyDomain} text={person.companyLogoText} className="size-5 text-[9px]" />
                   <span>{person.company}</span>
@@ -65,9 +66,21 @@ export function PersonDetailDrawer({ person, open, onOpenChange }: { person: Col
                 ? <a href={linkedinHref(String(person.linkedin.value))} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{String(person.linkedin.value)}</a>
                 : <span className="text-muted-foreground">—</span>}
             </Row>
+            {person.mobile && <Row icon={Phone} label="Mobile">{person.mobile}</Row>}
+            {person.twitter && <Row icon={Twitter} label="Twitter"><a href={linkedinHref(person.twitter)} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{person.twitter.replace(/^https?:\/\/(www\.)?/i, "")}</a></Row>}
+            {person.facebook && <Row icon={Facebook} label="Facebook"><a href={linkedinHref(person.facebook)} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{person.facebook.replace(/^https?:\/\/(www\.)?/i, "")}</a></Row>}
             <Row icon={MapPin} label="Location">{person.location ?? <span className="text-muted-foreground">—</span>}</Row>
             <Row icon={Building2} label="Company">{person.company}</Row>
           </Section>
+
+          {(person.companyDomain || person.companyIndustry || person.companyEmployees || person.companyPhone) && (
+            <Section title="Company">
+              {person.companyDomain && <Row icon={Globe} label="Website"><a href={`https://${person.companyDomain}`} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{person.companyDomain}</a></Row>}
+              {person.companyIndustry && <Row icon={Briefcase} label="Industry">{person.companyIndustry}</Row>}
+              {person.companyEmployees && <Row icon={Users} label="Employees">{person.companyEmployees}</Row>}
+              {person.companyPhone && <Row icon={Phone} label="Company phone">{person.companyPhone}</Row>}
+            </Section>
+          )}
 
           {/* Provenance */}
           <Section title="How we found them">

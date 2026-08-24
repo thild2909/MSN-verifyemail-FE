@@ -36,8 +36,12 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
     queryKey: ["people-job", activeId],
     queryFn: () => getPeopleJob(activeId!),
     enabled: !!activeId,
-    refetchInterval: (q) => { const j = q.state.data as PeopleCollectJob | undefined; return j?.status === "collecting" || j?.verifyStatus === "verifying" ? 1500 : false; },
+    refetchInterval: (q) => { const j = q.state.data as PeopleCollectJob | null | undefined; return j?.status === "collecting" || j?.verifyStatus === "verifying" ? 1500 : false; },
   });
+
+  // The selected job was deleted / no longer exists (query resolved to null):
+  // drop the stale id so the effect above re-selects the newest live job.
+  React.useEffect(() => { if (activeId && active === null) setActiveId(null); }, [active, activeId]);
 
   const remove = useMutation({
     mutationFn: (id: string) => deletePeopleJob(id),

@@ -5,8 +5,49 @@
  * No mock data. Email verification is NOT automatic — opt-in via "Verify emails".
  */
 import "server-only";
-import { resolvePeopleViaCrawler, resolvePersonViaCrawler } from "./crawler-client";
+import { resolvePeopleViaCrawler, resolvePersonViaCrawler, type CrawledPerson } from "./crawler-client";
+import type { PeopleSeedInput } from "@/lib/leads/people-types";
 import * as store from "./people-collect-store";
+
+/**
+ * A CSV-imported row is COMPLETE when it already carries the person's own
+ * enriched data — a LinkedIn, an email, or a Title/Seniority (the role). The
+ * enrich crawl only exists to FIND those; if the CSV already has them, we skip
+ * the (slow) crawl and show the imported data immediately (title, seniority,
+ * LinkedIn, location, company phone/email/employees/industry). The user's words:
+ * "đã map đủ thông tin … thì không cần crawl nữa mà show trực tiếp lên UI".
+ */
+function seedIsComplete(seed: PeopleSeedInput): boolean {
+  const has = (v?: string | null) => !!(v && v.trim());
+  return has(seed.personLinkedin) || has(seed.email) || has(seed.title) || has(seed.seniority);
+}
+
+const domainOf = (website?: string | null): string | null => {
+  if (!website) return null;
+  const h = website.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, "").trim().toLowerCase();
+  return h && h.includes(".") ? h : null;
+};
+
+/** Build a person row straight from the imported seed (no crawl). Fields are
+ *  left null so `applySeedPeople` fills them from the seed (title/LinkedIn/…). */
+function personFromSeed(seed: PeopleSeedInput): CrawledPerson {
+  return {
+    company: seed.company,
+    companyDomain: domainOf(seed.website) ?? seed.domain ?? null,
+    name: `${seed.firstName ?? ""} ${seed.lastName ?? ""}`.trim(),
+    firstName: seed.firstName ?? "",
+    lastName: seed.lastName ?? "",
+    title: null,
+    seniority: "other",
+    linkedin: null,
+    email: null,
+    emailKind: "none",
+    location: seed.location || null,
+    confidence: 80,
+    emailVerification: null,
+    collection: [{ source: "other", status: "ok", proxy: null, ms: 0, fieldsFound: 1, detail: "imported — already complete, not enriched", provider: "import" }],
+  };
+}
 
 const CONCURRENCY = Math.max(1, Math.min(Number(process.env.CRAWLER_PEOPLE_CONCURRENCY ?? process.env.CRAWLER_CONCURRENCY ?? 3), 12));
 // Block-retry: seeds that came back rate-limited (blocked, nothing found) are
@@ -38,7 +79,11 @@ async function run(id: string) {
     store.setSeedCollecting(id, index);
     try {
       const isPerson = !!(seed.firstName || seed.lastName);
-      if (isPerson) {
+      if (isPerson && seedIsComplete(seed)) {
+        // Already has LinkedIn/email from the CSV → show as-is, skip enrichment.
+        store.applySeedPeople(id, index, [personFromSeed(seed)]);
+        blocked.delete(index);
+      } else if (isPerson) {
         // Enrich mode: a known person → find that one profile.
         const { person, matched, blocked: wasBlocked } = await resolvePersonViaCrawler({
           companyId: seed.companyId ?? null,

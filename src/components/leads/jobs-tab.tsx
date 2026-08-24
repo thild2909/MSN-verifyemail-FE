@@ -8,11 +8,11 @@ import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
-import { getJobSearches, getJobSearch, deleteJobSearch, getProxyConfig } from "@/lib/api/client";
+import { getJobSearches, getJobSearch, deleteJobSearch, getProxyConfig, createPeopleJob } from "@/lib/api/client";
 import { DEFAULT_JOB_FILTERS, type JobFilters } from "@/lib/leads/types";
 import { JOB_SOURCE_LABEL, type JobCollectJob, type JobSourceCoverage } from "@/lib/leads/job-collect-types";
 import { WORK_MODE_LABEL } from "./leads-ui";
-import { CollectedJobsTable } from "./collected-jobs-table";
+import { CollectedJobsTable, type FindPeopleFromJobsPayload } from "./collected-jobs-table";
 import { JobCrawlDialog, type CrawlSeed } from "./job-crawl-dialog";
 import { ProxySettings } from "./proxy-settings";
 import { StatsBar } from "./stats-bar";
@@ -44,7 +44,7 @@ function seedFromFilters(f: JobFilters): CrawlSeed {
   };
 }
 
-export function JobsTab() {
+export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: string) => void }) {
   const qc = useQueryClient();
   const { toast } = useToast();
   const [filters, setFilters] = React.useState<JobFilters>(DEFAULT_JOB_FILTERS);
@@ -72,6 +72,24 @@ export function JobsTab() {
     mutationFn: (id: string) => deleteJobSearch(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["job-searches"] }); setActiveId(null); toast({ variant: "success", title: "Crawl deleted" }); },
     onError: () => toast({ variant: "error", title: "Could not delete" }),
+  });
+
+  // "Find people" — seed a real people-collect job from the employers behind the
+  // selected roles (deduped by company name). Opt-in, user-triggered from the
+  // selection bar, mirroring the Companies tab. Then jump to the People tab.
+  const findPeople = useMutation({
+    mutationFn: (payload: FindPeopleFromJobsPayload) =>
+      createPeopleJob({ name: `${active?.name ?? "Jobs"} — people`, seeds: payload.seeds }),
+    onSuccess: ({ job, truncated }, payload) => {
+      qc.invalidateQueries({ queryKey: ["people-jobs"] });
+      toast({
+        variant: "success",
+        title: "Finding people…",
+        description: `Crawling founders & C-level for ${formatNumber(payload.count)} ${payload.count === 1 ? "employer" : "employers"}.${truncated ? ` ${formatNumber(truncated)} skipped (cap 500).` : ""}`,
+      });
+      onNavigatePeople?.(job.id);
+    },
+    onError: (e) => toast({ variant: "error", title: "Couldn't start", description: e instanceof Error ? e.message : "Try again." }),
   });
 
   const patch = (p: Partial<JobFilters>) => setFilters((f) => ({ ...f, ...p }));
@@ -166,6 +184,8 @@ export function JobsTab() {
           onChangeFilters={patch}
           onClearFilters={clear}
           activeFilterCount={countActive(filters)}
+          onFindPeople={(payload) => findPeople.mutate(payload)}
+          findingPeople={findPeople.isPending}
         />
       )}
 

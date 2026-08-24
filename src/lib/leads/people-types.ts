@@ -56,6 +56,13 @@ export interface CollectedPerson {
   companyIndustry?: string | null;
   companyPhone?: string | null;
   companyEmail?: string | null;
+  // Extra contact fields, pre-filled from a CSV import (shown in the drawer).
+  mobile?: string | null;
+  twitter?: string | null;
+  facebook?: string | null;
+  photo?: string | null;
+  headline?: string | null;
+  department?: string | null;
   emailVerification: EmailVerification | null;
   llmVerification?: LlmVerdict | null; // DeepSeek founder↔company cross-check (opt-in)
   collection: CollectionAttempt[];
@@ -122,7 +129,7 @@ export interface PeopleCollectJob {
 
 /** Faceted filter state for the People table sidebar. */
 export interface PeopleFilters {
-  email: string[]; // Email Status: has | valid | bad
+  email: string[]; // Email Status: has | valid | catch_all | risky | invalid | unverified | none
   titles: string[]; // Job Titles: title contains any (OR)
   seniority: string[]; // founder | c_level | president | vp | other
   linkedin: boolean; // must have a LinkedIn URL
@@ -146,7 +153,7 @@ export const countPeopleFilters = (f: PeopleFilters): number =>
 /** Facet counts (over all people in the job) for the sidebar. */
 export interface PeopleFacets {
   seniority: Record<string, number>;
-  email: { has: number; valid: number; bad: number };
+  email: { has: number; valid: number; catch_all: number; risky: number; invalid: number; unverified: number; none: number };
   linkedin: { has: number };
   companies: { name: string; count: number }[];
   industries: { name: string; count: number }[];
@@ -171,4 +178,16 @@ export interface PeopleSeedInput {
   companyIndustry?: string | null; // employer industry, carried from the source company
   companyPhone?: string | null; // employer phone, carried from the source company
   companyEmail?: string | null; // employer contact email, carried from the source company
+  // Optional PERSON fields pre-filled from a CSV import (Apollo-style export).
+  // The crawl fills gaps (esp. a verified email) but never discards these.
+  title?: string | null;
+  seniority?: string | null; // raw CSV value (e.g. "C_suite", "VP") — normalized on apply
+  email?: string | null;
+  personLinkedin?: string | null; // the person's OWN LinkedIn profile URL
+  mobile?: string | null;
+  twitter?: string | null;
+  facebook?: string | null;
+  photo?: string | null;
+  headline?: string | null;
+  department?: string | null;
 }

@@ -15,7 +15,26 @@ import type {
   PeopleCollectJob,
   PeopleSeedInput,
   PeopleSummary,
+  PersonSeniority,
 } from "@/lib/leads/people-types";
+
+/** Map a raw CSV seniority / title into the app's PersonSeniority bucket. */
+function normalizeSeniority(raw?: string | null, title?: string | null): PersonSeniority | null {
+  const t = ` ${`${raw ?? ""} ${title ?? ""}`.toLowerCase()} `;
+  if (!t.trim()) return null;
+  if (/\b(founder|co-?founder|owner)\b/.test(t)) return "founder";
+  if (/\b(c_?suite|chief|ceo|cto|cfo|coo|cmo|cio|cpo|ciso|cdo|managing director|\bmd\b)\b/.test(t)) return "c_level";
+  if (/\bpresident\b/.test(t)) return "president";
+  if (/\b(vice[- ]president|\bvp\b|svp|evp|head|director)\b/.test(t)) return "vp";
+  return "other";
+}
+
+/** Bare registrable domain from a website URL ("http://www.acme.com/x" → "acme.com"). */
+function domainOf(website?: string | null): string | null {
+  if (!website) return null;
+  const h = website.replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, "").trim().toLowerCase();
+  return h && h.includes(".") ? h : null;
+}
 
 export const MAX_PEOPLE_SEEDS = Number(process.env.APP_MAX_PEOPLE_SEEDS ?? 200);
 
@@ -92,7 +111,7 @@ export function getSeedCoverage(jobId: string): { company: string; status: strin
 
 export interface PeopleQuery {
   page?: number; pageSize?: number; search?: string;
-  email?: string[]; // has | valid | bad
+  email?: string[]; // has | valid | catch_all | risky | invalid | unverified | none
   titles?: string[]; // title contains  (OR)
   seniority?: string[]; // founder | c_level | president | vp | other
   linkedin?: boolean; // must have a LinkedIn URL
@@ -104,7 +123,7 @@ export interface PeopleQuery {
 }
 export interface PeopleFacets {
   seniority: Record<string, number>;
-  email: { has: number; valid: number; bad: number };
+  email: { has: number; valid: number; catch_all: number; risky: number; invalid: number; unverified: number; none: number };
   linkedin: { has: number };
   companies: { name: string; count: number }[];
   industries: { name: string; count: number }[];
@@ -119,14 +138,31 @@ export interface PeoplePage {
   verifyingPersonIds: string[];
 }
 
-const isBadEmail = (p: CollectedPerson) =>
-  p.emailVerification != null &&
-  p.emailKind === "found" &&
-  ["invalid", "disposable"].includes(p.emailVerification.status);
+/**
+ * The one true email-status bucket for a person, mutually exclusive, matching
+ * the real verification statuses so the filter/facets never mislabel a row:
+ *   none        — no email at all (or the finder returned not_found)
+ *   unverified  — has an email (imported/guessed) that was never checked
+ *   valid       — SMTP-confirmed deliverable
+ *   catch_all   — domain accepts everything; deliverability can't be confirmed
+ *   risky       — risky / unknown / role address
+ *   invalid     — invalid or disposable
+ */
+export type EmailStatusBucket = "none" | "unverified" | "valid" | "catch_all" | "risky" | "invalid";
+export function emailStatusBucket(p: CollectedPerson): EmailStatusBucket {
+  if (!p.email) return "none";
+  const s = p.emailVerification?.status;
+  if (!s) return "unverified";
+  if (s === "valid") return "valid";
+  if (s === "catch_all") return "catch_all";
+  if (s === "invalid" || s === "disposable") return "invalid";
+  if (s === "not_found") return "none";
+  return "risky"; // risky | unknown | role
+}
 
 function peopleFacets(all: CollectedPerson[]): PeopleFacets {
   const seniority: Record<string, number> = {};
-  const email = { has: 0, valid: 0, bad: 0 };
+  const email = { has: 0, valid: 0, catch_all: 0, risky: 0, invalid: 0, unverified: 0, none: 0 };
   const linkedin = { has: 0 };
   const employees: Record<string, number> = {};
   const companyCounts = new Map<string, number>();
@@ -134,8 +170,7 @@ function peopleFacets(all: CollectedPerson[]): PeopleFacets {
   for (const p of all) {
     seniority[p.seniority] = (seniority[p.seniority] ?? 0) + 1;
     if (p.email) email.has++;
-    if (p.emailVerification?.status === "valid") email.valid++;
-    if (isBadEmail(p)) email.bad++;
+    email[emailStatusBucket(p)]++;
     if (p.linkedin) linkedin.has++;
     companyCounts.set(p.company, (companyCounts.get(p.company) ?? 0) + 1);
     const eb = employeeBucket(p.companyEmployees);
@@ -170,8 +205,10 @@ export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
     p.name.toLowerCase().includes(q) ||
     p.company.toLowerCase().includes(q) ||
     (p.title?.value ? String(p.title.value).toLowerCase().includes(q) : false));
-  if (email.length) filtered = filtered.filter((p) => email.some((e) =>
-    e === "has" ? !!p.email : e === "valid" ? p.emailVerification?.status === "valid" : e === "bad" ? isBadEmail(p) : false));
+  if (email.length) filtered = filtered.filter((p) => {
+    const b = emailStatusBucket(p);
+    return email.some((e) => (e === "has" ? !!p.email : e === "bad" ? b === "invalid" : e === b));
+  });
   if (titleTerms.length) filtered = filtered.filter((p) => { const t = (p.title?.value ? String(p.title.value) : "").toLowerCase(); return titleTerms.some((x) => t.includes(x)); });
   if (seniority.length) filtered = filtered.filter((p) => seniority.includes(p.seniority));
   if (linkedin) filtered = filtered.filter((p) => !!p.linkedin);
@@ -252,16 +289,38 @@ export function applySeedPeople(jobId: string, index: number, crawled: CrawledPe
   if (!seed) return;
   const list = s.people[jobId] ?? (s.people[jobId] = []);
   crawled.forEach((cp, i) => {
+    // Pre-fill from CSV-imported seed fields: the crawl's own finds take
+    // precedence (they are fresh/verified); the seed only FILLS what the crawl
+    // left empty, so an imported title/LinkedIn/seniority shows immediately.
+    const imp = (v: string | null | undefined, confidence: number) =>
+      v && String(v).trim() ? { value: String(v).trim().replace(/^https?:\/\//i, "").replace(/\/+$/, ""), source: "other" as const, confidence } : null;
+    const title = cp.title ?? imp(seed.title, 70);
+    const linkedin = cp.linkedin ?? imp(seed.personLinkedin, 75);
+    const email = cp.email ?? imp(seed.email, 55);
+    const seniority = cp.seniority && cp.seniority !== "other" ? cp.seniority : (normalizeSeniority(seed.seniority, seed.title ?? title?.value) ?? cp.seniority);
     list.push({
       ...cp,
+      title,
+      linkedin,
+      email,
+      emailKind: cp.email ? cp.emailKind : seed.email ? "pattern" : cp.emailKind,
+      seniority,
+      location: cp.location ?? (seed.location || null),
+      companyDomain: cp.companyDomain ?? domainOf(seed.website) ?? (seed.domain || null),
       id: `${jobId}_${index}_${i}`,
       jobId,
       companyId: seed.companyId ?? null,
       companyLogoText: initials(cp.company),
-      companyEmployees: seed.companyEmployees ?? null,
-      companyIndustry: seed.companyIndustry ?? null,
-      companyPhone: seed.companyPhone ?? null,
-      companyEmail: seed.companyEmail ?? null,
+      companyEmployees: seed.companyEmployees ?? cp.companyEmployees ?? null,
+      companyIndustry: seed.companyIndustry ?? cp.companyIndustry ?? null,
+      companyPhone: seed.companyPhone ?? cp.companyPhone ?? null,
+      companyEmail: seed.companyEmail ?? cp.companyEmail ?? null,
+      mobile: seed.mobile || null,
+      twitter: seed.twitter || null,
+      facebook: seed.facebook || null,
+      photo: seed.photo || null,
+      headline: seed.headline || null,
+      department: seed.department || null,
     });
   });
   seed.status = "done";

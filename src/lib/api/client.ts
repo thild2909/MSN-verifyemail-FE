@@ -483,11 +483,13 @@ export async function getPeopleJobs(): Promise<PeopleCollectJob[]> {
   return apiGet<PeopleCollectJob[]>("/api/v1/leads/people");
 }
 
-export async function getPeopleJob(id: string): Promise<PeopleCollectJob | undefined> {
+export async function getPeopleJob(id: string): Promise<PeopleCollectJob | null> {
   try {
     return await apiGet<PeopleCollectJob>(`/api/v1/leads/people/${id}`);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return undefined;
+    // A deleted / unknown job 404s. Return null (NOT undefined) — React Query
+    // rejects an undefined queryFn result ("Query data cannot be undefined").
+    if (err instanceof ApiError && err.status === 404) return null;
     throw err;
   }
 }

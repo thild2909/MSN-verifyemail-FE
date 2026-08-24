@@ -60,19 +60,28 @@ export interface EmailPattern {
 }
 
 /**
- * The finder's candidate formats, in fixed priority order. This is a curated,
- * first-name-based set (every format starts with the full first name); the
- * first-initial formats like `{f}{last}` are intentionally excluded. The prior
- * encodes the desired ranking and is only used as a *relative* tie-breaker when
- * verification can't decide (e.g. catch-all domains).
+ * The finder's candidate formats, in fixed priority order. Every candidate is
+ * SMTP-verified, so on a normal (non-catch-all) domain only the REAL format is
+ * deliverable — breadth here directly raises recall. Besides the common
+ * first-name formats we include first-initial + last ("{f}{last}" → smain) and
+ * last-name-led formats ("{last}" → zhao, "{last}{first}" → tanjun) that are
+ * standard at many Asian/SG companies. The prior only breaks ties when
+ * verification can't decide (catch-all domains), where first.last still wins.
  */
 export const EMAIL_PATTERNS: EmailPattern[] = [
   { id: "first.last", label: "{first}.{last}", prior: 0.4, local: (n) => `${n.first}.${n.last}` },
   { id: "first", label: "{first}", prior: 0.2, local: (n) => n.first },
+  { id: "flast", label: "{f}{last}", prior: 0.18, local: (n) => `${n.fi}${n.last}` }, // smain
   { id: "firstl", label: "{first}{l}", prior: 0.14, local: (n) => `${n.first}${n.li}` },
   { id: "firstlast", label: "{first}{last}", prior: 0.12, local: (n) => `${n.first}${n.last}` },
   { id: "first_last", label: "{first}_{last}", prior: 0.08, local: (n) => `${n.first}_${n.last}` },
+  { id: "f.last", label: "{f}.{last}", prior: 0.07, local: (n) => `${n.fi}.${n.last}` }, // s.main
   { id: "first.l", label: "{first}.{l}", prior: 0.06, local: (n) => `${n.first}.${n.li}` },
+  { id: "last", label: "{last}", prior: 0.05, local: (n) => n.last }, // zhao
+  { id: "lastfirst", label: "{last}{first}", prior: 0.045, local: (n) => `${n.last}${n.first}` }, // tanjun
+  { id: "last.first", label: "{last}.{first}", prior: 0.035, local: (n) => `${n.last}.${n.first}` },
+  { id: "lastf", label: "{last}{f}", prior: 0.03, local: (n) => `${n.last}${n.fi}` }, // mains
+  { id: "first-last", label: "{first}-{last}", prior: 0.02, local: (n) => `${n.first}-${n.last}` },
 ];
 
 const MAX_PRIOR = Math.max(...EMAIL_PATTERNS.map((p) => p.prior));

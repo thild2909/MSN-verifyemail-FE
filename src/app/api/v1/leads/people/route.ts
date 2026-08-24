@@ -18,6 +18,21 @@ const seedSchema = z.object({
   domain: z.string().trim().nullish(),
   website: z.string().trim().nullish(),
   linkedin: z.string().trim().nullish(),
+  // Optional CSV-imported fields (pre-fill the table; crawl fills the gaps).
+  title: z.string().trim().nullish(),
+  seniority: z.string().trim().nullish(),
+  email: z.string().trim().nullish(),
+  personLinkedin: z.string().trim().nullish(),
+  mobile: z.string().trim().nullish(),
+  twitter: z.string().trim().nullish(),
+  facebook: z.string().trim().nullish(),
+  photo: z.string().trim().nullish(),
+  headline: z.string().trim().nullish(),
+  department: z.string().trim().nullish(),
+  companyEmployees: z.string().trim().nullish(),
+  companyIndustry: z.string().trim().nullish(),
+  companyPhone: z.string().trim().nullish(),
+  companyEmail: z.string().trim().nullish(),
 });
 
 // Two ways to create a people job:

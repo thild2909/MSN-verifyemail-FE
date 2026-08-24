@@ -137,31 +137,27 @@ export function CollectedPeopleTable({
   const onExport = async () => {
     setBusy("export");
     try {
-      const all = await resolveSelected();
-      // Export ONLY valid records: a deliverable (verified-valid) email.
-      const sel = all.filter((p) => p.emailVerification?.status === "valid");
+      // Export exactly what is selected: all "select all N" rows, or the checked
+      // rows — every record, regardless of email status (the CSV carries the
+      // status column so nothing is hidden). No valid-only filtering.
+      const sel = await resolveSelected();
       if (sel.length === 0) {
-        toast({
-          variant: "info",
-          title: "Nothing to export",
-          description: all.length > 0
-            ? `${formatNumber(all.length)} selected, but none have a deliverable email. Run "Verify emails" first.`
-            : "No people selected.",
-        });
+        toast({ variant: "info", title: "Nothing to export", description: "Select some people (or Select all) first." });
         return;
       }
-      const headers = ["Name", "Title", "Seniority", "Company", "Company phone", "Company email", "Company employees", "Company industry", "Email", "Email type", "Email status", "LinkedIn", "Location", "Confidence"];
+      const headers = ["Name", "Title", "Seniority", "Company", "Company phone", "Company email", "Company employees", "Company industry", "Email", "Email type", "Email status", "LinkedIn", "Mobile", "Twitter", "Facebook", "Headline", "Department", "Location", "Confidence"];
       const csv = toCsv(headers, sel.map((p) => [
         p.name, p.title?.value ?? "", SENIORITY_LABEL[p.seniority], p.company,
         p.companyPhone ?? "", p.companyEmail ?? "", p.companyEmployees ?? "", p.companyIndustry ?? "",
-        p.email?.value ?? "", p.emailKind, p.emailVerification?.status ?? "", p.linkedin?.value ?? "", p.location ?? "", p.confidence,
+        p.email?.value ?? "", p.emailKind, p.emailVerification?.status ?? "", p.linkedin?.value ?? "",
+        p.mobile ?? "", p.twitter ?? "", p.facebook ?? "", p.headline ?? "", p.department ?? "", p.location ?? "", p.confidence,
       ]));
       downloadCsv(`people-${jobId}`, csv);
-      const excluded = all.length - sel.length;
+      const withValid = sel.filter((p) => p.emailVerification?.status === "valid").length;
       toast({
         variant: "success",
-        title: `Exported ${formatNumber(sel.length)} valid ${sel.length === 1 ? "person" : "people"}`,
-        description: excluded > 0 ? `Skipped ${formatNumber(excluded)} without a deliverable email` : undefined,
+        title: `Exported ${formatNumber(sel.length)} ${sel.length === 1 ? "person" : "people"}`,
+        description: withValid < sel.length ? `${formatNumber(withValid)} with a verified-valid email` : undefined,
       });
     } catch { toast({ variant: "error", title: "Export failed" }); }
     finally { setBusy(null); }
@@ -336,7 +332,7 @@ export function CollectedPeopleTable({
               {lists.length > 0 && <DropdownSeparator />}
               <DropdownItem onClick={() => { const l = createList(`List ${lists.length + 1}`); addSelectedToList(l.id, l.name); }}><Plus /> New list</DropdownItem>
             </DropdownMenu>
-            <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null} title="Exports only valid records — people with a deliverable (verified-valid) email.">{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
+            <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null} title={allMatching ? "Exports all matching records." : "Exports the checked records (all fields)."}>{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
             <button onClick={clearSelection} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
           </div>
         </div>

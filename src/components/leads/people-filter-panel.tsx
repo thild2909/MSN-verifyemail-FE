@@ -17,11 +17,18 @@ export function PeopleFilterPanel({ filters, facets, onChange, onClear }: {
 }) {
   const active = countPeopleFilters(filters);
 
+  // Email Status by the REAL verification status (mutually exclusive), so a
+  // count never mislabels a row. Hide a status with 0 rows unless it's selected.
+  const e = facets?.email;
   const emailOpts: Option[] = [
-    { value: "has", label: "Has email", hint: String(facets?.email.has ?? 0) },
-    { value: "valid", label: "Verified valid", hint: String(facets?.email.valid ?? 0) },
-    { value: "bad", label: "Verified bad", hint: String(facets?.email.bad ?? 0) },
-  ];
+    { value: "has", label: "Has email", hint: String(e?.has ?? 0) },
+    { value: "valid", label: "Valid", hint: String(e?.valid ?? 0) },
+    { value: "catch_all", label: "Catch-all", hint: String(e?.catch_all ?? 0) },
+    { value: "risky", label: "Risky / unknown", hint: String(e?.risky ?? 0) },
+    { value: "invalid", label: "Invalid", hint: String(e?.invalid ?? 0) },
+    { value: "unverified", label: "Unverified", hint: String(e?.unverified ?? 0) },
+    { value: "none", label: "No email", hint: String(e?.none ?? 0) },
+  ].filter((o) => o.value === "has" || o.hint !== "0" || filters.email.includes(o.value));
 
   const seniorityOpts: Option[] = SENIORITY_ORDER
     .filter((s) => (facets?.seniority[s] ?? 0) > 0 || filters.seniority.includes(s))

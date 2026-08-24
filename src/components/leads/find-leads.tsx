@@ -55,7 +55,7 @@ export function FindLeads() {
       ) : tab === "companies" ? (
         <CompaniesTab onNavigatePeople={(jobId) => { setPeopleJobId(jobId); setTab("people"); }} />
       ) : (
-        <JobsTab />
+        <JobsTab onNavigatePeople={(jobId) => { setPeopleJobId(jobId); setTab("people"); }} />
       )}
     </div>
   );
