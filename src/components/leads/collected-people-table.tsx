@@ -8,9 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
-import { getCollectedPeople, verifyPersonEmail, getLeadLists, createLeadList, addLeadItems, aiTagPeople, ApiError, type AiTagColor } from "@/lib/api/client";
+import { getCollectedPeople, verifyPersonEmail, getLeadLists, createLeadList, addPeopleToList, aiTagPeople, ApiError, type AiTagColor, type PeopleAddSelection } from "@/lib/api/client";
 import { formatNumber, cn } from "@/lib/utils";
-import { personToLeadItem, addToListToast } from "@/lib/leads/lead-snapshot";
+import { addToListToast } from "@/lib/leads/lead-snapshot";
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Avatar } from "./leads-ui";
@@ -285,13 +285,20 @@ export function CollectedPeopleTable({
     finally { setBusy(null); }
   };
 
-  const listItems = (rs: CollectedPerson[]) => rs.map((p) => personToLeadItem(p, jobId));
+  // Add-to-list sends only the SELECTION (explicit ids, or "all" + the visible
+  // filter context) — never the row snapshots — so a huge Select-all can't 413 at
+  // a proxy. The server resolves the rows and forwards them in chunks.
+  const buildAddSelection = (): PeopleAddSelection =>
+    allMatching
+      ? { all: true, query: { search: debounced, ...filters, ids: tagFilterIds, sort } }
+      : { all: false, personIds: [...selectedIds] };
+
   const addSelectedToList = async (listId: string, listName: string) => {
+    if (!someSelected) { toast({ variant: "info", title: "Nothing selected" }); return; }
     setBusy("list");
     try {
-      const sel = await resolveSelected();
-      if (sel.length === 0) { toast({ variant: "info", title: "Nothing selected" }); return; }
-      const { added, skipped } = await addLeadItems(listId, listItems(sel));
+      const { added, skipped, count } = await addPeopleToList(jobId, listId, buildAddSelection());
+      if (count === 0) { toast({ variant: "info", title: "Nothing selected" }); return; }
       qc.invalidateQueries({ queryKey: ["lead-lists"] });
       toast(addToListToast(added, skipped, listName));
     }
@@ -304,14 +311,14 @@ export function CollectedPeopleTable({
   const createAndAdd = async () => {
     const name = newListName.trim();
     if (!name) return;
+    if (!someSelected) { toast({ variant: "info", title: "Nothing selected" }); setNewListOpen(false); return; }
     setBusy("list");
     try {
-      const sel = await resolveSelected();
-      if (sel.length === 0) { toast({ variant: "info", title: "Nothing selected" }); setNewListOpen(false); return; }
       const list = await createLeadList(name);
-      const { added, skipped } = await addLeadItems(list.id, listItems(sel));
+      const { added, skipped, count } = await addPeopleToList(jobId, list.id, buildAddSelection());
       qc.invalidateQueries({ queryKey: ["lead-lists"] });
       setNewListOpen(false); setNewListName("");
+      if (count === 0) { toast({ variant: "info", title: "Nothing selected" }); return; }
       toast(addToListToast(added, skipped, list.name));
     }
     catch { toast({ variant: "error", title: "Could not create list" }); } finally { setBusy(null); }

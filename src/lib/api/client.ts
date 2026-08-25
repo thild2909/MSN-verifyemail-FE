@@ -579,6 +579,23 @@ export interface CollectPeopleQuery {
   companies?: string[]; locations?: string[]; employees?: string[]; industries?: string[]; minScore?: number;
   sort?: string;
 }
+
+export interface PeopleAddSelection {
+  all: boolean;             // true = "Select all N matching"
+  personIds?: string[];     // when all=false: the explicit checked rows
+  query?: CollectPeopleQuery; // when all=true: the filter context to resolve "all matching"
+}
+
+/**
+ * Add selected people to a list BY REFERENCE. The browser sends only ids or the
+ * filter context — never the (potentially multi-MB) row snapshots — so a large
+ * "Select all" can't 413 at a proxy. The server resolves the rows from its store
+ * and forwards them to the leads backend in small chunks. Returns added/skipped.
+ */
+export async function addPeopleToList(jobId: string, listId: string, selection: PeopleAddSelection): Promise<AddItemsResult & { count: number }> {
+  const { data } = await apiPost<AddItemsResult & { count: number }>(`/api/v1/leads/people/${jobId}/add-to-list`, { listId, ...selection });
+  return data;
+}
 export interface CollectPeoplePage {
   people: CollectedPerson[];
   total: number;
