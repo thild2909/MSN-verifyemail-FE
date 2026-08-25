@@ -119,7 +119,7 @@ export async function llmVerifyPeople(jobId: string, onlyUnverified = true): Pro
           store.setPersonLlm(jobId, p.id, {
             status: "mismatch",
             confidence: verdictById.get(p.id)?.confidence ?? 60,
-            reason: `Removed wrong LinkedIn — no ${p.company} profile found on the live web.`,
+            reason: `Removed wrong LinkedIn. No ${p.company} profile found on the live web.`,
             model: resp.model,
             verifiedAt: at,
           });

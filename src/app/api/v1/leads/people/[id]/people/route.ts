@@ -14,6 +14,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     page: num("page"),
     pageSize: num("pageSize"),
     search: url.searchParams.get("search") ?? "",
+    ids: list("ids"),
     email: list("email"),
     titles: list("titles"),
     seniority: list("seniority"),

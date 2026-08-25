@@ -142,55 +142,55 @@ function classify(c: VerificationChecks): {
     return {
       status: "invalid",
       score: 4,
-      suggestedAction: "Remove — this address is undeliverable.",
+      suggestedAction: "Remove: this address is undeliverable.",
     };
   }
   if (c.disposable) {
     return {
       status: "disposable",
       score: 18,
-      suggestedAction: "Do not send — temporary/disposable inbox.",
+      suggestedAction: "Do not send: temporary/disposable inbox.",
     };
   }
   if (c.smtp === "fail" || c.mailbox === "fail") {
     return {
       status: "invalid",
       score: 9,
-      suggestedAction: "Remove — the mailbox rejected verification.",
+      suggestedAction: "Remove: the mailbox rejected verification.",
     };
   }
   if (c.roleBased) {
     return {
       status: "role",
       score: 55,
-      suggestedAction: "Use with caution — shared role inbox, low engagement.",
+      suggestedAction: "Use with caution: shared role inbox, low engagement.",
     };
   }
   if (c.catchAll) {
     return {
       status: "catch_all",
       score: 52,
-      suggestedAction: "Risky — domain accepts all mail; deliverability unconfirmed.",
+      suggestedAction: "Risky: domain accepts all mail; deliverability unconfirmed.",
     };
   }
   if (c.smtp === "unknown" || c.mailbox === "unknown" || c.greylisted) {
     return {
       status: "risky",
       score: 64,
-      suggestedAction: "Risky — verification was inconclusive; send carefully.",
+      suggestedAction: "Risky: verification was inconclusive; send carefully.",
     };
   }
   if (c.smtp === "pass" && c.mailbox === "pass") {
     return {
       status: "valid",
       score: 92 + Math.round((c.freeProvider ? 0 : 4)),
-      suggestedAction: "Safe to send — mailbox verified deliverable.",
+      suggestedAction: "Safe to send: mailbox verified deliverable.",
     };
   }
   return {
     status: "unknown",
     score: 40,
-    suggestedAction: "Unknown — could not reach a confident conclusion.",
+    suggestedAction: "Unknown: could not reach a confident conclusion.",
   };
 }
 

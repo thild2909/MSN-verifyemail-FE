@@ -239,7 +239,7 @@ export function BulkFinderPanel() {
         {step === "mapping" && parsed && (
           <div className="space-y-4">
             <div className="flex items-center gap-2 rounded-lg bg-valid/10 px-3 py-2 text-sm text-[hsl(var(--valid))]">
-              <CheckCircle2 className="size-4" /> File parsed — map the columns below.
+              <CheckCircle2 className="size-4" /> File parsed. Map the columns below.
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="First name">
@@ -270,7 +270,7 @@ export function BulkFinderPanel() {
         {step === "finding" && (
           <div className="flex items-center gap-2 py-6 text-sm font-medium">
             <Loader2 className="size-4 animate-spin text-primary" />
-            Finding &amp; verifying emails — one shared pass over the backend…
+            Finding &amp; verifying emails in one shared pass over the backend…
           </div>
         )}
 
@@ -295,7 +295,7 @@ export function BulkFinderPanel() {
             {stats && (
               <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm text-primary">
                 <Zap className="size-4 shrink-0" />
-                {formatNumber(stats.backendCalls)} live checks for {formatNumber(stats.people)} people — saved{" "}
+                {formatNumber(stats.backendCalls)} live checks for {formatNumber(stats.people)} people, saved{" "}
                 {formatNumber(stats.saved)} of {formatNumber(stats.naiveCalls)} thanks to early-exit + shared domain/email cache.
               </div>
             )}

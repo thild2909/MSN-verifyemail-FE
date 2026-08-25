@@ -424,7 +424,9 @@ export async function getCollectJob(id: string): Promise<CompanyCollectJob | und
 export interface CreateCollectInput {
   name: string;
   fileName: string;
-  rows: { company: string; location: string }[];
+  // `prefill` is a full snapshot pulled from a saved list (import dedup): the row
+  // is shown straight from it — no crawl.
+  rows: { company: string; location: string; prefill?: CollectedCompany | null }[];
 }
 export async function createCollectJob(input: CreateCollectInput): Promise<{ job: CompanyCollectJob; truncated: number }> {
   const { data, raw } = await apiPost<CompanyCollectJob>("/api/v1/leads/collect", input);
@@ -555,8 +557,24 @@ export async function llmVerifyPeople(id: string, all = false): Promise<LlmPeopl
   return data;
 }
 
+export type AiTagColor = "amber" | "blue" | "green" | "purple" | "red" | "teal" | "pink" | "orange";
+export interface AiTagResult {
+  tag: { label: string; color: AiTagColor } | null;
+  matchedIds: string[];
+  scanned: number;
+  total: number;
+  tokens: number;
+}
+
+/** "AI Support": run a natural-language instruction over the People table and get
+ *  back which rows to tag + a label/colour. `search` targets the visible rows. */
+export async function aiTagPeople(id: string, prompt: string, search = ""): Promise<AiTagResult> {
+  const { data } = await apiPost<AiTagResult>(`/api/v1/leads/people/${id}/ai-tag`, { prompt, search });
+  return data;
+}
+
 export interface CollectPeopleQuery {
-  page?: number; pageSize?: number; search?: string;
+  page?: number; pageSize?: number; search?: string; ids?: string[];
   email?: string[]; titles?: string[]; seniority?: string[]; linkedin?: boolean; funded?: boolean;
   companies?: string[]; locations?: string[]; employees?: string[]; industries?: string[]; minScore?: number;
   sort?: string;
@@ -575,6 +593,7 @@ export async function getCollectedPeople(id: string, query: CollectPeopleQuery =
   if (query.page) params.set("page", String(query.page));
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
   if (query.search) params.set("search", query.search);
+  if (query.ids?.length) params.set("ids", query.ids.join(","));
   if (query.email?.length) params.set("email", query.email.join(","));
   if (query.titles?.length) params.set("titles", query.titles.join(","));
   if (query.seniority?.length) params.set("seniority", query.seniority.join(","));
@@ -684,28 +703,36 @@ export async function getLeadItems(listId: string, query: LeadItemsQuery = {}): 
   return apiGet<LeadItemsPage>(`/api/v1/leads/lists/${listId}/items?${params.toString()}`);
 }
 
-// The API caps items per request; chunk large "Select all N" selections so they
-// still persist in one logical action.
-const LEAD_ITEM_CHUNK = 500;
+// The API caps items per request (and each item carries a full lead snapshot), so
+// chunk large "Select all N" selections; they still persist in one logical action.
+const LEAD_ITEM_CHUNK = 250;
 
-async function postLeadItemsChunked(path: string, items: NewLeadItem[]): Promise<{ added: number }> {
+export interface AddItemsResult {
+  added: number; // newly inserted
+  skipped: number; // already in the list (duplicate by ref or identity)
+}
+
+async function postLeadItemsChunked(path: string, items: NewLeadItem[]): Promise<AddItemsResult> {
   let added = 0;
+  let skipped = 0;
   for (let i = 0; i < items.length; i += LEAD_ITEM_CHUNK) {
     const chunk = items.slice(i, i + LEAD_ITEM_CHUNK);
     if (chunk.length === 0) continue;
-    const { data } = await apiPost<{ added: number }>(path, { items: chunk });
+    const { data } = await apiPost<AddItemsResult>(path, { items: chunk });
     added += data.added;
+    skipped += data.skipped ?? chunk.length - data.added;
   }
-  return { added };
+  return { added, skipped };
 }
 
-/** Add items to a named list (deduped by kind+refId). Returns how many were new. */
-export async function addLeadItems(listId: string, items: NewLeadItem[]): Promise<{ added: number }> {
+/** Add items to a named list (deduped by kind+refId + identity). Returns how many
+ *  were newly added vs skipped as duplicates. */
+export async function addLeadItems(listId: string, items: NewLeadItem[]): Promise<AddItemsResult> {
   return postLeadItemsChunked(`/api/v1/leads/lists/${listId}/items`, items);
 }
 
 /** Drop items into the built-in "Saved" list (the Save button). */
-export async function saveLeadItems(items: NewLeadItem[]): Promise<{ added: number }> {
+export async function saveLeadItems(items: NewLeadItem[]): Promise<AddItemsResult> {
   return postLeadItemsChunked("/api/v1/leads/saved/items", items);
 }
 
@@ -724,6 +751,25 @@ export async function removeLeadItems(listId: string, ids: string[]): Promise<{ 
     removed += (json.data as { removed: number }).removed;
   }
   return { removed };
+}
+
+/* ----------------------- match imports against lists --------------------- */
+
+export interface PersonMatchKey { key: string; name?: string | null; company?: string | null; email?: string | null }
+export interface CompanyMatchKey { key: string; company?: string | null; location?: string | null }
+export interface LeadMatchInput { people?: PersonMatchKey[]; companies?: CompanyMatchKey[] }
+/** Hits keyed by the caller's `key` — each is the full saved LeadItem (snapshot in `data`). */
+export interface LeadMatchResult { people: Record<string, LeadItem>; companies: Record<string, LeadItem> }
+
+/**
+ * Cross-reference import rows against every saved list. A hit means the lead was
+ * already enriched and saved, so its snapshot can fill the table without a crawl.
+ * People match by email or name+company; companies by name+location.
+ */
+export async function matchLeadItems(input: LeadMatchInput): Promise<LeadMatchResult> {
+  if (!input.people?.length && !input.companies?.length) return { people: {}, companies: {} };
+  const { data } = await apiPost<LeadMatchResult>("/api/v1/leads/lists/match", input);
+  return data;
 }
 
 /* -------------------------------- jobs ----------------------------------- */
@@ -757,6 +803,12 @@ export async function deleteJobSearch(id: string): Promise<void> {
   const res = await fetch(`/api/v1/leads/jobs/${id}`, { method: "DELETE" });
   const json = await res.json();
   if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
+}
+
+/** Re-crawl only the blocked/failed sources of an existing job search. */
+export async function retryBlockedJobSources(id: string): Promise<{ id: string; sources: JobSource[] }> {
+  const { data } = await apiPost<{ id: string; sources: JobSource[] }>(`/api/v1/leads/jobs/${id}/retry`, {});
+  return data;
 }
 
 export interface CrawledJobsQuery {

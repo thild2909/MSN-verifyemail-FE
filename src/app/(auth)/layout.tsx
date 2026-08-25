@@ -18,7 +18,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           </h1>
           <p className="mt-4 text-sidebar-muted">
             Verify emails at scale, discover professional contacts, and protect your sender
-            reputation — all from one workspace.
+            reputation, all from one workspace.
           </p>
           <ul className="mt-8 space-y-3 text-sm">
             {[
@@ -35,7 +35,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
 
         <p className="relative z-10 text-xs text-sidebar-muted">
-          © 2026 Verifly. Demo interface — not affiliated with any existing brand.
+          © 2026 Verifly. Demo interface. Not affiliated with any existing brand.
         </p>
 
         <div className="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-sidebar-accent/20 blur-3xl" />

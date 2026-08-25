@@ -10,7 +10,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { getCollectedCompanies, getLeadLists, createLeadList, addLeadItems } from "@/lib/api/client";
 import { formatNumber, cn } from "@/lib/utils";
-import { companyToLeadItem } from "@/lib/leads/lead-snapshot";
+import { companyToLeadItem, addToListToast } from "@/lib/leads/lead-snapshot";
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Sourced, COLLECT_STATUS_META, VerificationBadge, CompanyLogo, LlmBadge } from "./collect-ui";
@@ -142,9 +142,9 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
     try {
       const sel = await resolveSelected();
       if (sel.length === 0) { toast({ variant: "info", title: "Nothing selected" }); return; }
-      const { added } = await addLeadItems(listId, listItems(sel));
+      const { added, skipped } = await addLeadItems(listId, listItems(sel));
       qc.invalidateQueries({ queryKey: ["lead-lists"] });
-      toast({ variant: "success", title: `Added ${formatNumber(added)} to ${listName}` });
+      toast(addToListToast(added, skipped, listName));
     }
     catch { toast({ variant: "error", title: "Could not add to list" }); }
     finally { setBusy(null); }
@@ -161,10 +161,10 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
       const sel = await resolveSelected();
       if (sel.length === 0) { toast({ variant: "info", title: "Nothing selected" }); setNewListOpen(false); return; }
       const list = await createLeadList(name);
-      const { added } = await addLeadItems(list.id, listItems(sel));
+      const { added, skipped } = await addLeadItems(list.id, listItems(sel));
       qc.invalidateQueries({ queryKey: ["lead-lists"] });
       setNewListOpen(false); setNewListName("");
-      toast({ variant: "success", title: `Added ${formatNumber(added)} to ${list.name}` });
+      toast(addToListToast(added, skipped, list.name));
     }
     catch { toast({ variant: "error", title: "Could not create list" }); }
     finally { setBusy(null); }

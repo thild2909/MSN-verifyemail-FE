@@ -8,6 +8,31 @@
 import type { NewLeadItem } from "@/lib/api/client";
 import type { CollectedCompany } from "@/lib/leads/collect-types";
 import type { CollectedPerson } from "@/lib/leads/people-types";
+import { formatNumber } from "@/lib/utils";
+
+/**
+ * Build the toast for an "Add to list" / "New list" result so People and Companies
+ * report duplicates the same way. `skipped` are rows already in the list (duplicate
+ * by ref or by identity — see the leads store), which the backend silently drops.
+ */
+export function addToListToast(
+  added: number,
+  skipped: number,
+  listName: string,
+): { variant: "success" | "info"; title: string; description?: string } {
+  if (added === 0 && skipped > 0) {
+    return {
+      variant: "info",
+      title: `Already in ${listName}`,
+      description: `${formatNumber(skipped)} ${skipped === 1 ? "row was" : "rows were"} already in the list.`,
+    };
+  }
+  return {
+    variant: "success",
+    title: `Added ${formatNumber(added)} to ${listName}`,
+    description: skipped > 0 ? `${formatNumber(skipped)} skipped (already in the list).` : undefined,
+  };
+}
 
 export function companyToLeadItem(c: CollectedCompany, jobId: string): NewLeadItem {
   return {

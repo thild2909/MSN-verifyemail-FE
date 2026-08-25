@@ -6,7 +6,7 @@ export default function InboxPlacementPage() {
   return (
     <ComingSoon
       title="Inbox Placement"
-      subtitle="See where your campaigns land — inbox, spam, or promotions — across major providers."
+      subtitle="See where your campaigns land: inbox, spam, or promotions across major providers."
       features={[
         { title: "Seed list testing", description: "Send to seed inboxes across Gmail, Outlook, Yahoo and more." },
         { title: "Placement breakdown", description: "Per-provider inbox vs. spam vs. missing rates." },

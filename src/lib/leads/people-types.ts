@@ -225,4 +225,7 @@ export interface PeopleSeedInput {
   companyFoundedYear?: string | null;
   companySeoDescription?: string | null;
   companyShortDescription?: string | null;
+  // A full snapshot pulled from a saved list (import dedup). When present the row
+  // is shown straight from this snapshot — no crawl, no re-verify.
+  prefill?: CollectedPerson | null;
 }

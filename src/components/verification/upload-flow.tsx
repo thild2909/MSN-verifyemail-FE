@@ -262,12 +262,12 @@ export function UploadFlow() {
         {step === "parsed" && parsed && (
           <div className="space-y-4">
             <div className="flex items-center gap-2 rounded-lg bg-valid/10 px-3 py-2 text-sm text-[hsl(var(--valid))]">
-              <CheckCircle2 className="size-4" /> Parsed — {formatNumber(parsed.uniqueEmails)} unique emails
+              <CheckCircle2 className="size-4" /> Parsed: {formatNumber(parsed.uniqueEmails)} unique emails
             </div>
             {parsed.skipped > 0 && (
               <div className="flex items-center gap-2 rounded-lg bg-risky/10 px-3 py-2 text-sm text-[hsl(var(--risky))]">
                 <AlertTriangle className="size-4" />
-                {formatNumber(parsed.skipped)} {parsed.skipped === 1 ? "row" : "rows"} skipped — missing email
+                {formatNumber(parsed.skipped)} {parsed.skipped === 1 ? "row" : "rows"} skipped (missing email)
               </div>
             )}
             <div className="grid gap-3 sm:grid-cols-3">
@@ -291,7 +291,7 @@ export function UploadFlow() {
               <Row label="Unique emails" value={formatNumber(parsed.uniqueEmails)} strong />
             </div>
             <p className="rounded-lg bg-accent/50 px-3 py-2 text-xs text-accent-foreground">
-              Verification runs on the server — you can leave this page and check the list later.
+              Verification runs on the server. You can leave this page and check the list later.
             </p>
             <Button className="w-full" disabled={creating} onClick={start}>
               {creating ? <Loader2 className="size-4 animate-spin" /> : "Start verification"}

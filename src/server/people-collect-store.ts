@@ -129,6 +129,7 @@ export function getSeedCoverage(jobId: string): { company: string; status: strin
 
 export interface PeopleQuery {
   page?: number; pageSize?: number; search?: string;
+  ids?: string[]; // restrict to these person ids (AI Support "filter tagged rows")
   email?: string[]; // has | valid | catch_all | risky | invalid | unverified | none
   titles?: string[]; // title contains  (OR)
   seniority?: string[]; // founder | c_level | president | vp | other
@@ -212,7 +213,7 @@ export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
   sealMissedEmailLookups(jobId);
   const all = store().people[jobId] ?? [];
   const {
-    page = 1, pageSize = 25, search = "",
+    page = 1, pageSize = 25, search = "", ids = [],
     email = [], titles = [], seniority = [], linkedin = false, funded = false,
     companies = [], locations = [], employees = [], industries = [], minScore = 0, sort = "",
   } = query;
@@ -223,6 +224,8 @@ export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
   const locationTerms = lower(locations);
 
   let filtered = all;
+  // AI Support "filter tagged rows": restrict to an explicit id whitelist first.
+  if (ids.length) { const idSet = new Set(ids); filtered = filtered.filter((p) => idSet.has(p.id)); }
   const q = search.trim().toLowerCase();
   if (q) filtered = filtered.filter((p) =>
     p.name.toLowerCase().includes(q) ||
@@ -398,6 +401,35 @@ export function applySeedPeople(jobId: string, index: number, crawled: CrawledPe
   });
   seed.status = "done";
   seed.peopleFound = crawled.length;
+  s.people[jobId] = dedupePeopleList(s.people[jobId] ?? []);
+  recompute(jobId);
+  scheduleSave();
+}
+
+/**
+ * Attach a person straight from a saved-list snapshot (import dedup) and mark the
+ * seed done. The snapshot is the full CollectedPerson we stored earlier, so every
+ * field — title, LinkedIn, email + its verification, confidence — is preserved
+ * as-is; no crawl, no re-verify. Re-ids the row to this job.
+ */
+export function applyPrefillPerson(jobId: string, index: number, snapshot: CollectedPerson) {
+  const s = store();
+  const seed = s.seeds[jobId]?.[index];
+  if (!seed) return;
+  const list = s.people[jobId] ?? (s.people[jobId] = []);
+  list.push({
+    ...snapshot,
+    id: `${jobId}_${index}_0`,
+    jobId,
+    companyId: seed.companyId ?? snapshot.companyId ?? null,
+    companyLogoText: initials(snapshot.company || seed.company),
+    collection: [
+      ...(snapshot.collection ?? []),
+      { source: "other", status: "ok", proxy: null, ms: 0, fieldsFound: 1, detail: "imported from saved list, not re-enriched", provider: "import" },
+    ],
+  });
+  seed.status = "done";
+  seed.peopleFound = 1;
   s.people[jobId] = dedupePeopleList(s.people[jobId] ?? []);
   recompute(jobId);
   scheduleSave();

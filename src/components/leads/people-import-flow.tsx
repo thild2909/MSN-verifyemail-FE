@@ -9,7 +9,8 @@ import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { FileDropzone } from "@/components/verification/file-dropzone";
 import { useToast } from "@/components/ui/toast";
-import { createPeopleJob, ApiError } from "@/lib/api/client";
+import { createPeopleJob, matchLeadItems, ApiError, type LeadItem } from "@/lib/api/client";
+import type { CollectedPerson } from "@/lib/leads/people-types";
 import { formatNumber } from "@/lib/utils";
 
 interface Parsed { fileName: string; columns: string[]; rows: string[][] }
@@ -79,9 +80,12 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
   const [map, setMap] = React.useState<Mapping>({ firstName: "", lastName: "", company: "", city: "", state: "", country: "", ...EMPTY_OPT });
   const [showOptional, setShowOptional] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
+  // Rows already saved in a list (import dedup), keyed by built-row index → snapshot.
+  const [matches, setMatches] = React.useState<Record<string, LeadItem>>({});
+  const [matching, setMatching] = React.useState(false);
   const { toast } = useToast();
 
-  const reset = () => { setParsed(null); setName(""); setMap({ firstName: "", lastName: "", company: "", city: "", state: "", country: "", ...EMPTY_OPT }); setShowOptional(false); setCreating(false); };
+  const reset = () => { setParsed(null); setName(""); setMap({ firstName: "", lastName: "", company: "", city: "", state: "", country: "", ...EMPTY_OPT }); setShowOptional(false); setCreating(false); setMatches({}); };
   const close = () => { onOpenChange(false); setTimeout(reset, 200); };
 
   const onFile = (file: File) => {
@@ -89,8 +93,12 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
       const cols = columns.length ? columns : ["first_name", "last_name", "company", "location"];
       setParsed({ fileName: file.name, columns: cols, rows: data });
       const firstName = bestColumn(cols, data, FIRST_RE) ?? bestColumn(cols, data, FULLNAME_RE) ?? cols[0] ?? "";
-      const lastName = bestColumn(cols, data, LAST_RE, [firstName]) ?? cols.find((c) => c !== firstName) ?? "";
-      const company = bestColumn(cols, data, COMPANY_RE, [firstName, lastName]) ?? "";
+      // Last Name is OPTIONAL — only auto-map a real Last-Name column. Never fall
+      // back to "some other column", which used to steal Company/Email into Last
+      // Name (emptying the required Company map, so every row looked "missing").
+      // A single combined name column is split per-row later (see `built`).
+      const lastName = bestColumn(cols, data, LAST_RE, [firstName]) ?? "";
+      const company = bestColumn(cols, data, COMPANY_RE, [firstName, lastName].filter(Boolean)) ?? "";
       // Location is composed from City + State + Country (Apollo-style exports).
       // A single generic "Location"/address column falls back into City.
       const city = bestColumn(cols, data, CITY_RE, [firstName, lastName, company]) ?? bestColumn(cols, data, LOCATION_RE, [firstName, lastName, company]) ?? "";
@@ -161,6 +169,24 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
     return out;
   }, [parsed, map]);
 
+  // Cross-reference the built rows against every saved list. A hit means the
+  // person is already enriched somewhere, so we reuse that snapshot (no crawl).
+  React.useEffect(() => {
+    setMatches({}); // drop stale hits before re-matching — indices shift when the mapping changes
+    if (built.length === 0) return;
+    let cancelled = false;
+    setMatching(true);
+    matchLeadItems({
+      people: built.map((r, i) => ({ key: String(i), name: `${r.firstName} ${r.lastName}`.trim(), company: r.company, email: r.email || undefined })),
+    })
+      .then((res) => { if (!cancelled) setMatches(res.people); })
+      .catch(() => { if (!cancelled) setMatches({}); })
+      .finally(() => { if (!cancelled) setMatching(false); });
+    return () => { cancelled = true; };
+  }, [built]);
+
+  const matchedCount = React.useMemo(() => built.reduce((n, _r, i) => (matches[String(i)] ? n + 1 : n), 0), [built, matches]);
+
   const skipped = parsed ? parsed.rows.length - built.length : 0;
   const optionalMapped = OPTIONAL_FIELDS.filter((f) => map[f.key]).length;
   // Rows that already carry enriched data (LinkedIn / email / title / seniority)
@@ -174,7 +200,9 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
     try {
       const { job, truncated } = await createPeopleJob({
         name: name.trim() || parsed.fileName,
-        seeds: built.map((r) => ({
+        seeds: built.map((r, i) => ({
+          // A saved-list hit fills the row straight from its snapshot — no crawl.
+          prefill: (matches[String(i)]?.data as unknown as CollectedPerson | undefined) ?? undefined,
           firstName: r.firstName, lastName: r.lastName, company: r.company, location: r.location,
           city: r.city || undefined, state: r.state || undefined, country: r.country || undefined,
           title: r.title || undefined, headline: r.headline || undefined, seniority: r.seniority || undefined,
@@ -247,6 +275,12 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
             <span><span className="font-semibold text-foreground">{formatNumber(built.length)}</span> valid rows{optionalMapped > 0 && ` · ${optionalMapped} extra field${optionalMapped === 1 ? "" : "s"}`}</span>
             {skipped > 0 && <span className="inline-flex items-center gap-1 text-[hsl(var(--risky))]"><AlertTriangle className="size-3.5" /> {formatNumber(skipped)} rows missing name or company</span>}
           </div>
+          {matching && <p className="text-xs text-muted-foreground">Checking your lists for matches…</p>}
+          {matchedCount > 0 && (
+            <p className="rounded-md bg-primary/10 px-2.5 py-1.5 text-xs text-primary">
+              <span className="font-medium">{formatNumber(matchedCount)}</span> row{matchedCount === 1 ? " is" : "s are"} already in your <span className="font-medium">Lists</span>. Filled straight from the saved record, <span className="font-medium">no crawl</span>.
+            </p>
+          )}
           {asIsCount > 0 && (
             <p className="rounded-md bg-valid/10 px-2.5 py-1.5 text-xs text-[hsl(var(--valid))]">
               <span className="font-medium">{formatNumber(asIsCount)}</span> row{asIsCount === 1 ? "" : "s"} already have LinkedIn / title / email, shown <span className="font-medium">directly, no crawl</span>.{built.length > asIsCount && ` The other ${formatNumber(built.length - asIsCount)} (name + company only) get their LinkedIn & email added.`}

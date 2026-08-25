@@ -24,7 +24,11 @@ export function isJobSearchRunning(id: string) {
 async function run(id: string) {
   const job = store.getJobSearch(id);
   if (!job) return;
-  const sources = [...job.sources];
+  // Crawl only the sources still marked "pending". On the first run that's every
+  // selected source; on a "Retry blocked" run it's just the ones reset back to
+  // pending — so this one runner serves both without re-crawling finished boards.
+  const pending = job.coverage.filter((c) => c.status === "pending").map((c) => c.source as JobSource);
+  const sources = pending.length ? pending : [...job.sources];
   const params = job.params;
   let next = 0;
 

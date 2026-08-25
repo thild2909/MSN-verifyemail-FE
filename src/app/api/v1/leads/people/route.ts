@@ -46,6 +46,8 @@ const seedSchema = z.object({
   companyFoundedYear: z.string().trim().nullish(),
   companySeoDescription: z.string().trim().nullish(),
   companyShortDescription: z.string().trim().nullish(),
+  // Full snapshot from a saved list (import dedup) — shown as-is, no crawl.
+  prefill: z.record(z.unknown()).nullish(),
 });
 
 // Two ways to create a people job:
@@ -101,7 +103,8 @@ export async function POST(req: Request) {
 
   let seeds: PeopleSeedInput[];
   if ("seeds" in parsed.data) {
-    seeds = parsed.data.seeds;
+    // `prefill` is validated as an opaque record; it IS the stored CollectedPerson snapshot.
+    seeds = parsed.data.seeds as PeopleSeedInput[];
   } else {
     const { fromCompanyJob, companyIds, allMatching, search, company, locations, employees, technologies, status, has, email, industries } = parsed.data;
     if (!companyStore.getCollectJob(fromCompanyJob)) {
@@ -117,7 +120,7 @@ export async function POST(req: Request) {
     // Only companies that actually resolved can yield people.
     seeds = companies.filter((c) => c.status === "enriched").map(seedFromCompany);
     if (!seeds.length) {
-      return NextResponse.json({ success: false, error: { code: "NO_SEEDS", message: "None of the selected companies are resolved yet — run collection first." } }, { status: 400 });
+      return NextResponse.json({ success: false, error: { code: "NO_SEEDS", message: "None of the selected companies are resolved yet. Run collection first." } }, { status: 400 });
     }
   }
 

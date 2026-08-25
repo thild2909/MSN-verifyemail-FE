@@ -93,7 +93,7 @@ export default function BillingPage() {
                 ))}
               </TableBody>
             </Table>
-            <p className="mt-3 text-xs text-muted-foreground">Pricing is served from backend configuration — never hard-coded in the client.</p>
+            <p className="mt-3 text-xs text-muted-foreground">Pricing is served from backend configuration, never hard-coded in the client.</p>
           </CardContent>
         </Card>
       </div>

@@ -47,7 +47,6 @@ const SOURCE_COUNTRY: Record<JobSource, string | null> = {
   glassdoor: null,
   mycareersfuture: "Singapore",
   wellfound: "United States",
-  "startups-gallery": null,
 };
 
 export interface SourceCrawlResult {

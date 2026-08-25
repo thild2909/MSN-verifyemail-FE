@@ -55,7 +55,7 @@ export function FinderPanel() {
     const savings = o.fromCache
       ? " (from cache)"
       : o.skipped > 0
-        ? ` — skipped ${o.skipped} check${o.skipped === 1 ? "" : "s"}`
+        ? ` (skipped ${o.skipped} check${o.skipped === 1 ? "" : "s"})`
         : "";
     const copy: Record<FinderState, { variant: "success" | "info" | "warning"; title: string; description: string }> = {
       verified: { variant: "success", title: "Email found", description: `Verified the deliverable address${savings}.` },

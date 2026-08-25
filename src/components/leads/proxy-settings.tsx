@@ -89,7 +89,7 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
         toast({
           variant: healthy > 0 ? "success" : "error",
           title: healthy > 0 ? "Full pool verified" : "Proxy pool test failed",
-          description: `${healthy} healthy · ${slow} slow · ${dead} dead — ${total} tested sequentially`,
+          description: `${healthy} healthy · ${slow} slow · ${dead} dead. ${total} tested sequentially`,
         });
         return;
       }
@@ -255,7 +255,7 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
                   value={paste}
                   onChange={(e) => setPaste(e.target.value)}
                   rows={4}
-                  placeholder={"Paste one per line — Webshare format:\n31.59.20.176:6754:ghftyooq:3pu60o6w995p\nor  user:pass@host:port  ·  host:port"}
+                  placeholder={"Paste one per line. Webshare format:\n31.59.20.176:6754:ghftyooq:3pu60o6w995p\nor  user:pass@host:port  ·  host:port"}
                   className="w-full rounded-md border border-input bg-card p-2 font-mono text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
                 <div className="mt-2 flex justify-end gap-2">

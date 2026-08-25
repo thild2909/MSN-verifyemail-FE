@@ -187,28 +187,28 @@ function classify(
   smtp: SmtpDetails | null,
 ): { status: VerificationStatus; score: number; suggestedAction: string } {
   if (c.syntax === "fail") {
-    return { status: "invalid", score: 3, suggestedAction: "Remove — invalid email syntax." };
+    return { status: "invalid", score: 3, suggestedAction: "Remove: invalid email syntax." };
   }
   if (reachable === "invalid" || c.mx === "fail" || (smtp?.is_disabled ?? false)) {
-    return { status: "invalid", score: 7, suggestedAction: "Remove — this address is undeliverable." };
+    return { status: "invalid", score: 7, suggestedAction: "Remove: this address is undeliverable." };
   }
   if (c.disposable) {
-    return { status: "disposable", score: 18, suggestedAction: "Do not send — temporary/disposable inbox." };
+    return { status: "disposable", score: 18, suggestedAction: "Do not send: temporary/disposable inbox." };
   }
   if (reachable === "safe") {
     if (c.roleBased) {
-      return { status: "role", score: 74, suggestedAction: "Deliverable, but a shared role inbox — expect low engagement." };
+      return { status: "role", score: 74, suggestedAction: "Deliverable, but a shared role inbox. Expect low engagement." };
     }
-    return { status: "valid", score: c.freeProvider ? 92 : 96, suggestedAction: "Safe to send — mailbox verified deliverable." };
+    return { status: "valid", score: c.freeProvider ? 92 : 96, suggestedAction: "Safe to send: mailbox verified deliverable." };
   }
   if (c.catchAll) {
-    return { status: "catch_all", score: 54, suggestedAction: "Risky — domain accepts all mail; deliverability unconfirmed." };
+    return { status: "catch_all", score: 54, suggestedAction: "Risky: domain accepts all mail; deliverability unconfirmed." };
   }
   if (c.roleBased) {
-    return { status: "role", score: 60, suggestedAction: "Use with caution — shared role inbox." };
+    return { status: "role", score: 60, suggestedAction: "Use with caution: shared role inbox." };
   }
   if (reachable === "risky") {
-    return { status: "risky", score: 62, suggestedAction: "Risky — verification was inconclusive; send carefully." };
+    return { status: "risky", score: 62, suggestedAction: "Risky: verification was inconclusive; send carefully." };
   }
-  return { status: "unknown", score: 40, suggestedAction: "Unknown — the mail server did not give a definitive answer." };
+  return { status: "unknown", score: 40, suggestedAction: "Unknown: the mail server did not give a definitive answer." };
 }

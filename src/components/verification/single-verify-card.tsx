@@ -24,7 +24,7 @@ export function SingleVerifyCard() {
       if (res.provider === "mock") {
         toast({
           variant: "warning",
-          title: "Backend offline — simulated result",
+          title: "Backend offline: simulated result",
           description: "Start the verification backend for real SMTP checks.",
         });
       } else {

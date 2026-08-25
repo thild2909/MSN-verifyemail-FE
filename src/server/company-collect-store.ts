@@ -184,13 +184,16 @@ export function getCompanies(jobId: string, query: CompaniesQuery = {}): Compani
 export interface CreateCollectInput {
   name: string;
   fileName: string;
-  rows: { company: string; location: string }[];
+  // `prefill` is a full snapshot pulled from a saved list (import dedup); such a
+  // row is shown straight from it, skipping the crawl. Typed as an opaque record
+  // (it crosses the JSON boundary); it IS a stored CollectedCompany.
+  rows: { company: string; location: string; prefill?: Record<string, unknown> | null }[];
 }
 
 export function createCollectJob(input: CreateCollectInput): { job: CompanyCollectJob; truncated: number } {
   const seen = new Set<string>();
   const unique = input.rows
-    .map((r) => ({ company: r.company.trim(), location: r.location.trim() }))
+    .map((r) => ({ company: r.company.trim(), location: r.location.trim(), prefill: r.prefill ?? null }))
     .filter((r) => {
       if (!r.company) return false;
       const key = `${r.company.toLowerCase()}|${r.location.toLowerCase()}`;
@@ -208,11 +211,41 @@ export function createCollectJob(input: CreateCollectInput): { job: CompanyColle
     total: capped.length, progress: 0, summary: emptySummary(capped.length), createdAt: now,
   };
   const s = store();
-  s.companies[id] = capped.map((r, i) => blankCompany(`${id}_${i}`, id, r.company, r.location));
+  s.companies[id] = capped.map((r, i) =>
+    r.prefill ? companyFromPrefill(`${id}_${i}`, id, r.company, r.location, r.prefill) : blankCompany(`${id}_${i}`, id, r.company, r.location),
+  );
   s.jobs.push(job);
   pruneHistory(s);
+  recompute(id); // reflect prefilled (already-resolved) rows in progress/summary immediately
   scheduleSave();
   return { job, truncated };
+}
+
+/**
+ * Build a company row from a saved-list snapshot (import dedup). Re-ids it to this
+ * job, keeps every collected field, and marks the status as resolved so the crawl
+ * runner (which only processes `pending`) skips it. A `not_found`/`failed` snapshot
+ * keeps that status so it can still be retried.
+ */
+function companyFromPrefill(id: string, jobId: string, name: string, location: string, raw: Record<string, unknown>): CollectedCompany {
+  const snap = raw as Partial<CollectedCompany>;
+  const base = blankCompany(id, jobId, name, location);
+  const crawled = snap.status && snap.status !== "pending" && snap.status !== "collecting" ? snap.status : "enriched";
+  return {
+    ...base,
+    ...snap,
+    id,
+    jobId,
+    // Keep the import's own name/location as the row identity (the snapshot's may
+    // differ slightly); everything else comes from the snapshot.
+    inputName: name,
+    inputLocation: location,
+    status: crawled,
+    collection: [
+      ...(snap.collection ?? []),
+      { source: "other", status: "ok", proxy: null, ms: 0, fieldsFound: 1, detail: "imported from saved list, not re-collected", simulated: false },
+    ],
+  };
 }
 
 function blankCompany(id: string, jobId: string, name: string, location: string): CollectedCompany {

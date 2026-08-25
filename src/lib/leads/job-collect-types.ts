@@ -15,8 +15,7 @@
 import type { CollectionAttempt, VerifyStatus } from "./collect-types";
 
 /** Job boards the server-side crawler can search. Ported from the browser
- *  extension's per-site crawlers. Startups.gallery is a funding-signal feed
- *  (freshly-funded companies), not a classic board — see its adapter. */
+ *  extension's per-site crawlers. */
 export const JOB_SOURCES = [
   "seek",
   "indeed",
@@ -27,7 +26,6 @@ export const JOB_SOURCES = [
   "glassdoor",
   "mycareersfuture",
   "wellfound",
-  "startups-gallery",
 ] as const;
 export type JobSource = (typeof JOB_SOURCES)[number];
 
@@ -41,7 +39,6 @@ export const JOB_SOURCE_LABEL: Record<JobSource, string> = {
   glassdoor: "Glassdoor",
   mycareersfuture: "MyCareersFuture",
   wellfound: "Wellfound",
-  "startups-gallery": "Startups.gallery",
 };
 
 /** Short region hint shown next to each source so the user knows its coverage. */
@@ -55,7 +52,6 @@ export const JOB_SOURCE_REGION: Record<JobSource, string> = {
   glassdoor: "Global",
   mycareersfuture: "Singapore",
   wellfound: "US startups",
-  "startups-gallery": "Funding signals",
 };
 
 export type CollectedJobStatus = "found";

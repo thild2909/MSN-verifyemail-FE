@@ -22,7 +22,7 @@ export function ComingSoon({
         </div>
         <h2 className="text-lg font-semibold">This module is on the roadmap</h2>
         <p className="mt-1 max-w-md text-sm text-muted-foreground">
-          The architecture is in place — data models, navigation, and API surface are ready. The
+          The architecture is in place: data models, navigation, and API surface are ready. The
           interactive experience ships in an upcoming release.
         </p>
       </Card>

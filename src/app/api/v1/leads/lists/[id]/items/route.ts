@@ -37,7 +37,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!parsed.success) {
     return NextResponse.json({ success: false, error: { code: "INVALID_REQUEST", message: "An `items` array is required." } }, { status: 400 });
   }
-  const res = await be<{ data: { added: number } }>(`/leads/lists/${encodeURIComponent(id)}/items`, {
+  const res = await be<{ data: { added: number; skipped: number } }>(`/leads/lists/${encodeURIComponent(id)}/items`, {
     method: "POST",
     body: JSON.stringify({ items: parsed.data.items }),
   });

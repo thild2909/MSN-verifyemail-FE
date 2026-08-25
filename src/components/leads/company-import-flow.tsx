@@ -9,7 +9,8 @@ import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { FileDropzone } from "@/components/verification/file-dropzone";
 import { useToast } from "@/components/ui/toast";
-import { createCollectJob, ApiError } from "@/lib/api/client";
+import { createCollectJob, matchLeadItems, ApiError, type LeadItem } from "@/lib/api/client";
+import type { CollectedCompany } from "@/lib/leads/collect-types";
 import { formatNumber } from "@/lib/utils";
 
 interface Parsed { fileName: string; columns: string[]; rows: string[][] }
@@ -39,9 +40,12 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
   const [name, setName] = React.useState("");
   const [map, setMap] = React.useState({ company: "", location: "" });
   const [creating, setCreating] = React.useState(false);
+  // Rows already saved in a list (import dedup), keyed by built-row index → snapshot.
+  const [matches, setMatches] = React.useState<Record<string, LeadItem>>({});
+  const [matching, setMatching] = React.useState(false);
   const { toast } = useToast();
 
-  const reset = () => { setParsed(null); setName(""); setMap({ company: "", location: "" }); setCreating(false); };
+  const reset = () => { setParsed(null); setName(""); setMap({ company: "", location: "" }); setCreating(false); setMatches({}); };
   const close = () => { onOpenChange(false); setTimeout(reset, 200); };
 
   const onFile = (file: File) => {
@@ -99,13 +103,30 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
     return out;
   }, [parsed, map]);
 
+  // Cross-reference the built rows against every saved list. A hit means the
+  // company is already enriched somewhere, so we reuse that snapshot (no crawl).
+  React.useEffect(() => {
+    setMatches({}); // drop stale hits before re-matching — indices shift when the mapping changes
+    if (built.length === 0) return;
+    let cancelled = false;
+    setMatching(true);
+    matchLeadItems({ companies: built.map((r, i) => ({ key: String(i), company: r.company, location: r.location })) })
+      .then((res) => { if (!cancelled) setMatches(res.companies); })
+      .catch(() => { if (!cancelled) setMatches({}); })
+      .finally(() => { if (!cancelled) setMatching(false); });
+    return () => { cancelled = true; };
+  }, [built]);
+
+  const matchedCount = React.useMemo(() => built.reduce((n, _r, i) => (matches[String(i)] ? n + 1 : n), 0), [built, matches]);
+
   const skipped = parsed ? parsed.rows.length - built.length : 0;
 
   const create = async () => {
     if (!parsed || built.length === 0) return;
     setCreating(true);
     try {
-      const { job, truncated } = await createCollectJob({ name: name.trim() || parsed.fileName, fileName: parsed.fileName, rows: built });
+      const rows = built.map((r, i) => ({ ...r, prefill: (matches[String(i)]?.data as unknown as CollectedCompany | undefined) ?? null }));
+      const { job, truncated } = await createCollectJob({ name: name.trim() || parsed.fileName, fileName: parsed.fileName, rows });
       toast({ variant: "success", title: "Collection started", description: `${formatNumber(job.total)} companies${truncated ? ` · ${formatNumber(truncated)} over cap` : ""}.` });
       onCreated(job.id);
       close();
@@ -129,7 +150,7 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 rounded-lg bg-valid/10 px-3 py-2 text-sm text-[hsl(var(--valid))]"><CheckCircle2 className="size-4" /> {parsed.fileName} — map the required columns.</div>
+          <div className="flex items-center gap-2 rounded-lg bg-valid/10 px-3 py-2 text-sm text-[hsl(var(--valid))]"><CheckCircle2 className="size-4" /> {parsed.fileName}. Map the required columns.</div>
           <div className="space-y-1.5"><Label>Job name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Target accounts" /></div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5"><Label>Company Name <span className="text-[hsl(var(--invalid))]">*</span></Label>
@@ -143,6 +164,12 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
             <span><span className="font-semibold text-foreground">{formatNumber(built.length)}</span> valid rows</span>
             {skipped > 0 && <span className="inline-flex items-center gap-1 text-[hsl(var(--risky))]"><AlertTriangle className="size-3.5" /> {formatNumber(skipped)} rows missing name/location</span>}
           </div>
+          {matching && <p className="text-xs text-muted-foreground">Checking your lists for matches…</p>}
+          {matchedCount > 0 && (
+            <p className="rounded-md bg-primary/10 px-2.5 py-1.5 text-xs text-primary">
+              <span className="font-medium">{formatNumber(matchedCount)}</span> compan{matchedCount === 1 ? "y is" : "ies are"} already in your <span className="font-medium">Lists</span>. Filled straight from the saved record, <span className="font-medium">no crawl</span>.
+            </p>
+          )}
         </div>
       )}
 

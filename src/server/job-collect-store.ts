@@ -260,6 +260,34 @@ function recompute(jobId: string) {
   }
 }
 
+/** Reset every blocked/failed source back to "pending" so a retry re-crawls
+ *  only those. Their prior partial results/counters are cleared so the fresh
+ *  attempt rebuilds them cleanly. Returns the sources queued for retry (an
+ *  empty array means there was nothing to retry). */
+export function retryBlockedSources(jobId: string): JobSource[] {
+  const s = store();
+  const job = getJob(jobId);
+  const coverage = s.coverage[jobId];
+  if (!job || !coverage) return [];
+  const retry: JobSource[] = [];
+  for (const c of coverage) {
+    if (c.status === "blocked" || c.status === "failed") {
+      c.status = "pending";
+      c.jobsFound = 0;
+      c.pages = 0;
+      retry.push(c.source);
+    }
+  }
+  if (retry.length === 0) return [];
+  const retrySet = new Set<JobSource>(retry);
+  s.results[jobId] = (s.results[jobId] ?? []).filter((j) => !retrySet.has(j.source));
+  job.status = "collecting";
+  job.completedAt = undefined;
+  recompute(jobId);
+  scheduleSave();
+  return retry;
+}
+
 export function deleteJobSearch(id: string): boolean {
   const s = store();
   const before = s.jobs.length;

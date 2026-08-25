@@ -24,7 +24,7 @@ export const FINDER_STATE_META: Record<FinderState, FinderStateMeta> = {
   },
   accept_all: {
     icon: ShieldAlert,
-    label: "Plausible but unverified — deliverability not confirmed",
+    label: "Plausible but unverified: deliverability not confirmed",
     chip: "Unverified",
     className: "text-[hsl(var(--risky))] bg-[hsl(var(--risky))]/10",
   },

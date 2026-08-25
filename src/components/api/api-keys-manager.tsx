@@ -134,7 +134,7 @@ export function ApiKeysManager() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogHeader>
           <DialogTitle>Create API key</DialogTitle>
-          <DialogDescription>{generated ? "Copy your key now — it won't be shown again." : "Give your key a recognizable name."}</DialogDescription>
+          <DialogDescription>{generated ? "Copy your key now. It won't be shown again." : "Give your key a recognizable name."}</DialogDescription>
         </DialogHeader>
         {generated ? (
           <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3">

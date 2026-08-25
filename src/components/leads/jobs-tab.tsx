@@ -8,7 +8,7 @@ import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
-import { getJobSearches, getJobSearch, deleteJobSearch, getProxyConfig, createPeopleJob } from "@/lib/api/client";
+import { getJobSearches, getJobSearch, deleteJobSearch, retryBlockedJobSources, getProxyConfig, createPeopleJob } from "@/lib/api/client";
 import { DEFAULT_JOB_FILTERS, type JobFilters } from "@/lib/leads/types";
 import { JOB_SOURCE_LABEL, type JobCollectJob, type JobSourceCoverage } from "@/lib/leads/job-collect-types";
 import { WORK_MODE_LABEL } from "./leads-ui";
@@ -74,12 +74,24 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
     onError: () => toast({ variant: "error", title: "Could not delete" }),
   });
 
+  // "Retry blocked" — re-crawl only the sources that came back blocked/failed
+  // (e.g. a Cloudflare wall) without touching the boards that already returned.
+  const retry = useMutation({
+    mutationFn: (id: string) => retryBlockedJobSources(id),
+    onSuccess: ({ sources }) => {
+      qc.invalidateQueries({ queryKey: ["job-search", activeId] });
+      qc.invalidateQueries({ queryKey: ["job-searches"] });
+      toast({ variant: "success", title: "Retrying…", description: `Re-crawling ${sources.length} source${sources.length === 1 ? "" : "s"}.` });
+    },
+    onError: (e) => toast({ variant: "error", title: "Couldn't retry", description: e instanceof Error ? e.message : "Try again." }),
+  });
+
   // "Find people" — seed a real people-collect job from the employers behind the
   // selected roles (deduped by company name). Opt-in, user-triggered from the
   // selection bar, mirroring the Companies tab. Then jump to the People tab.
   const findPeople = useMutation({
     mutationFn: (payload: FindPeopleFromJobsPayload) =>
-      createPeopleJob({ name: `${active?.name ?? "Jobs"} — people`, seeds: payload.seeds }),
+      createPeopleJob({ name: `People from ${active?.name ?? "Jobs"}`, seeds: payload.seeds }),
     onSuccess: ({ job, truncated }, payload) => {
       qc.invalidateQueries({ queryKey: ["people-jobs"] });
       toast({
@@ -99,6 +111,7 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
   const rotatingActive = proxy?.rotating?.active ?? false;
   const live = active?.status === "collecting";
   const s = active?.summary;
+  const retryable = active?.coverage?.filter((c) => c.status === "blocked" || c.status === "failed").length ?? 0;
 
   const modals = (
     <>
@@ -144,6 +157,12 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
             {rotatingActive ? <Globe className="size-3.5" /> : proxy?.enabled ? <ShieldCheck className="size-3.5" /> : <ShieldOff className="size-3.5" />}
             {rotatingActive ? "Rotating residential" : proxy?.enabled ? `Proxies on · ${enabledProxies}` : "Proxies off"}
           </button>
+          {active && retryable > 0 && !live && (
+            <Button size="sm" variant="outline" onClick={() => retry.mutate(active.id)} disabled={retry.isPending}>
+              {retry.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />} Retry blocked
+              <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{retryable}</span>
+            </Button>
+          )}
           <Button size="sm" onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> New crawl</Button>
           {active && <button onClick={() => remove.mutate(active.id)} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete crawl">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
         </div>

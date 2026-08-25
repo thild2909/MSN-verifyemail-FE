@@ -87,7 +87,7 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
   const findPeople = useMutation({
     mutationFn: (payload: FindPeoplePayload) =>
       createPeopleJob({
-        name: `${active?.name ?? "Companies"} — people`,
+        name: `People from ${active?.name ?? "Companies"}`,
         fromCompanyJob: activeId!,
         ...(payload.allMatching
           ? { allMatching: true, search: payload.search, ...payload.filters }

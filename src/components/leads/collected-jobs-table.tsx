@@ -38,7 +38,6 @@ const SOURCE_CLASS: Record<JobSource, string> = {
   glassdoor: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
   mycareersfuture: "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300",
   wellfound: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
-  "startups-gallery": "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/15 dark:text-fuchsia-300",
 };
 
 export function SourceBadge({ source }: { source: JobSource }) {
@@ -188,10 +187,9 @@ export function CollectedJobsTable({
     setBusy("export");
     try {
       const sel = await resolveSelected();
-      const headers = ["Title", "Company", "Location", "Source", "Salary", "Posted", "Work mode", "Employment type", "URL"];
+      const headers = ["Company", "Location", "Posted"];
       const csv = toCsv(headers, sel.map((j) => [
-        j.title, j.company, j.location ?? "", JOB_SOURCE_LABEL[j.source] ?? j.source, j.salary ?? "",
-        postedLabel(j), j.workMode ?? "", j.employmentType ?? "", j.url ?? "",
+        j.company, j.location ?? "", postedLabel(j),
       ]));
       downloadCsv(`jobs-${jobId}`, csv);
       toast({ variant: "success", title: `Exported ${formatNumber(sel.length)} roles` });

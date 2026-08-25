@@ -5,7 +5,7 @@
  * No mock data. Email verification is NOT automatic — opt-in via "Verify emails".
  */
 import "server-only";
-import { resolvePeopleViaCrawler, resolvePersonViaCrawler, type CrawledPerson } from "./crawler-client";
+import { resolvePeopleViaCrawler, resolvePersonViaCrawler, crawlerProxyAvailable, type CrawledPerson } from "./crawler-client";
 import type { PeopleSeedInput } from "@/lib/leads/people-types";
 import * as store from "./people-collect-store";
 
@@ -45,7 +45,7 @@ function personFromSeed(seed: PeopleSeedInput): CrawledPerson {
     location: seed.location || null,
     confidence: 80,
     emailVerification: null,
-    collection: [{ source: "other", status: "ok", proxy: null, ms: 0, fieldsFound: 1, detail: "imported — already complete, not enriched", provider: "import" }],
+    collection: [{ source: "other", status: "ok", proxy: null, ms: 0, fieldsFound: 1, detail: "imported, already complete, not enriched", provider: "import" }],
   };
 }
 
@@ -56,6 +56,9 @@ const CONCURRENCY = Math.max(1, Math.min(Number(process.env.CRAWLER_PEOPLE_CONCU
 const RETRY_PASSES = Math.max(0, Number(process.env.CRAWLER_PEOPLE_RETRY_PASSES ?? 4));
 const RETRY_BACKOFF_MS = Math.max(2000, Number(process.env.CRAWLER_PEOPLE_RETRY_BACKOFF_MS ?? 15_000));
 const RETRY_CONCURRENCY = Math.max(1, Number(process.env.CRAWLER_PEOPLE_RETRY_CONCURRENCY ?? 2));
+// Hard ceiling on the WHOLE block-retry phase. Even when a proxy is present, this
+// caps the futile tail so the job can never sit "almost done" for many minutes.
+const RETRY_PHASE_BUDGET_MS = Math.max(30_000, Number(process.env.CRAWLER_PEOPLE_RETRY_BUDGET_MS ?? 120_000));
 const running = new Set<string>();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -79,7 +82,11 @@ async function run(id: string) {
     store.setSeedCollecting(id, index);
     try {
       const isPerson = !!(seed.firstName || seed.lastName);
-      if (isPerson && seedIsComplete(seed)) {
+      if (seed.prefill) {
+        // Matched a saved-list snapshot on import → show it as-is, no crawl.
+        store.applyPrefillPerson(id, index, seed.prefill);
+        blocked.delete(index);
+      } else if (isPerson && seedIsComplete(seed)) {
         // Already has LinkedIn/email from the CSV → show as-is, skip enrichment.
         store.applySeedPeople(id, index, [personFromSeed(seed)]);
         blocked.delete(index);
@@ -132,11 +139,24 @@ async function run(id: string) {
 
   // Retry passes — only blocked seeds, at low concurrency after a growing backoff
   // so the shared proxy pool cools down and we ride past the rate-limit.
-  for (let pass = 0; pass < RETRY_PASSES; pass++) {
-    const idxs = [...blocked];
-    if (!idxs.length) break; // no blocked seeds left → done
-    await sleep(RETRY_BACKOFF_MS * (pass + 1));
-    await runPass(idxs, RETRY_CONCURRENCY);
+  //
+  // These retries ONLY help when a proxy rotation exists: a fresh IP is what lets
+  // a rate-limited query succeed on the next pass. With no proxy every retry hits
+  // the same server IP and returns `blocked` identically — so the passes are pure
+  // waste, and (because each flips its seeds back to "collecting") they leave the
+  // progress bar stuck just under 100% for many minutes. Skip them entirely when
+  // the crawler reports no proxy, and hard-cap the phase wall-clock either way.
+  const proxyAvailable = blocked.size ? await crawlerProxyAvailable() : true;
+  const retryDeadline = Date.now() + RETRY_PHASE_BUDGET_MS;
+  if (proxyAvailable) {
+    for (let pass = 0; pass < RETRY_PASSES; pass++) {
+      const idxs = [...blocked];
+      if (!idxs.length) break; // no blocked seeds left → done
+      if (Date.now() >= retryDeadline) break; // phase budget spent → stop the tail
+      await sleep(Math.min(RETRY_BACKOFF_MS * (pass + 1), Math.max(0, retryDeadline - Date.now())));
+      if (Date.now() >= retryDeadline) break;
+      await runPass(idxs, RETRY_CONCURRENCY);
+    }
   }
 
   store.finalizePeopleJob(id);

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
   fileName: z.string().trim().min(1),
-  rows: z.array(z.object({ company: z.string(), location: z.string() })).min(1).max(5000),
+  rows: z.array(z.object({ company: z.string(), location: z.string(), prefill: z.record(z.unknown()).nullish() })).min(1).max(5000),
 });
 
 export async function GET() {
@@ -26,7 +26,8 @@ export async function POST(req: Request) {
   if (missing) {
     return NextResponse.json({ success: false, error: { code: "MISSING_FIELDS", message: "Every row needs both Company Name and Location." } }, { status: 400 });
   }
-  const { job, truncated } = store.createCollectJob(parsed.data);
+  // `prefill` is validated as an opaque record; it IS a stored CollectedCompany snapshot.
+  const { job, truncated } = store.createCollectJob(parsed.data as store.CreateCollectInput);
   startCollectJob(job.id);
   return NextResponse.json({ success: true, data: job, truncated }, { status: 201 });
 }

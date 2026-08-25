@@ -59,7 +59,7 @@ export function collectLinkedIn(ctx: CollectContext): SourceResult {
     fields.industry = sf(pick(INDUSTRIES, `${seed}:ind`), "linkedin");
     fields.employees = sf(pick(SIZES, `${seed}:size`), "linkedin");
     fields.founded = sf(1990 + Math.floor(seededRandom(`${seed}:founded`) * 33), "linkedin");
-    fields.description = sf(`${ctx.inputName} — ${pick(INDUSTRIES, `${seed}:ind`).toLowerCase()} company based in ${ctx.inputLocation}.`, "linkedin");
+    fields.description = sf(`${ctx.inputName}: ${pick(INDUSTRIES, `${seed}:ind`).toLowerCase()} company based in ${ctx.inputLocation}.`, "linkedin");
     fields.technologies = sf(sampleTech(`${seed}:tech`), "linkedin");
   }
   const att = attempt("linkedin", b.status, proxyLabel(b.proxy), b.ms, Object.keys(fields).length, { simulated: true, detail: "simulated firmographics" });

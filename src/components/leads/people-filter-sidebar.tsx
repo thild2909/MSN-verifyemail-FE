@@ -56,7 +56,7 @@ export function PeopleFilterSidebar({
           <TokenList
             values={filters.jobTitles}
             onChange={(v) => onChange({ jobTitles: v })}
-            placeholder="Include titles — e.g. CTO"
+            placeholder="Include titles, e.g. CTO"
           />
         </FilterSection>
 

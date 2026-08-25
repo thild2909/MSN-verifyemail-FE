@@ -18,7 +18,7 @@ const ERRORS = [
   ["INSUFFICIENT_CREDITS", "402", "Not enough credits for the requested operation."],
   ["INVALID_REQUEST", "400", "The request body failed validation."],
   ["UNAUTHORIZED", "401", "Missing or invalid API key."],
-  ["RATE_LIMITED", "429", "Too many requests — slow down."],
+  ["RATE_LIMITED", "429", "Too many requests. Slow down."],
   ["NOT_FOUND", "404", "The requested resource does not exist."],
 ];
 

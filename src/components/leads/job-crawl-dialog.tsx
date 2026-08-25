@@ -65,7 +65,7 @@ export function JobCrawlDialog({
   const canSubmit = keywords.trim().length > 0 && sources.length > 0;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} className="max-w-lg">
+    <Dialog open={open} onOpenChange={onOpenChange} className="max-w-2xl">
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2"><Radar className="size-5 text-primary" /> Crawl job boards</DialogTitle>
         <DialogDescription>Search open roles across multiple boards through your proxy pool. Every role is tagged with its source.</DialogDescription>
@@ -85,7 +85,7 @@ export function JobCrawlDialog({
 
         <div className="space-y-1.5">
           <Label className="text-xs">Sources</Label>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {JOB_SOURCES.map((s) => {
               const on = sources.includes(s);
               return (
@@ -93,13 +93,13 @@ export function JobCrawlDialog({
                   key={s}
                   type="button"
                   onClick={() => toggle(s)}
-                  className={cn("flex flex-col items-start gap-0.5 rounded-lg border p-2.5 text-left transition-colors", on ? "border-primary bg-primary/5" : "border-input hover:bg-muted")}
+                  className={cn("flex min-w-0 flex-col items-start gap-0.5 rounded-lg border p-2.5 text-left transition-colors", on ? "border-primary bg-primary/5" : "border-input hover:bg-muted")}
                 >
-                  <span className="flex w-full items-center justify-between text-sm font-medium">
-                    {JOB_SOURCE_LABEL[s]}
-                    {on && <Check className="size-3.5 text-primary" />}
+                  <span className="flex w-full min-w-0 items-center justify-between gap-1 text-sm font-medium">
+                    <span className="truncate">{JOB_SOURCE_LABEL[s]}</span>
+                    {on && <Check className="size-3.5 shrink-0 text-primary" />}
                   </span>
-                  <span className="text-[11px] text-muted-foreground">{JOB_SOURCE_REGION[s]}</span>
+                  <span className="w-full truncate text-[11px] text-muted-foreground">{JOB_SOURCE_REGION[s]}</span>
                 </button>
               );
             })}

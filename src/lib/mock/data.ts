@@ -193,13 +193,13 @@ export const MOCK_CREDITS: CreditBalance = {
 };
 
 export const MOCK_TRANSACTIONS: CreditTransaction[] = [
-  { id: "tx_1", date: "2026-08-19T08:30:00Z", operation: "bulk_verification", label: "US Funding — bulk verify", credits: -864, balance: 21763, user: "labs@mindsupernova.com" },
+  { id: "tx_1", date: "2026-08-19T08:30:00Z", operation: "bulk_verification", label: "US Funding: bulk verify", credits: -864, balance: 21763, user: "labs@mindsupernova.com" },
   { id: "tx_2", date: "2026-08-18T16:05:00Z", operation: "top_up", label: "Pay-as-you-go top up", credits: 10000, balance: 22627, user: "labs@mindsupernova.com" },
-  { id: "tx_3", date: "2026-08-16T09:12:00Z", operation: "bulk_verification", label: "Apollo Contacts — bulk verify", credits: -2226, balance: 12627, user: "labs@mindsupernova.com" },
-  { id: "tx_4", date: "2026-08-16T08:44:00Z", operation: "deep_scan", label: "Apollo Contacts — deep scan (188)", credits: -376, balance: 14853, user: "labs@mindsupernova.com" },
-  { id: "tx_5", date: "2026-08-15T13:20:00Z", operation: "email_finder", label: "Finder — acme.com", credits: -12, balance: 15229, user: "labs@mindsupernova.com" },
-  { id: "tx_6", date: "2026-08-14T14:02:00Z", operation: "bulk_verification", label: "Australia AI — bulk verify", credits: -2860, balance: 15241, user: "labs@mindsupernova.com" },
-  { id: "tx_7", date: "2026-08-13T10:11:00Z", operation: "api_verification", label: "API — /verify (batch)", credits: -540, balance: 18101, user: "api" },
+  { id: "tx_3", date: "2026-08-16T09:12:00Z", operation: "bulk_verification", label: "Apollo Contacts: bulk verify", credits: -2226, balance: 12627, user: "labs@mindsupernova.com" },
+  { id: "tx_4", date: "2026-08-16T08:44:00Z", operation: "deep_scan", label: "Apollo Contacts: deep scan (188)", credits: -376, balance: 14853, user: "labs@mindsupernova.com" },
+  { id: "tx_5", date: "2026-08-15T13:20:00Z", operation: "email_finder", label: "Finder: acme.com", credits: -12, balance: 15229, user: "labs@mindsupernova.com" },
+  { id: "tx_6", date: "2026-08-14T14:02:00Z", operation: "bulk_verification", label: "Australia AI: bulk verify", credits: -2860, balance: 15241, user: "labs@mindsupernova.com" },
+  { id: "tx_7", date: "2026-08-13T10:11:00Z", operation: "api_verification", label: "API: /verify (batch)", credits: -540, balance: 18101, user: "api" },
   { id: "tx_8", date: "2026-08-10T11:20:00Z", operation: "bulk_verification", label: "australia-hiring-data-engineer", credits: -990, balance: 18641, user: "labs@mindsupernova.com" },
 ];
 

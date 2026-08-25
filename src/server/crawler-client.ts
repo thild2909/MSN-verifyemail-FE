@@ -394,6 +394,36 @@ export function llmVerifyPeopleViaCrawler(records: PersonLlmRecord[]): Promise<L
   return llmFetch("/llm/verify-people", records);
 }
 
+export interface TagPersonRecord { id: string; name: string; title?: string | null; company?: string | null; location?: string | null; email?: string | null }
+export type TagColor = "amber" | "blue" | "green" | "purple" | "red" | "teal" | "pink" | "orange";
+export interface PeopleTagResponse {
+  configured: boolean;
+  tag: { label: string; color: TagColor } | null;
+  matchedIds: string[];
+  scanned: number;
+  tokens: number;
+  model: string;
+}
+
+/** Run a free-form user instruction over people rows → which ids to tag + label/colour. */
+export async function tagPeopleViaCrawler(prompt: string, records: TagPersonRecord[]): Promise<PeopleTagResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/llm/tag-people`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, records }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /llm/tag-people responded ${res.status}`);
+    return (await res.json()) as PeopleTagResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* --------------------------- proxy config (pool) ------------------------- */
 
 async function proxyFetch(path: string, init?: RequestInit): Promise<unknown> {
@@ -424,6 +454,34 @@ export function testProxiesRemote(opts?: { id?: string; all?: boolean }): Promis
 }
 export function getProxyTestStatusRemote(): Promise<unknown> {
   return proxyFetch("/proxies/test/status");
+}
+
+/**
+ * Does the crawler currently have a working proxy rotation (rotating endpoint or
+ * a datacenter pool)? When it does NOT, a search that comes back `blocked` will
+ * be blocked identically on retry (same server IP), so the people job skips its
+ * block-retry passes to avoid a long, futile tail. Defaults to `true` on any
+ * error so we never suppress retries when we simply couldn't ask.
+ */
+export async function crawlerProxyAvailable(): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
+    if (!res.ok) return true;
+    const j = (await res.json()) as {
+      proxyActive?: boolean;
+      proxies?: { active?: number; enabled?: boolean };
+    };
+    // Newer crawler builds report this directly; fall back to deriving it from the
+    // pool stats (mirrors the crawler's own hasRotationPool: enabled + ≥5 IPs).
+    if (typeof j.proxyActive === "boolean") return j.proxyActive;
+    return !!(j.proxies?.enabled && (j.proxies?.active ?? 0) >= 5);
+  } catch {
+    return true;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Reachability probe for the crawler service. */

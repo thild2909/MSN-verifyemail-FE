@@ -46,7 +46,7 @@ export function CompanyLogo({ domain, text, className }: { domain?: string | nul
 /** Small honest "Simulated" tag for gated sources whose values are mock. */
 export function SimulatedTag({ className }: { className?: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground", className)} title="This source is simulated (ToS-gated — mock values, real rotation/rate-limit behaviour)">
+    <span className={cn("inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground", className)} title="This source is simulated (ToS-gated: mock values, real rotation/rate-limit behaviour)">
       <FlaskConical className="size-3" /> Simulated
     </span>
   );
