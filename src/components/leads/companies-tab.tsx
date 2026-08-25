@@ -147,7 +147,7 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
         <EmptyState
           icon={Building2}
           title="Import companies to enrich"
-          description="Upload a CSV with Company Name + Location. We collect website, email, phone, LinkedIn, socials and firmographics from multiple sources — through your configured proxies."
+          description="Upload a CSV with Company Name and Location. We find each company's website, email, phone, LinkedIn, socials and key details."
           action={
             <div className="flex items-center gap-2">
               <Button onClick={() => setImportOpen(true)}><Upload className="size-4" /> Import companies</Button>
@@ -227,6 +227,7 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
       {activeId && (
         <CollectedCompaniesTable
           jobId={activeId}
+          jobName={active?.name}
           live={!!live}
           onOpenCompany={setDrawer}
           onFindPeople={(payload) => findPeople.mutate(payload)}

@@ -41,6 +41,7 @@ export function DropdownMenu({ trigger, children, align = "end", up = false, cla
             align === "end" ? "right-0" : "left-0",
             className,
           )}
+          style={{ fontFamily: "var(--font-sans), system-ui, sans-serif" }}
           onClick={() => setOpen(false)}
         >
           {children}
@@ -58,7 +59,7 @@ export function DropdownItem({
   return (
     <button
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent [&_svg]:size-4 [&_svg]:text-muted-foreground",
+        "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-normal transition-colors hover:bg-accent [&_svg]:size-4 [&_svg]:text-muted-foreground",
         destructive && "text-destructive hover:bg-destructive/10 [&_svg]:text-destructive",
         className,
       )}

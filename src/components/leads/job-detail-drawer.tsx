@@ -62,10 +62,10 @@ export function JobDetailDrawer({
             <div className="mb-1"><HiringSignalChip signal={j.hiringSignal} /></div>
             <p className="text-muted-foreground">
               {j.hiringSignal === "strong"
-                ? "Posted recently and actively hiring — a strong signal this team is growing. Reach out to the decision makers now."
+                ? "Posted recently and actively hiring. A strong sign this team is growing, so reach out now."
                 : j.hiringSignal === "medium"
-                  ? "Open role with moderate recency — worth watching and reaching out to the hiring team."
-                  : "Older posting — lower urgency, but still a signal of the team's direction."}
+                  ? "Open role posted a while ago. Worth watching and reaching out to the hiring team."
+                  : "Older posting with lower urgency, but still a sign of where the team is headed."}
             </p>
           </div>
         </section>

@@ -9,9 +9,9 @@ import type { LeadsTab } from "@/lib/leads/types";
 
 const TAB_TITLE: Record<LeadsTab, string> = { people: "Find people", companies: "Find companies", jobs: "Find jobs" };
 const TAB_SUB: Record<LeadsTab, string> = {
-  people: "Founders, co-founders and C-level — crawled from the public web with a verifiable work email.",
-  companies: "Resolve companies to real website, email, LinkedIn and firmographics from multiple sources.",
-  jobs: "Track hiring signals and open roles.",
+  people: "Find founders and C-level with a verified work email.",
+  companies: "Get each company's website, email, LinkedIn and key details.",
+  jobs: "Track who is hiring and their open roles.",
 };
 
 /**

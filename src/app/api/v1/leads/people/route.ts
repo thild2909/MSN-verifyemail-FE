@@ -33,6 +33,19 @@ const seedSchema = z.object({
   companyIndustry: z.string().trim().nullish(),
   companyPhone: z.string().trim().nullish(),
   companyEmail: z.string().trim().nullish(),
+  // Raw location parts (location is the combined value).
+  city: z.string().trim().nullish(),
+  state: z.string().trim().nullish(),
+  country: z.string().trim().nullish(),
+  // Rich company detail (Apollo-style export).
+  keywords: z.string().trim().nullish(),
+  companyLinkedin: z.string().trim().nullish(),
+  companyRevenue: z.string().trim().nullish(),
+  companyFunding: z.string().trim().nullish(),
+  companyTechnologies: z.string().trim().nullish(),
+  companyFoundedYear: z.string().trim().nullish(),
+  companySeoDescription: z.string().trim().nullish(),
+  companyShortDescription: z.string().trim().nullish(),
 });
 
 // Two ways to create a people job:
@@ -40,7 +53,9 @@ const seedSchema = z.object({
 //  2. `fromCompanyJob` — seed from a company-collect job's resolved companies
 //     (by `companyIds`, or all matching `search`/`filter` when `allMatching`).
 const createSchema = z.union([
-  z.object({ name: z.string().trim().min(1).max(120), seeds: z.array(seedSchema).min(1).max(500) }),
+  // Accept large uploads; the store dedups + truncates to MAX_PEOPLE_SEEDS and
+  // reports `truncated`, so a big file never hard-fails here.
+  z.object({ name: z.string().trim().min(1).max(120), seeds: z.array(seedSchema).min(1).max(100000) }),
   z.object({
     name: z.string().trim().min(1).max(120),
     fromCompanyJob: z.string().trim().min(1),

@@ -36,6 +36,8 @@ export function PeopleFilterPanel({ filters, facets, onChange, onClear }: {
 
   const linkedinOpts: Option[] = [{ value: "has", label: "Has LinkedIn", hint: String(facets?.linkedin.has ?? 0) }];
 
+  const fundedOpts: Option[] = [{ value: "has", label: "Funded companies", hint: String(facets?.funded.has ?? 0) }];
+
   const companyOpts: Option[] = (facets?.companies ?? []).map((c) => ({ value: c.name, label: c.name, hint: String(c.count) }));
 
   const employeeOpts: Option[] = EMPLOYEE_BUCKETS.map((b) => ({
@@ -63,6 +65,11 @@ export function PeopleFilterPanel({ filters, facets, onChange, onClear }: {
         <FilterSection title="LinkedIn" count={filters.linkedin ? 1 : 0} onClear={() => onChange({ ...filters, linkedin: false })}>
           <CheckboxList options={linkedinOpts} selected={filters.linkedin ? ["has"] : []} onToggle={() => onChange({ ...filters, linkedin: !filters.linkedin })} />
         </FilterSection>
+        {((facets?.funded.has ?? 0) > 0 || filters.funded) && (
+          <FilterSection title="Funding" defaultOpen count={filters.funded ? 1 : 0} onClear={() => onChange({ ...filters, funded: false })}>
+            <CheckboxList options={fundedOpts} selected={filters.funded ? ["has"] : []} onToggle={() => onChange({ ...filters, funded: !filters.funded })} />
+          </FilterSection>
+        )}
         {companyOpts.length > 1 && (
           <FilterSection title="Company" count={filters.companies.length} onClear={() => onChange({ ...filters, companies: [] })}>
             <CheckboxList options={companyOpts} selected={filters.companies} onToggle={(v) => onChange({ ...filters, companies: toggle(filters.companies, v) })} />

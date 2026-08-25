@@ -63,6 +63,19 @@ export interface CollectedPerson {
   photo?: string | null;
   headline?: string | null;
   department?: string | null;
+  // Raw location parts from the CSV (location above is the combined display value).
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  // Rich company detail pre-filled from a CSV import (Apollo-style export).
+  keywords?: string | null;
+  companyLinkedin?: string | null;
+  companyRevenue?: string | null; // annual revenue (prefers the "Clean" numeric column)
+  companyFunding?: string | null; // total funding (prefers the "Clean" numeric column)
+  companyTechnologies?: string | null;
+  companyFoundedYear?: string | null;
+  companySeoDescription?: string | null;
+  companyShortDescription?: string | null;
   emailVerification: EmailVerification | null;
   llmVerification?: LlmVerdict | null; // DeepSeek founder↔company cross-check (opt-in)
   collection: CollectionAttempt[];
@@ -84,6 +97,7 @@ export function isUnconfirmedEmail(p: CollectedPerson): boolean {
 export interface PeopleSummary {
   companies: number; // seed companies
   companiesWithPeople: number;
+  rowsWithPeople: number; // enrich mode: imported rows (seeds) that resolved to a person
   people: number;
   founders: number;
   cLevel: number;
@@ -133,6 +147,7 @@ export interface PeopleFilters {
   titles: string[]; // Job Titles: title contains any (OR)
   seniority: string[]; // founder | c_level | president | vp | other
   linkedin: boolean; // must have a LinkedIn URL
+  funded: boolean; // employer has a real funding figure
   companies: string[]; // company names to include (OR)
   locations: string[]; // person location contains any (OR)
   employees: string[]; // employer size buckets, see EMPLOYEE_BUCKETS (OR)
@@ -141,20 +156,27 @@ export interface PeopleFilters {
 }
 
 export const EMPTY_PEOPLE_FILTERS: PeopleFilters = {
-  email: [], titles: [], seniority: [], linkedin: false, companies: [], locations: [], employees: [], industries: [], minScore: 0,
+  email: [], titles: [], seniority: [], linkedin: false, funded: false, companies: [], locations: [], employees: [], industries: [], minScore: 0,
 };
 
 /** Total number of active constraints — shared so the panel badge and the
  *  toolbar badge stay in sync. */
 export const countPeopleFilters = (f: PeopleFilters): number =>
-  f.email.length + f.titles.length + f.seniority.length + (f.linkedin ? 1 : 0) +
+  f.email.length + f.titles.length + f.seniority.length + (f.linkedin ? 1 : 0) + (f.funded ? 1 : 0) +
   f.companies.length + f.locations.length + f.employees.length + f.industries.length + (f.minScore > 0 ? 1 : 0);
+
+/** True when the person's employer carries a real funding figure (not blank / 0). */
+export function personHasFunding(p: Pick<CollectedPerson, "companyFunding">): boolean {
+  const v = p.companyFunding?.trim();
+  return !!v && !/^(0+(\.0+)?|\$?0)$/.test(v) && !/^(n\/?a|none|null|-)$/i.test(v);
+}
 
 /** Facet counts (over all people in the job) for the sidebar. */
 export interface PeopleFacets {
   seniority: Record<string, number>;
   email: { has: number; valid: number; catch_all: number; risky: number; invalid: number; unverified: number; none: number };
   linkedin: { has: number };
+  funded: { has: number };
   companies: { name: string; count: number }[];
   industries: { name: string; count: number }[];
   employees: Record<string, number>; // bucket value -> count
@@ -190,4 +212,17 @@ export interface PeopleSeedInput {
   photo?: string | null;
   headline?: string | null;
   department?: string | null;
+  // Raw location parts from the CSV (location above is the combined value).
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  // Rich company detail from a CSV import (Apollo-style export).
+  keywords?: string | null;
+  companyLinkedin?: string | null;
+  companyRevenue?: string | null;
+  companyFunding?: string | null;
+  companyTechnologies?: string | null;
+  companyFoundedYear?: string | null;
+  companySeoDescription?: string | null;
+  companyShortDescription?: string | null;
 }

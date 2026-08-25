@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Linkedin, Mail, MapPin, Building2, BadgeCheck, ExternalLink, Phone, Twitter, Facebook, Briefcase, Users, Globe } from "lucide-react";
+import { Linkedin, Mail, MapPin, Building2, BadgeCheck, ExternalLink, Phone, Twitter, Facebook, Briefcase, Users, Globe, DollarSign, Calendar, Cpu, Tag } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./leads-ui";
@@ -11,9 +11,9 @@ const linkedinHref = (v: string) => (/^https?:\/\//i.test(v) ? v : `https://${v}
 
 export function PersonDetailDrawer({ person, open, onOpenChange }: { person: CollectedPerson | null; open: boolean; onOpenChange: (o: boolean) => void }) {
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer open={open} onOpenChange={onOpenChange} className="max-w-xl">
       {person && (
-        <div className="flex flex-col">
+        <div className="flex flex-col pr-[5px]">
           {/* Header */}
           <div className="border-b p-5 pr-12">
             <div className="flex items-start gap-3">
@@ -56,7 +56,7 @@ export function PersonDetailDrawer({ person, open, onOpenChange }: { person: Col
                   <div className="flex items-center gap-1.5">
                     {person.emailVerification
                       ? <VerificationBadge ev={person.emailVerification} showScore />
-                      : <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{person.emailKind === "found" ? "Found on web" : "Pattern guess"}</span>}
+                      : <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not verified</span>}
                   </div>
                 </div>
               ) : <span className="text-muted-foreground">—</span>}
@@ -73,12 +73,27 @@ export function PersonDetailDrawer({ person, open, onOpenChange }: { person: Col
             <Row icon={Building2} label="Company">{person.company}</Row>
           </Section>
 
-          {(person.companyDomain || person.companyIndustry || person.companyEmployees || person.companyPhone) && (
+          {(person.companyDomain || person.companyIndustry || person.companyEmployees || person.companyPhone || person.companyLinkedin || person.companyFoundedYear || person.companyRevenue || person.companyFunding) && (
             <Section title="Company">
               {person.companyDomain && <Row icon={Globe} label="Website"><a href={`https://${person.companyDomain}`} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{person.companyDomain}</a></Row>}
+              {person.companyLinkedin && <Row icon={Linkedin} label="Company LinkedIn"><a href={linkedinHref(person.companyLinkedin)} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{person.companyLinkedin.replace(/^https?:\/\/(www\.)?/i, "")}</a></Row>}
               {person.companyIndustry && <Row icon={Briefcase} label="Industry">{person.companyIndustry}</Row>}
               {person.companyEmployees && <Row icon={Users} label="Employees">{person.companyEmployees}</Row>}
+              {person.companyFoundedYear && <Row icon={Calendar} label="Founded">{person.companyFoundedYear}</Row>}
+              {person.companyRevenue && <Row icon={DollarSign} label="Annual revenue">{person.companyRevenue}</Row>}
+              {person.companyFunding && <Row icon={DollarSign} label="Total funding">{person.companyFunding}</Row>}
               {person.companyPhone && <Row icon={Phone} label="Company phone">{person.companyPhone}</Row>}
+            </Section>
+          )}
+
+          {(person.companyShortDescription || person.companySeoDescription || person.companyTechnologies || person.keywords) && (
+            <Section title="About">
+              {person.companyShortDescription && <TextBlock label="Short description">{person.companyShortDescription}</TextBlock>}
+              {person.companySeoDescription && person.companySeoDescription !== person.companyShortDescription && (
+                <TextBlock label="SEO description">{person.companySeoDescription}</TextBlock>
+              )}
+              {person.companyTechnologies && <TagList icon={Cpu} label="Technologies" value={person.companyTechnologies} />}
+              {person.keywords && <TagList icon={Tag} label="Keywords" value={person.keywords} />}
             </Section>
           )}
 
@@ -94,7 +109,7 @@ export function PersonDetailDrawer({ person, open, onOpenChange }: { person: Col
                   </div>
                 </div>
               ))}
-              <p className="text-[11px] text-muted-foreground">Emails are derived from the company domain (first.last@) and confirmed by the verification pass — they are not scraped from LinkedIn.</p>
+              <p className="text-[11px] text-muted-foreground">Emails are built from the company domain (first.last@) and confirmed by the verification pass. They are not scraped from LinkedIn.</p>
             </div>
           </Section>
         </div>
@@ -117,6 +132,30 @@ function Row({ icon: Icon, label, children }: { icon: React.ElementType; label: 
     <div className="flex items-center justify-between gap-3 py-1.5 text-sm">
       <span className="inline-flex items-center gap-2 text-muted-foreground"><Icon className="size-4" /> {label}</span>
       <div className="min-w-0 text-right">{children}</div>
+    </div>
+  );
+}
+
+/** Full-width labelled text (descriptions) — wraps instead of truncating. */
+function TextBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="py-1.5 text-sm">
+      <p className="mb-1 text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="leading-relaxed text-foreground">{children}</p>
+    </div>
+  );
+}
+
+/** Comma/semicolon/pipe-separated value rendered as chips (technologies, keywords). */
+function TagList({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+  const items = value.split(/[,;|]/).map((s) => s.trim()).filter(Boolean).slice(0, 60);
+  if (!items.length) return null;
+  return (
+    <div className="py-1.5 text-sm">
+      <span className="inline-flex items-center gap-2 text-muted-foreground"><Icon className="size-4" /> {label}</span>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {items.map((t, i) => <span key={i} className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground">{t}</span>)}
+      </div>
     </div>
   );
 }

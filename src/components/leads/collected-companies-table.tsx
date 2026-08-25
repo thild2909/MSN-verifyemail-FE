@@ -29,6 +29,7 @@ export interface FindPeoplePayload {
 
 interface Props {
   jobId: string;
+  jobName?: string;
   live: boolean;
   onOpenCompany: (c: CollectedCompany) => void;
   onFindPeople: (payload: FindPeoplePayload) => void;
@@ -58,7 +59,7 @@ function Check({ checked, indeterminate, onChange }: { checked: boolean; indeter
   );
 }
 
-export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeople, findingPeople }: Props) {
+export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, onFindPeople, findingPeople }: Props) {
   const { toast } = useToast();
   const [search, setSearch] = React.useState("");
   const [filters, setFilters] = React.useState<CompanyFilters>(EMPTY_COMPANY_FILTERS);
@@ -121,13 +122,12 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
     setBusy("export");
     try {
       const sel = await resolveSelected();
-      const headers = ["Company", "Location", "Website", "Email", "Email status", "Phone", "LinkedIn", "Industry", "Employees", "Match %", "Status"];
+      const headers = ["Company", "Employees", "Industry", "Website", "Email", "Phone", "LinkedIn", "Location"];
       const csv = toCsv(headers, sel.map((c) => [
-        c.inputName, c.address?.value ?? c.inputLocation, c.website?.value ?? "", c.contactEmail?.value ?? "",
-        c.emailVerification?.status ?? "", c.phone?.value ?? "", c.linkedin?.value ?? "", c.industry?.value ?? "",
-        c.employees?.value ?? "", c.resolution?.confidence ?? "", c.status,
+        c.inputName, c.employees?.value ?? "", c.industry?.value ?? "", c.website?.value ?? "",
+        c.contactEmail?.value ?? "", c.phone?.value ?? "", c.linkedin?.value ?? "", c.address?.value ?? c.inputLocation,
       ]));
-      downloadCsv(`companies-${jobId}`, csv);
+      downloadCsv(jobName?.trim() || `companies-${jobId}`, csv);
       toast({ variant: "success", title: `Exported ${formatNumber(sel.length)} companies` });
     } catch { toast({ variant: "error", title: "Export failed" }); }
     finally { setBusy(null); }
@@ -205,13 +205,13 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
                     </div>
                   </th>
                   <th className="px-3 py-2.5 font-medium">Company</th>
+                  <th className="px-3 py-2.5 font-medium">Employees</th>
+                  <th className="px-3 py-2.5 font-medium">Industry</th>
                   <th className="px-3 py-2.5 font-medium">Website</th>
                   <th className="px-3 py-2.5 font-medium">Email</th>
                   <th className="px-3 py-2.5 font-medium">Phone</th>
                   <th className="px-3 py-2.5 font-medium">LinkedIn</th>
-                  <th className="px-3 py-2.5 font-medium">Industry</th>
                   <th className="px-3 py-2.5 font-medium">Location</th>
-                  <th className="px-3 py-2.5 font-medium">Employees</th>
                   <th className="px-3 py-2.5 font-medium">Status</th>
                   <th className="w-8" />
                 </tr>
@@ -242,6 +242,8 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
                           </div>
                         </div>
                       </td>
+                      <td className="px-3 py-2"><Sourced field={c.employees} showConfidence /></td>
+                      <td className="px-3 py-2"><Sourced field={c.industry} /></td>
                       <td className="px-3 py-2"><Sourced field={c.website} /></td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5">
@@ -251,9 +253,7 @@ export function CollectedCompaniesTable({ jobId, live, onOpenCompany, onFindPeop
                       </td>
                       <td className="px-3 py-2"><Sourced field={c.phone} /></td>
                       <td className="px-3 py-2"><Sourced field={c.linkedin} /></td>
-                      <td className="px-3 py-2"><Sourced field={c.industry} /></td>
                       <td className="px-3 py-2">{c.address ? <Sourced field={c.address} /> : <span className="text-xs text-muted-foreground">{c.inputLocation}</span>}</td>
-                      <td className="px-3 py-2"><Sourced field={c.employees} showConfidence /></td>
                       <td className="px-3 py-2">
                         {c.status === "collecting"
                           ? <span className="inline-flex items-center gap-1 text-xs font-medium text-[hsl(var(--risky))]"><Loader2 className="size-3 animate-spin" /> Collecting</span>

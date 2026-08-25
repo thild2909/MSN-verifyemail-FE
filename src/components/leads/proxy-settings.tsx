@@ -164,7 +164,7 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
                       ? <span className="rounded-full bg-[hsl(var(--valid))]/15 px-2 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]">Active</span>
                       : <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">Off</span>}
                   </p>
-                  <p className="text-xs text-muted-foreground">Fresh residential IP per request (80M+ pool) — never rate-limited. When on, this overrides the static pool below.</p>
+                  <p className="text-xs text-muted-foreground">Fresh residential IP per request (80M+ pool) so you never hit rate limits. When on, this overrides the static pool below.</p>
                 </div>
               </div>
               <Switch checked={rotatingEnabled} disabled={!rotatingEditable} onCheckedChange={setRotatingEnabled} />
@@ -178,7 +178,7 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
             />
             <p className="mt-1 text-[11px] text-muted-foreground">
               {rotatingEditable
-                ? "Paste your Webshare rotating/backbone endpoint. Password is masked — leave it to keep the saved one."
+                ? "Paste your Webshare rotating/backbone endpoint. Password is masked, so leave it blank to keep the saved one."
                 : "Locked by the CRAWLER_ROTATING_PROXY environment variable."}
             </p>
             {rotatingActive && data?.rotating && (

@@ -117,8 +117,8 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
       <div className="flex min-h-0 flex-1 items-center justify-center p-8">
         <EmptyState
           icon={Briefcase}
-          title="Track hiring signals — live from the job boards"
-          description="Pick your filters, then crawl the job boards — Seek, Indeed, Reed, Dice, CTgoodjobs, Foundit, Glassdoor, MyCareersFuture, Wellfound and more — for matching open roles through your proxy pool. Every role is tagged with the source it came from."
+          title="Track hiring signals from the job boards"
+          description="Pick your filters and search the job boards (Seek, Indeed, Reed, Dice, Glassdoor, Wellfound and more) for matching open roles. Every role shows the source it came from."
           action={
             <div className="flex items-center gap-2">
               <Button onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> Crawl job boards</Button>

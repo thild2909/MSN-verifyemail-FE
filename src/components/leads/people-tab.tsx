@@ -129,7 +129,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
         <EmptyState
           icon={UserSearch}
           title="Find decision-makers"
-          description="Import a CSV of people (First Name, Last Name, Company Name) to enrich each with LinkedIn + a verifiable email — or go to the Companies tab and click “Find people” to discover a company's founders and C-level."
+          description="Import a CSV with First Name, Last Name and Company Name. We add each person's LinkedIn and a verified email. You can also use “Find people” on the Companies tab."
           action={<Button onClick={() => setImportOpen(true)}><Upload className="size-4" /> Import people</Button>}
         />
         {importModal}
@@ -176,7 +176,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
           <Stat icon={Star} label="Founders" value={formatNumber(s.founders)} />
           <Stat icon={Crown} label="C-Level" value={formatNumber(s.cLevel)} />
           <Stat icon={Users} label="VP / Pres" value={formatNumber(s.vps)} />
-          <Stat icon={Building2} label={seedLabel} value={`${formatNumber(s.companiesWithPeople)}/${formatNumber(s.companies)}`} />
+          <Stat icon={Building2} label={seedLabel} value={active.mode === "enrich" ? `${formatNumber(s.rowsWithPeople ?? s.people)}/${formatNumber(s.companies)}` : `${formatNumber(s.companiesWithPeople)}/${formatNumber(s.companies)}`} />
           <Stat icon={Mail} label="Emails" value={formatNumber(s.withEmail)} />
           <Stat icon={Linkedin} label="LinkedIn" value={formatNumber(s.withLinkedin)} />
           <Stat icon={MailCheck} label="Valid emails" value={`${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)}`} />
@@ -220,6 +220,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
       {activeId && (
         <CollectedPeopleTable
           jobId={activeId}
+          jobName={active?.name}
           live={!!live}
           bulkVerifying={verifying}
           verifyingPersonIds={active?.verifyingPersonIds}

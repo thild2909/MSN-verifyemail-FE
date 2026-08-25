@@ -551,8 +551,9 @@ export async function llmVerifyPeople(id: string, all = false): Promise<LlmPeopl
 
 export interface CollectPeopleQuery {
   page?: number; pageSize?: number; search?: string;
-  email?: string[]; titles?: string[]; seniority?: string[]; linkedin?: boolean;
+  email?: string[]; titles?: string[]; seniority?: string[]; linkedin?: boolean; funded?: boolean;
   companies?: string[]; locations?: string[]; employees?: string[]; industries?: string[]; minScore?: number;
+  sort?: string;
 }
 export interface CollectPeoplePage {
   people: CollectedPerson[];
@@ -572,11 +573,13 @@ export async function getCollectedPeople(id: string, query: CollectPeopleQuery =
   if (query.titles?.length) params.set("titles", query.titles.join(","));
   if (query.seniority?.length) params.set("seniority", query.seniority.join(","));
   if (query.linkedin) params.set("linkedin", "1");
+  if (query.funded) params.set("funded", "1");
   if (query.companies?.length) params.set("companies", query.companies.join(","));
   if (query.locations?.length) params.set("locations", query.locations.join(","));
   if (query.employees?.length) params.set("employees", query.employees.join(","));
   if (query.industries?.length) params.set("industries", query.industries.join(","));
   if (query.minScore) params.set("minScore", String(query.minScore));
+  if (query.sort) params.set("sort", query.sort);
   return apiGet<CollectPeoplePage>(`/api/v1/leads/people/${id}/people?${params.toString()}`);
 }
 

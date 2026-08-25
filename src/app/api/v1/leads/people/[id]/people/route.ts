@@ -18,11 +18,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     titles: list("titles"),
     seniority: list("seniority"),
     linkedin: url.searchParams.get("linkedin") === "1",
+    funded: url.searchParams.get("funded") === "1",
     companies: list("companies"),
     locations: list("locations"),
     employees: list("employees"),
     industries: list("industries"),
     minScore: num("minScore"),
+    sort: url.searchParams.get("sort") ?? undefined,
   });
   return NextResponse.json({ success: true, data });
 }

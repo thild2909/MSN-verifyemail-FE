@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Inbox, Loader2, ChevronRight, Linkedin, ChevronDown, Bookmark, ListPlus, Download, X, Plus, SlidersHorizontal, MailCheck } from "lucide-react";
+import { Search, Inbox, Loader2, ChevronRight, Linkedin, ChevronDown, Bookmark, ListPlus, Download, X, Plus, SlidersHorizontal, MailCheck, DollarSign, Columns3, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,9 +16,59 @@ import { Avatar } from "./leads-ui";
 import { CompanyLogo, VerificationBadge, LlmBadge } from "./collect-ui";
 import { PeopleFilterPanel } from "./people-filter-panel";
 import { MobileFilterDrawer, openFiltersFor } from "./filter-drawer";
-import { SENIORITY_LABEL, EMPTY_PEOPLE_FILTERS, countPeopleFilters, isUnconfirmedEmail, type PeopleFilters, type CollectedPerson, type PersonSeniority } from "@/lib/leads/people-types";
+import { SENIORITY_LABEL, EMPTY_PEOPLE_FILTERS, countPeopleFilters, isUnconfirmedEmail, personHasFunding, type PeopleFilters, type CollectedPerson, type PersonSeniority } from "@/lib/leads/people-types";
 
 const PAGE_SIZE = 25;
+
+/**
+ * Customizable table columns. Order here is the on-screen order (after the fixed
+ * Name column): Email / Company / Company employees / Company industry sit right
+ * after Title; Seniority is hidden by default. The user toggles columns via the
+ * "Columns" menu and the choice persists in localStorage.
+ */
+type ColKey =
+  | "title" | "email" | "company" | "companyEmployees" | "companyIndustry"
+  | "seniority" | "companyPhone" | "companyEmail" | "linkedin" | "location";
+
+const COLUMN_DEFS: { key: ColKey; label: string; default: boolean }[] = [
+  { key: "title", label: "Title", default: true },
+  { key: "email", label: "Email", default: true },
+  { key: "company", label: "Company", default: true },
+  { key: "companyEmployees", label: "Company employees", default: true },
+  { key: "companyIndustry", label: "Company industry", default: true },
+  { key: "seniority", label: "Seniority", default: false },
+  { key: "companyPhone", label: "Company phone", default: true },
+  { key: "companyEmail", label: "Company email", default: false },
+  { key: "linkedin", label: "LinkedIn", default: true },
+  { key: "location", label: "Location", default: true },
+];
+
+const DEFAULT_COLS = Object.fromEntries(COLUMN_DEFS.map((c) => [c.key, c.default])) as Record<ColKey, boolean>;
+const COL_STORAGE_KEY = "people-table-columns-v1";
+
+function loadCols(): Record<ColKey, boolean> {
+  const base = { ...DEFAULT_COLS };
+  try {
+    const raw = localStorage.getItem(COL_STORAGE_KEY);
+    if (raw) { const saved = JSON.parse(raw) as Partial<Record<ColKey, boolean>>; for (const c of COLUMN_DEFS) if (typeof saved[c.key] === "boolean") base[c.key] = saved[c.key]!; }
+  } catch { /* ignore unreadable storage */ }
+  return base;
+}
+
+/**
+ * City / State / Country for export. Uses the separately-stored fields when the
+ * person carries them; otherwise best-effort splits the combined `location`
+ * ("City, State, Country" — some parts may be missing): 1 part → city; 2 →
+ * city + country; 3+ → city + state + country.
+ */
+function splitLocation(p: CollectedPerson): { city: string; state: string; country: string } {
+  if (p.city || p.state || p.country) return { city: p.city ?? "", state: p.state ?? "", country: p.country ?? "" };
+  const parts = (p.location ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (parts.length === 0) return { city: "", state: "", country: "" };
+  if (parts.length === 1) return { city: parts[0], state: "", country: "" };
+  if (parts.length === 2) return { city: parts[0], state: "", country: parts[1] };
+  return { city: parts[0], state: parts.slice(1, -1).join(", "), country: parts[parts.length - 1] };
+}
 
 const SENIORITY_STYLE: Record<PersonSeniority, string> = {
   founder: "bg-[hsl(var(--valid))]/12 text-[hsl(var(--valid))]",
@@ -47,12 +97,14 @@ const linkedinHref = (v: string) => (/^https?:\/\//i.test(v) ? v : `https://${v}
 
 export function CollectedPeopleTable({
   jobId,
+  jobName,
   live,
   bulkVerifying = false,
   verifyingPersonIds: jobVerifyingIds,
   onOpenPerson,
 }: {
   jobId: string;
+  jobName?: string;
   live: boolean;
   bulkVerifying?: boolean;
   verifyingPersonIds?: string[];
@@ -82,18 +134,35 @@ export function CollectedPeopleTable({
   const [showFilters, setShowFilters] = React.useState(true);
   const [mobileFilters, setMobileFilters] = React.useState(false);
   const [page, setPage] = React.useState(1);
+  // Column visibility (default on first render for SSR safety, then hydrated from
+  // localStorage on mount so the saved layout wins without a hydration mismatch).
+  const [cols, setCols] = React.useState<Record<ColKey, boolean>>(DEFAULT_COLS);
+  React.useEffect(() => { setCols(loadCols()); }, []);
+  const toggleCol = (key: ColKey) => setCols((prev) => { const next = { ...prev, [key]: !prev[key] }; try { localStorage.setItem(COL_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ } return next; });
+  const resetCols = () => { setCols(DEFAULT_COLS); try { localStorage.removeItem(COL_STORAGE_KEY); } catch { /* ignore */ } };
+  const show = (key: ColKey) => cols[key];
+  // Sort by any column, applied server-side across all pages. Clicking a column
+  // cycles asc → desc → off; clicking another column starts it at asc.
+  const [sortField, setSortField] = React.useState<string | null>(null);
+  const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
+  const sort = sortField ? (sortDir === "asc" ? sortField : `${sortField}_desc`) : undefined;
+  const onSort = (field: string) => {
+    if (sortField !== field) { setSortField(field); setSortDir("asc"); }
+    else if (sortDir === "asc") setSortDir("desc");
+    else { setSortField(null); setSortDir("asc"); }
+  };
   const [debounced, setDebounced] = React.useState("");
   React.useEffect(() => { const t = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(t); }, [search]);
   const filterKey = JSON.stringify(filters);
-  React.useEffect(() => { setPage(1); }, [debounced, filterKey]);
+  React.useEffect(() => { setPage(1); }, [debounced, filterKey, sortField, sortDir]);
 
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [allMatching, setAllMatching] = React.useState(false);
   React.useEffect(() => { setSelectedIds(new Set()); setAllMatching(false); }, [jobId, debounced, filterKey]);
 
   const { data, isLoading, isPlaceholderData } = useQuery({
-    queryKey: ["collect-people", jobId, debounced, filterKey, page],
-    queryFn: () => getCollectedPeople(jobId, { search: debounced, ...filters, page, pageSize: PAGE_SIZE }),
+    queryKey: ["collect-people", jobId, debounced, filterKey, sort ?? "", page],
+    queryFn: () => getCollectedPeople(jobId, { search: debounced, ...filters, sort, page, pageSize: PAGE_SIZE }),
     placeholderData: (prev) => prev,
     refetchInterval: live ? 1500 : false,
   });
@@ -145,14 +214,16 @@ export function CollectedPeopleTable({
         toast({ variant: "info", title: "Nothing to export", description: "Select some people (or Select all) first." });
         return;
       }
-      const headers = ["Name", "Title", "Seniority", "Company", "Company phone", "Company email", "Company employees", "Company industry", "Email", "Email type", "Email status", "LinkedIn", "Mobile", "Twitter", "Facebook", "Headline", "Department", "Location", "Confidence"];
-      const csv = toCsv(headers, sel.map((p) => [
-        p.name, p.title?.value ?? "", SENIORITY_LABEL[p.seniority], p.company,
-        p.companyPhone ?? "", p.companyEmail ?? "", p.companyEmployees ?? "", p.companyIndustry ?? "",
-        p.email?.value ?? "", p.emailKind, p.emailVerification?.status ?? "", p.linkedin?.value ?? "",
-        p.mobile ?? "", p.twitter ?? "", p.facebook ?? "", p.headline ?? "", p.department ?? "", p.location ?? "", p.confidence,
-      ]));
-      downloadCsv(`people-${jobId}`, csv);
+      const headers = ["First Name", "Last Name", "Company Name", "Company Website", "Email", "Full Name", "LinkedIn", "Title", "Industry", "Employees Count", "City", "State", "Country"];
+      const csv = toCsv(headers, sel.map((p) => {
+        const loc = splitLocation(p);
+        return [
+          p.firstName, p.lastName, p.company, p.companyDomain ?? "",
+          p.email?.value ?? "", p.name, p.linkedin?.value ?? "", p.title?.value ?? "",
+          p.companyIndustry ?? "", p.companyEmployees ?? "", loc.city, loc.state, loc.country,
+        ];
+      }));
+      downloadCsv(jobName?.trim() || `people-${jobId}`, csv);
       const withValid = sel.filter((p) => p.emailVerification?.status === "valid").length;
       toast({
         variant: "success",
@@ -195,16 +266,29 @@ export function CollectedPeopleTable({
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, title or company…" className="h-9 pl-9" />
         </div>
         <span className="text-sm text-muted-foreground"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
-        <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="ml-auto h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-          <SlidersHorizontal className="size-4" /> Filters{filtersActive > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{filtersActive}</span>}
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <ColumnsMenu cols={cols} onToggle={toggleCol} onReset={resetCols} />
+          <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
+            <SlidersHorizontal className="size-4" /> Filters{filtersActive > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{filtersActive}</span>}
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1">
         {isLoading ? (
           <div className="space-y-2 p-4">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
         ) : total === 0 ? (
-          <EmptyState icon={Inbox} title="No people found yet" description="People appear here as each company is crawled. Try clearing the filter." className="m-6" />
+          filtersActive > 0 || debounced ? (
+            <EmptyState
+              icon={Search}
+              title="No people match your filters"
+              description="No one matches the current filters and search. Try removing some to see more."
+              action={<Button variant="outline" onClick={() => { setFilters(EMPTY_PEOPLE_FILTERS); setSearch(""); }}><X className="size-4" /> Clear filters</Button>}
+              className="m-6"
+            />
+          ) : (
+            <EmptyState icon={Inbox} title="No people found yet" description="People appear here as each company is crawled." className="m-6" />
+          )
         ) : (
           <div className={cn("scrollbar-thin h-full overflow-auto transition-opacity", isPlaceholderData && "opacity-60")}>
             <table className="w-full border-collapse text-[13px]">
@@ -220,17 +304,17 @@ export function CollectedPeopleTable({
                       </DropdownMenu>
                     </div>
                   </th>
-                  <th className="px-3 py-2.5 font-medium">Name</th>
-                  <th className="px-3 py-2.5 font-medium">Title</th>
-                  <th className="px-3 py-2.5 font-medium">Seniority</th>
-                  <th className="px-3 py-2.5 font-medium">Company</th>
-                  <th className="px-3 py-2.5 font-medium">Company phone</th>
-                  <th className="px-3 py-2.5 font-medium">Company email</th>
-                  <th className="px-3 py-2.5 font-medium">Company employees</th>
-                  <th className="px-3 py-2.5 font-medium">Company industry</th>
-                  <th className="px-3 py-2.5 font-medium">Email</th>
-                  <th className="px-3 py-2.5 font-medium">LinkedIn</th>
-                  <th className="px-3 py-2.5 font-medium">Location</th>
+                  <SortHeader label="Name" field="name" sortField={sortField} sortDir={sortDir} onSort={onSort} />
+                  {show("title") && <SortHeader label="Title" field="title" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
+                  {show("email") && <SortHeader label="Email" field="email" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
+                  {show("company") && <SortHeader label="Company" field="company" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
+                  {show("companyEmployees") && <SortHeader label="Company employees" field="companyEmployees" sortField={sortField} sortDir={sortDir} onSort={onSort} align="center" />}
+                  {show("companyIndustry") && <SortHeader label="Company industry" field="companyIndustry" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
+                  {show("seniority") && <SortHeader label="Seniority" field="seniority" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
+                  {show("companyPhone") && <SortHeader label="Company phone" field="companyPhone" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
+                  {show("companyEmail") && <SortHeader label="Company email" field="companyEmail" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
+                  {show("linkedin") && <SortHeader label="LinkedIn" field="linkedin" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
+                  {show("location") && <SortHeader label="Location" field="location" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
                   <th className="w-8" />
                 </tr>
               </thead>
@@ -240,40 +324,59 @@ export function CollectedPeopleTable({
                   const finding = inflightIds.has(p.id);
                   return (
                     <tr key={p.id} onClick={() => onOpenPerson(p)} className={cn("cursor-pointer border-b hover:bg-muted/30", selected && "bg-primary/[0.04]")}>
-                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(p.id)} /></td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-2.5">
+                      <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(p.id)} /></td>
+                      <td className="min-w-[160px] max-w-[240px] px-3 py-2 align-top">
+                        <div className="flex min-w-0 items-center gap-2.5">
                           <Avatar name={p.name} seed={p.id} />
-                          <span className="truncate font-medium">{p.name}</span>
+                          <span className="min-w-0 truncate font-medium">{p.name}</span>
+                          {personHasFunding(p) && (
+                            <span
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[hsl(var(--valid))]/10 px-2 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]"
+                              title={`Company funding: ${p.companyFunding}`}
+                            >
+                              <DollarSign className="size-3" /> Funded
+                            </span>
+                          )}
                           {p.llmVerification && <LlmBadge v={p.llmVerification} />}
                         </div>
                       </td>
-                      <td className="max-w-[240px] px-3 py-2"><span className="line-clamp-1 text-muted-foreground">{p.title?.value ?? "—"}</span></td>
-                      <td className="px-3 py-2"><span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", SENIORITY_STYLE[p.seniority])}>{SENIORITY_LABEL[p.seniority]}</span></td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <CompanyLogo domain={p.companyDomain} text={p.companyLogoText} className="size-6 text-[10px]" />
-                          <span className="line-clamp-1">{p.company}</span>
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
-                        {p.companyPhone ? <a href={`tel:${p.companyPhone}`} className="hover:text-primary">{p.companyPhone}</a> : <span className="text-xs">—</span>}
-                      </td>
-                      <td className="max-w-[200px] px-3 py-2 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
-                        {p.companyEmail ? <a href={`mailto:${p.companyEmail}`} className="line-clamp-1 hover:text-primary">{p.companyEmail}</a> : <span className="text-xs">—</span>}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.companyEmployees || <span className="text-xs">—</span>}</td>
-                      <td className="max-w-[180px] px-3 py-2 text-muted-foreground"><span className="line-clamp-1">{p.companyIndustry || "—"}</span></td>
-                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                      {show("title") && (
+                        <td className="min-w-[200px] max-w-[420px] px-3 py-2 align-top text-muted-foreground">
+                          <span className="whitespace-normal break-words">{p.title?.value ?? "—"}</span>
+                        </td>
+                      )}
+                      {show("email") && (
+                      <td className="min-w-[220px] max-w-[360px] px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>
                         {p.emailVerification ? (
                           isUnconfirmedEmail(p) ? (
                             <span className="text-xs text-muted-foreground">Not found</span>
                           ) : (
-                            <div className="flex items-center gap-1.5">
-                              <span className="truncate text-xs">{String(p.email?.value ?? p.emailVerification.email)}</span>
-                              <VerificationBadge ev={p.emailVerification} />
+                            <div className="flex flex-col gap-1">
+                              <span className="break-all text-xs">{String(p.email?.value ?? p.emailVerification.email)}</span>
+                              <div><VerificationBadge ev={p.emailVerification} /></div>
                             </div>
                           )
+                        ) : p.email ? (
+                          // Imported email — shown as-is with a "not verified" note.
+                          // Full address on its own line; the note + Verify sit below
+                          // so the email is never truncated. Verify only VERIFIES it.
+                          <div className="flex flex-col gap-1">
+                            <span className="break-all text-xs">{String(p.email.value)}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not verified</span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 gap-1.5 px-2 text-xs"
+                                disabled={finding || bulkVerifying}
+                                onClick={() => verifyOne.mutate(p.id)}
+                                title={finding ? "Verifying email…" : "Verify this email"}
+                              >
+                                {finding ? <Loader2 className="size-3.5 animate-spin" /> : <MailCheck className="size-3.5" />}
+                                {finding ? "Verifying…" : "Verify"}
+                              </Button>
+                            </div>
+                          </div>
                         ) : (
                           <Button
                             size="sm"
@@ -288,13 +391,47 @@ export function CollectedPeopleTable({
                           </Button>
                         )}
                       </td>
-                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                        {p.linkedin ? (
-                          <a href={linkedinHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary" aria-label="View LinkedIn"><Linkedin className="size-4" /></a>
-                        ) : <span className="text-xs text-muted-foreground">—</span>}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{p.location ?? "—"}</td>
-                      <td className="px-2 py-2 text-right"><ChevronRight className="size-4 text-muted-foreground" /></td>
+                      )}
+                      {show("company") && (
+                        <td className="min-w-[200px] max-w-[380px] px-3 py-2 align-top">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <CompanyLogo domain={p.companyDomain} text={p.companyLogoText} className="mt-0.5 size-6 text-[10px]" />
+                            <span className="whitespace-normal break-words">{p.company}</span>
+                          </div>
+                        </td>
+                      )}
+                      {show("companyEmployees") && (
+                        <td className="whitespace-nowrap px-3 py-2 text-center align-top text-muted-foreground">{p.companyEmployees || <span className="text-xs">—</span>}</td>
+                      )}
+                      {show("companyIndustry") && (
+                        <td className="min-w-[140px] max-w-[240px] px-3 py-2 align-top text-muted-foreground">
+                          <span className="whitespace-normal break-words">{p.companyIndustry || "—"}</span>
+                        </td>
+                      )}
+                      {show("seniority") && (
+                        <td className="px-3 py-2 align-top"><span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", SENIORITY_STYLE[p.seniority])}>{SENIORITY_LABEL[p.seniority]}</span></td>
+                      )}
+                      {show("companyPhone") && (
+                        <td className="whitespace-nowrap px-3 py-2 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                          {p.companyPhone ? <a href={`tel:${p.companyPhone}`} className="hover:text-primary">{p.companyPhone}</a> : <span className="text-xs">—</span>}
+                        </td>
+                      )}
+                      {show("companyEmail") && (
+                        <td className="max-w-[220px] px-3 py-2 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                          {p.companyEmail ? <a href={`mailto:${p.companyEmail}`} className="line-clamp-1 hover:text-primary">{p.companyEmail}</a> : <span className="text-xs">—</span>}
+                        </td>
+                      )}
+                      {show("linkedin") && (
+                        <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>
+                          {p.linkedin ? (
+                            <a href={linkedinHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary" aria-label="View LinkedIn"><Linkedin className="size-4" /></a>
+                          ) : <span className="text-xs text-muted-foreground">—</span>}
+                        </td>
+                      )}
+                      {show("location") && (
+                        <td className="whitespace-nowrap px-3 py-2 align-top text-muted-foreground">{p.location ?? "—"}</td>
+                      )}
+                      <td className="px-2 py-2 text-right align-top"><ChevronRight className="size-4 text-muted-foreground" /></td>
                     </tr>
                   );
                 })}
@@ -338,6 +475,63 @@ export function CollectedPeopleTable({
         </div>
       )}
       </div>
+    </div>
+  );
+}
+
+/** Clickable, sortable column header. Cycles asc → desc → off via onSort. */
+function SortHeader({ label, field, sortField, sortDir, onSort, align }: {
+  label: string; field: string; sortField: string | null; sortDir: "asc" | "desc"; onSort: (f: string) => void; align?: "center";
+}) {
+  const active = sortField === field;
+  return (
+    <th className={cn("px-3 py-2.5 font-medium", align === "center" && "text-center")}>
+      <button onClick={() => onSort(field)} className="inline-flex items-center gap-1 hover:text-foreground" title={`Sort by ${label}`}>
+        {label}
+        {active ? (sortDir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />) : <ArrowUpDown className="size-3.5 opacity-40" />}
+      </button>
+    </th>
+  );
+}
+
+/** Column show/hide picker. Its own popover (stays open across toggles). */
+function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean>; onToggle: (k: ColKey) => void; onReset: () => void }) {
+  const [open, setOpen] = React.useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  const shown = COLUMN_DEFS.filter((c) => cols[c.key]).length;
+  return (
+    <div ref={ref} className="relative inline-block text-left">
+      <Button size="sm" variant="outline" className="h-9" onClick={() => setOpen((o) => !o)}>
+        <Columns3 className="size-4" /> Columns
+        <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground tabular-nums">{shown}</span>
+      </Button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-1 w-56 animate-fade-in rounded-lg border bg-popover p-1.5 shadow-lg" style={{ fontFamily: "var(--font-sans), system-ui, sans-serif" }}>
+          <div className="flex items-center justify-between px-2 py-1.5">
+            <span className="text-xs font-semibold text-muted-foreground">Show columns</span>
+            <button onClick={onReset} className="text-[11px] font-medium text-primary hover:underline">Reset</button>
+          </div>
+          <div className="max-h-72 overflow-y-auto">
+            {COLUMN_DEFS.map((c) => (
+              <label key={c.key} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
+                <span className={cn("flex size-4 shrink-0 items-center justify-center rounded border transition-colors", cols[c.key] ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card")}>
+                  {cols[c.key] && <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                </span>
+                <input type="checkbox" className="sr-only" checked={cols[c.key]} onChange={() => onToggle(c.key)} />
+                <span className="flex-1">{c.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

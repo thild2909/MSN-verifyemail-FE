@@ -9,6 +9,7 @@ import fs from "fs";
 import path from "path";
 import { initials } from "@/lib/utils";
 import { employeeBucket } from "@/lib/leads/collect-types";
+import { personHasFunding } from "@/lib/leads/people-types";
 import type { CrawledPerson } from "./crawler-client";
 import type {
   CollectedPerson,
@@ -36,7 +37,7 @@ function domainOf(website?: string | null): string | null {
   return h && h.includes(".") ? h : null;
 }
 
-export const MAX_PEOPLE_SEEDS = Number(process.env.APP_MAX_PEOPLE_SEEDS ?? 200);
+export const MAX_PEOPLE_SEEDS = Number(process.env.APP_MAX_PEOPLE_SEEDS ?? 100000);
 
 /** A company seed the job iterates over (also drives progress). */
 interface PeopleSeed extends PeopleSeedInput {
@@ -89,7 +90,7 @@ function scheduleSave() {
 }
 
 function emptySummary(companies: number): PeopleSummary {
-  return { companies, companiesWithPeople: 0, people: 0, founders: 0, cLevel: 0, vps: 0, withEmail: 0, withLinkedin: 0, emailsVerified: 0, emailsValid: 0 };
+  return { companies, companiesWithPeople: 0, rowsWithPeople: 0, people: 0, founders: 0, cLevel: 0, vps: 0, withEmail: 0, withLinkedin: 0, emailsVerified: 0, emailsValid: 0 };
 }
 
 /* -------------------------------- reads ---------------------------------- */
@@ -115,16 +116,19 @@ export interface PeopleQuery {
   titles?: string[]; // title contains  (OR)
   seniority?: string[]; // founder | c_level | president | vp | other
   linkedin?: boolean; // must have a LinkedIn URL
+  funded?: boolean; // employer has a real funding figure
   companies?: string[]; // filter to these company names
   locations?: string[]; // person location contains  (OR)
   employees?: string[]; // employer size buckets  (OR)
   industries?: string[]; // employer industry  (OR)
   minScore?: number; // minimum match confidence 0-100
+  sort?: string; // "company" | "company_desc" (default: insertion order)
 }
 export interface PeopleFacets {
   seniority: Record<string, number>;
   email: { has: number; valid: number; catch_all: number; risky: number; invalid: number; unverified: number; none: number };
   linkedin: { has: number };
+  funded: { has: number };
   companies: { name: string; count: number }[];
   industries: { name: string; count: number }[];
   employees: Record<string, number>;
@@ -164,6 +168,7 @@ function peopleFacets(all: CollectedPerson[]): PeopleFacets {
   const seniority: Record<string, number> = {};
   const email = { has: 0, valid: 0, catch_all: 0, risky: 0, invalid: 0, unverified: 0, none: 0 };
   const linkedin = { has: 0 };
+  const funded = { has: 0 };
   const employees: Record<string, number> = {};
   const companyCounts = new Map<string, number>();
   const industryCounts = new Map<string, number>();
@@ -172,6 +177,7 @@ function peopleFacets(all: CollectedPerson[]): PeopleFacets {
     if (p.email) email.has++;
     email[emailStatusBucket(p)]++;
     if (p.linkedin) linkedin.has++;
+    if (personHasFunding(p)) funded.has++;
     companyCounts.set(p.company, (companyCounts.get(p.company) ?? 0) + 1);
     const eb = employeeBucket(p.companyEmployees);
     if (eb) employees[eb] = (employees[eb] ?? 0) + 1;
@@ -181,7 +187,7 @@ function peopleFacets(all: CollectedPerson[]): PeopleFacets {
   const byCountDesc = (a: { count: number }, b: { count: number }) => b.count - a.count;
   const companies = [...companyCounts.entries()].map(([name, count]) => ({ name, count })).sort(byCountDesc).slice(0, 40);
   const industries = [...industryCounts.entries()].map(([name, count]) => ({ name, count })).sort(byCountDesc).slice(0, 40);
-  return { seniority, email, linkedin, companies, industries, employees };
+  return { seniority, email, linkedin, funded, companies, industries, employees };
 }
 
 export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
@@ -190,8 +196,8 @@ export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
   const all = store().people[jobId] ?? [];
   const {
     page = 1, pageSize = 25, search = "",
-    email = [], titles = [], seniority = [], linkedin = false,
-    companies = [], locations = [], employees = [], industries = [], minScore = 0,
+    email = [], titles = [], seniority = [], linkedin = false, funded = false,
+    companies = [], locations = [], employees = [], industries = [], minScore = 0, sort = "",
   } = query;
   const facets = peopleFacets(all);
 
@@ -212,11 +218,47 @@ export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
   if (titleTerms.length) filtered = filtered.filter((p) => { const t = (p.title?.value ? String(p.title.value) : "").toLowerCase(); return titleTerms.some((x) => t.includes(x)); });
   if (seniority.length) filtered = filtered.filter((p) => seniority.includes(p.seniority));
   if (linkedin) filtered = filtered.filter((p) => !!p.linkedin);
+  if (funded) filtered = filtered.filter((p) => personHasFunding(p));
   if (companies.length) filtered = filtered.filter((p) => companies.includes(p.company));
   if (locationTerms.length) filtered = filtered.filter((p) => { const loc = (p.location ?? "").toLowerCase(); return locationTerms.some((x) => loc.includes(x)); });
   if (employees.length) filtered = filtered.filter((p) => { const b = employeeBucket(p.companyEmployees); return b != null && employees.includes(b); });
   if (industries.length) filtered = filtered.filter((p) => p.companyIndustry != null && industries.includes(String(p.companyIndustry)));
   if (minScore > 0) filtered = filtered.filter((p) => p.confidence >= minScore);
+
+  if (sort) {
+    const desc = sort.endsWith("_desc");
+    const field = desc ? sort.slice(0, -"_desc".length) : sort;
+    const SENIORITY_RANK: Record<string, number> = { founder: 0, c_level: 1, president: 2, vp: 3, other: 4 };
+    // Returns a string or number per row for the chosen column.
+    const valueOf = (p: CollectedPerson): string | number => {
+      switch (field) {
+        case "name": return p.name;
+        case "title": return p.title?.value ? String(p.title.value) : "";
+        case "email": return p.email?.value ? String(p.email.value) : "";
+        case "company": return p.company;
+        case "companyEmployees": { const n = parseInt(String(p.companyEmployees ?? "").replace(/[^0-9]/g, ""), 10); return Number.isFinite(n) ? n : NaN; }
+        case "companyIndustry": return p.companyIndustry ?? "";
+        case "seniority": return SENIORITY_RANK[p.seniority] ?? 99;
+        case "companyPhone": return p.companyPhone ?? "";
+        case "companyEmail": return p.companyEmail ?? "";
+        case "linkedin": return p.linkedin ? 0 : 1; // has-LinkedIn first (asc)
+        case "location": return p.location ?? "";
+        default: return "";
+      }
+    };
+    const isEmpty = (v: string | number) => v === "" || (typeof v === "number" && Number.isNaN(v));
+    filtered = [...filtered].sort((a, b) => {
+      const av = valueOf(a), bv = valueOf(b);
+      // Blank values always sort to the bottom, regardless of direction.
+      if (isEmpty(av) && isEmpty(bv)) return 0;
+      if (isEmpty(av)) return 1;
+      if (isEmpty(bv)) return -1;
+      const base = typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv), undefined, { sensitivity: "base" });
+      return desc ? -base : base;
+    });
+  }
 
   const total = filtered.length;
   const start = (page - 1) * pageSize;
@@ -303,7 +345,9 @@ export function applySeedPeople(jobId: string, index: number, crawled: CrawledPe
       title,
       linkedin,
       email,
-      emailKind: cp.email ? cp.emailKind : seed.email ? "pattern" : cp.emailKind,
+      // An imported (CSV) email is a real, user-given address — mark it "found"
+      // so Find & verify only VERIFIES it (never re-finds/replaces it).
+      emailKind: cp.email ? cp.emailKind : seed.email ? "found" : cp.emailKind,
       seniority,
       location: cp.location ?? (seed.location || null),
       companyDomain: cp.companyDomain ?? domainOf(seed.website) ?? (seed.domain || null),
@@ -321,6 +365,17 @@ export function applySeedPeople(jobId: string, index: number, crawled: CrawledPe
       photo: seed.photo || null,
       headline: seed.headline || null,
       department: seed.department || null,
+      city: seed.city || null,
+      state: seed.state || null,
+      country: seed.country || null,
+      keywords: seed.keywords || null,
+      companyLinkedin: seed.companyLinkedin || null,
+      companyRevenue: seed.companyRevenue || null,
+      companyFunding: seed.companyFunding || null,
+      companyTechnologies: seed.companyTechnologies || null,
+      companyFoundedYear: seed.companyFoundedYear || null,
+      companySeoDescription: seed.companySeoDescription || null,
+      companyShortDescription: seed.companyShortDescription || null,
     });
   });
   seed.status = "done";
@@ -718,7 +773,11 @@ function recompute(jobId: string) {
   const s = emptySummary(seeds.length);
   const companiesWith = new Set<string>();
   let done = 0;
-  for (const seed of seeds) if (seed.status === "done" || seed.status === "failed") done++;
+  let rowsWithPeople = 0;
+  for (const seed of seeds) {
+    if (seed.status === "done" || seed.status === "failed") done++;
+    if ((seed.peopleFound ?? 0) > 0) rowsWithPeople++;
+  }
   for (const p of people) {
     s.people++;
     if (p.seniority === "founder") s.founders++;
@@ -733,6 +792,7 @@ function recompute(jobId: string) {
     companiesWith.add(p.companyId ?? p.company);
   }
   s.companiesWithPeople = companiesWith.size;
+  s.rowsWithPeople = rowsWithPeople;
   job.summary = s;
   job.processedCompanies = done;
   job.progress = seeds.length ? Math.round((done / seeds.length) * 100) : 100;
