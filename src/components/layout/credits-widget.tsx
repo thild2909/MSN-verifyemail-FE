@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
-import { Zap } from "lucide-react";
-import { getCredits } from "@/lib/api/client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Zap, RotateCcw, Loader2 } from "lucide-react";
+import { getCredits, resetCredits } from "@/lib/api/client";
 import { formatNumber } from "@/lib/utils";
+import { useToast } from "@/components/ui/toast";
 
 function Meter({ label, value, max, tone }: { label: string; value: number; max: number; tone: string }) {
   const pct = max > 0 ? (value / max) * 100 : 0;
@@ -23,7 +24,19 @@ function Meter({ label, value, max, tone }: { label: string; value: number; max:
 }
 
 export function CreditsWidget() {
+  const qc = useQueryClient();
+  const { toast } = useToast();
   const { data, isLoading } = useQuery({ queryKey: ["credits"], queryFn: getCredits });
+
+  const reset = useMutation({
+    mutationFn: resetCredits,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["credits"] });
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      toast({ variant: "success", title: "Credits reset", description: "Your balance is back to unused." });
+    },
+    onError: () => toast({ variant: "error", title: "Could not reset credits" }),
+  });
 
   return (
     <div className="rounded-xl border border-sidebar-border bg-white/5 p-4">
@@ -58,6 +71,15 @@ export function CreditsWidget() {
       >
         Add credits
       </Link>
+
+      <button
+        onClick={() => reset.mutate()}
+        disabled={reset.isPending}
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-center text-[11px] font-medium text-sidebar-muted transition-colors hover:bg-white/5 hover:text-sidebar-foreground disabled:opacity-50"
+      >
+        {reset.isPending ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
+        Reset to unused
+      </button>
     </div>
   );
 }

@@ -1,30 +1,14 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
-import * as store from "@/server/store";
-import { startJob } from "@/server/verification-job";
+import { be } from "@/server/verify-client";
+import type { EmailList } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const contactSchema = z.object({
-  email: z.string().trim().min(1),
-  firstName: z.string().optional(),
-  lastName: z.string().optional(),
-  company: z.string().optional(),
-  jobTitle: z.string().optional(),
-  custom: z.record(z.string()).optional(),
-});
-
-const createSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  fileName: z.string().trim().min(1),
-  columns: z.array(z.string()).default([]),
-  emailColumn: z.string().default("email"),
-  contacts: z.array(contactSchema).min(1).max(50_000),
-});
-
 export async function GET() {
-  return NextResponse.json({ success: true, data: store.listAll() });
+  const res = await be<{ data: EmailList[] }>("/lists");
+  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not load lists." } }, { status: 502 });
+  return NextResponse.json({ success: true, data: res.json.data });
 }
 
 export async function POST(req: Request) {
@@ -35,25 +19,23 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: { code: "INVALID_REQUEST", message: "Malformed JSON." } }, { status: 400 });
   }
 
-  const parsed = createSchema.safeParse(body);
-  if (!parsed.success) {
+  const res = await be<{ data: EmailList; truncated: number; error?: { code: string; message: string; required?: number; available?: number } }>(
+    "/lists",
+    { method: "POST", body: JSON.stringify(body) },
+  );
+
+  if (res.status === 201) {
+    return NextResponse.json({ success: true, data: res.json.data, truncated: res.json.truncated }, { status: 201 });
+  }
+  if (res.status === 402 && res.json.error) {
+    const e = res.json.error;
     return NextResponse.json(
-      { success: false, error: { code: "INVALID_REQUEST", message: parsed.error.issues[0]?.message ?? "Invalid body." } },
-      { status: 400 },
+      { success: false, error: { code: e.code, message: e.message, required: e.required, available: e.available } },
+      { status: 402 },
     );
   }
-
-  try {
-    const { list, truncated } = store.createList(parsed.data);
-    startJob(list.id); // fire-and-forget; verifies via the Rust engine
-    return NextResponse.json({ success: true, data: list, truncated }, { status: 201 });
-  } catch (err) {
-    if (err instanceof store.CreditsError) {
-      return NextResponse.json(
-        { success: false, error: { code: err.code, message: err.message, required: err.required, available: err.available } },
-        { status: 402 },
-      );
-    }
-    return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not create list." } }, { status: 500 });
+  if (res.status === 400) {
+    return NextResponse.json({ success: false, error: { code: "INVALID_REQUEST", message: "Invalid body." } }, { status: 400 });
   }
+  return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not create list." } }, { status: 500 });
 }

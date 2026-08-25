@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "./status-badge";
 import { DetailDrawer } from "./detail-drawer";
 import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
-import { getListRecords, deepScanRecord } from "@/lib/api/client";
+import { getListRecords, deepScanRecord, listExportUrl } from "@/lib/api/client";
 import { useToast } from "@/components/ui/toast";
 import { cn, formatNumber } from "@/lib/utils";
 import type { EmailRecord } from "@/lib/types";
@@ -70,8 +70,19 @@ export function ResultsTable({ listId, live = false }: { listId: string; live?: 
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search email…" className="pl-9" />
         </div>
-        <Button variant="outline" size="sm" onClick={() => toast({ variant: "info", title: "Export started", description: "Your file will be ready shortly." })}>
-          <Download className="size-4" /> Export
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            const a = document.createElement("a");
+            a.href = listExportUrl(listId, "csv", status);
+            a.rel = "noopener";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          }}
+        >
+          <Download className="size-4" /> Export {status !== "all" ? FILTER_LABELS[status] : ""}
         </Button>
       </div>
 

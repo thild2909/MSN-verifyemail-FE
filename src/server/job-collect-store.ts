@@ -21,6 +21,8 @@ import {
 } from "@/lib/leads/job-collect-types";
 
 export const MAX_JOBS_PER_SEARCH = Number(process.env.APP_MAX_JOBS_PER_SEARCH ?? 2000);
+// Find Leads tabs cache only the N most-recent runs so `.data/*.json` can't grow unbounded.
+export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 3);
 
 interface JobStoreData {
   jobs: JobCollectJob[];
@@ -40,7 +42,11 @@ function load(): JobStoreData {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-      if (parsed && Array.isArray(parsed.jobs) && parsed.results) return parsed as JobStoreData;
+      if (parsed && Array.isArray(parsed.jobs) && parsed.results) {
+        const data = parsed as JobStoreData;
+        if (data.jobs.length > FIND_LEADS_HISTORY_LIMIT) { pruneHistory(data); persist(data); }
+        return data;
+      }
     }
   } catch { /* start empty */ }
   const empty: JobStoreData = { jobs: [], results: {}, coverage: {} };
@@ -63,6 +69,17 @@ function persist(d: JobStoreData) {
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => { saveTimer = null; persist(store()); }, 1200);
+}
+
+/** Keep only the N most-recent searches (by createdAt); drop older ones + their results/coverage. */
+function pruneHistory(s: JobStoreData) {
+  if (s.jobs.length <= FIND_LEADS_HISTORY_LIMIT) return;
+  const keep = new Set(
+    s.jobs.slice().sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, FIND_LEADS_HISTORY_LIMIT).map((j) => j.id),
+  );
+  s.jobs = s.jobs.filter((j) => keep.has(j.id));
+  for (const id of Object.keys(s.results)) if (!keep.has(id)) delete s.results[id];
+  for (const id of Object.keys(s.coverage)) if (!keep.has(id)) delete s.coverage[id];
 }
 
 /* -------------------------------- reads ---------------------------------- */
@@ -152,6 +169,7 @@ export function createJobSearch(input: CreateJobSearchInput): { job: JobCollectJ
   s.jobs.push(job);
   s.results[id] = [];
   s.coverage[id] = sources.map((source) => ({ source, status: "pending", jobsFound: 0, pages: 0 }));
+  pruneHistory(s);
   scheduleSave();
   return { job };
 }

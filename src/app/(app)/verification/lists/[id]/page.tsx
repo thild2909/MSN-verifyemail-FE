@@ -2,13 +2,14 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Download, Sparkles, CheckCircle2, XCircle, AlertTriangle, HelpCircle, Users } from "lucide-react";
+import { ChevronLeft, Sparkles, CheckCircle2, XCircle, AlertTriangle, HelpCircle, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/common/stat-card";
 import { ResultsTable } from "@/components/verification/results-table";
+import { DownloadMenu } from "@/components/verification/download-menu";
 import { getList } from "@/lib/api/client";
 import { safeToSendRate } from "@/lib/types";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
@@ -75,9 +76,7 @@ export default function ListDetailPage() {
             <Button variant="outline" onClick={() => toast({ variant: "info", title: "Deep scan queued", description: "Risky rows will be re-checked over SMTP." })}>
               <Sparkles className="size-4" /> Deep scan
             </Button>
-            <Button onClick={() => toast({ variant: "success", title: "Export started", description: "Your cleaned list is being generated." })}>
-              <Download className="size-4" /> Download
-            </Button>
+            <DownloadMenu list={list} />
           </div>
         </div>
       </div>

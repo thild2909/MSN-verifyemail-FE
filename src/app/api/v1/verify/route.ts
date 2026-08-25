@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { verifyWithBackend } from "@/lib/verifier/backend";
+import { be } from "@/server/verify-client";
+import type { VerificationResult } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,11 +27,16 @@ export async function POST(req: Request) {
     return errorResponse("INVALID_REQUEST", "An `email` field is required.", 400);
   }
 
-  const outcome = await verifyWithBackend(parsed.data.email);
+  const res = await be<{ result: VerificationResult; provider: string; warning?: string }>("/verify/email", {
+    method: "POST",
+    body: JSON.stringify({ email: parsed.data.email }),
+  });
+  if (!res.ok) return errorResponse("INTERNAL", "Verification failed.", 502);
+
   return NextResponse.json({
     success: true,
-    data: outcome.result,
-    provider: outcome.provider,
-    ...(outcome.error ? { warning: outcome.error } : {}),
+    data: res.json.result,
+    provider: res.json.provider,
+    ...(res.json.warning ? { warning: res.json.warning } : {}),
   });
 }

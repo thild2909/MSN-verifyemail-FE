@@ -1,17 +1,18 @@
 "use client";
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Search, Inbox, Loader2, ChevronRight, Database, ChevronDown, Bookmark, ListPlus, Download, Users, X, Plus, SlidersHorizontal } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Search, Inbox, Loader2, ChevronRight, Database, ChevronDown, ListPlus, Download, Users, X, Plus, SlidersHorizontal } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
-import { getCollectedCompanies } from "@/lib/api/client";
+import { getCollectedCompanies, getLeadLists, createLeadList, addLeadItems } from "@/lib/api/client";
 import { formatNumber, cn } from "@/lib/utils";
-import { getLists, createList, addToList, saveToSaved, type LeadListItem } from "@/lib/leads/lists-store";
+import { companyToLeadItem } from "@/lib/leads/lead-snapshot";
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
+import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Sourced, COLLECT_STATUS_META, VerificationBadge, CompanyLogo, LlmBadge } from "./collect-ui";
 import { CompanyFilterPanel } from "./company-filter-panel";
 import { MobileFilterDrawer, openFiltersFor } from "./filter-drawer";
@@ -61,6 +62,7 @@ function Check({ checked, indeterminate, onChange }: { checked: boolean; indeter
 
 export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, onFindPeople, findingPeople }: Props) {
   const { toast } = useToast();
+  const qc = useQueryClient();
   const [search, setSearch] = React.useState("");
   const [filters, setFilters] = React.useState<CompanyFilters>(EMPTY_COMPANY_FILTERS);
   const [showFilters, setShowFilters] = React.useState(true);
@@ -116,7 +118,7 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
     return allMatching ? all.companies : all.companies.filter((c) => selectedIds.has(c.id));
   }, [jobId, debounced, filterKey, allMatching, selectedIds]);
 
-  const [busy, setBusy] = React.useState<null | "export" | "save" | "list">(null);
+  const [busy, setBusy] = React.useState<null | "export" | "list">(null);
 
   const onExport = async () => {
     setBusy("export");
@@ -133,28 +135,42 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
     finally { setBusy(null); }
   };
 
-  const listItems = (rows: CollectedCompany[]): LeadListItem[] => rows.map((c) => ({ refId: c.id, name: c.inputName, jobId, kind: "company" as const }));
-
-  const onSave = async () => {
-    setBusy("save");
-    try { const sel = await resolveSelected(); const { added } = saveToSaved(listItems(sel)); toast({ variant: "success", title: `Saved ${formatNumber(added)} companies`, description: added < sel.length ? `${sel.length - added} already saved` : undefined }); }
-    catch { toast({ variant: "error", title: "Save failed" }); }
-    finally { setBusy(null); }
-  };
+  const listItems = (rows: CollectedCompany[]) => rows.map((c) => companyToLeadItem(c, jobId));
 
   const addSelectedToList = async (listId: string, listName: string) => {
     setBusy("list");
-    try { const sel = await resolveSelected(); const { added } = addToList(listId, listItems(sel)); toast({ variant: "success", title: `Added ${formatNumber(added)} to ${listName}` }); }
+    try {
+      const sel = await resolveSelected();
+      if (sel.length === 0) { toast({ variant: "info", title: "Nothing selected" }); return; }
+      const { added } = await addLeadItems(listId, listItems(sel));
+      qc.invalidateQueries({ queryKey: ["lead-lists"] });
+      toast({ variant: "success", title: `Added ${formatNumber(added)} to ${listName}` });
+    }
     catch { toast({ variant: "error", title: "Could not add to list" }); }
     finally { setBusy(null); }
   };
 
-  const [lists, setLists] = React.useState(() => getLists());
-  React.useEffect(() => {
-    const h = () => setLists(getLists());
-    window.addEventListener("leadlists:changed", h);
-    return () => window.removeEventListener("leadlists:changed", h);
-  }, []);
+  // "New list" opens a naming dialog (same as /lists), then adds the selection.
+  const [newListOpen, setNewListOpen] = React.useState(false);
+  const [newListName, setNewListName] = React.useState("");
+  const createAndAdd = async () => {
+    const name = newListName.trim();
+    if (!name) return;
+    setBusy("list");
+    try {
+      const sel = await resolveSelected();
+      if (sel.length === 0) { toast({ variant: "info", title: "Nothing selected" }); setNewListOpen(false); return; }
+      const list = await createLeadList(name);
+      const { added } = await addLeadItems(list.id, listItems(sel));
+      qc.invalidateQueries({ queryKey: ["lead-lists"] });
+      setNewListOpen(false); setNewListName("");
+      toast({ variant: "success", title: `Added ${formatNumber(added)} to ${list.name}` });
+    }
+    catch { toast({ variant: "error", title: "Could not create list" }); }
+    finally { setBusy(null); }
+  };
+
+  const { data: lists = [] } = useQuery({ queryKey: ["lead-lists"], queryFn: getLeadLists });
 
   const findPeople = () => onFindPeople(
     allMatching
@@ -291,20 +307,38 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
               <button onClick={selectAll} className="text-xs font-medium text-primary hover:underline">Select all {formatNumber(total)}</button>
             )}
             <div className="h-6 w-px bg-border" />
-            <Button size="sm" variant="ghost" onClick={onSave} disabled={busy !== null}>{busy === "save" ? <Loader2 className="size-4 animate-spin" /> : <Bookmark className="size-4" />} Save</Button>
             <Button size="sm" onClick={findPeople} disabled={findingPeople}>{findingPeople ? <Loader2 className="size-4 animate-spin" /> : <Users className="size-4" />} Find people</Button>
             <DropdownMenu up align="end" trigger={<Button size="sm" variant="ghost" disabled={busy !== null}>{busy === "list" ? <Loader2 className="size-4 animate-spin" /> : <ListPlus className="size-4" />} Add to list <ChevronDown className="size-3.5" /></Button>}>
               {lists.length > 0 && lists.map((l) => (
-                <DropdownItem key={l.id} onClick={() => addSelectedToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs text-muted-foreground">{l.items.length}</span></DropdownItem>
+                <DropdownItem key={l.id} onClick={() => addSelectedToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs text-muted-foreground">{l.summary.total}</span></DropdownItem>
               ))}
               {lists.length > 0 && <DropdownSeparator />}
-              <DropdownItem onClick={() => { const l = createList(`List ${lists.length + 1}`); addSelectedToList(l.id, l.name); }}><Plus /> New list</DropdownItem>
+              <DropdownItem onClick={() => { setNewListName(""); setNewListOpen(true); }}><Plus /> New list</DropdownItem>
             </DropdownMenu>
             <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null}>{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
             <button onClick={clearSelection} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
           </div>
         </div>
       )}
+
+      {/* New list dialog — name it (same as the /lists screen), then add the selection. */}
+      <Dialog open={newListOpen} onOpenChange={(o) => { if (!o) { setNewListOpen(false); setNewListName(""); } }}>
+        <DialogHeader>
+          <DialogTitle>New list</DialogTitle>
+          <DialogDescription>Name the list, then add the {formatNumber(effectiveCount)} selected {effectiveCount === 1 ? "company" : "companies"}.</DialogDescription>
+        </DialogHeader>
+        <Input
+          autoFocus
+          value={newListName}
+          onChange={(e) => setNewListName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && newListName.trim()) createAndAdd(); }}
+          placeholder="List name"
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { setNewListOpen(false); setNewListName(""); }}>Cancel</Button>
+          <Button disabled={!newListName.trim() || busy === "list"} onClick={createAndAdd}>{busy === "list" ? <Loader2 className="size-4 animate-spin" /> : null} Create &amp; add</Button>
+        </DialogFooter>
+      </Dialog>
       </div>
     </div>
   );

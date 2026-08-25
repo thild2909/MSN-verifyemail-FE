@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  MoreHorizontal, Eye, Download, Pencil, Trash2, RefreshCw, FileDown, Loader2,
+  MoreHorizontal, Eye, Download, Pencil, Trash2, RefreshCw, Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -15,8 +15,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { DownloadMenu } from "./download-menu";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
-import { reprocessList, renameList, deleteList, listExportUrl, ApiError } from "@/lib/api/client";
+import { reprocessList, renameList, deleteList, ApiError } from "@/lib/api/client";
 import { safeToSendRate, type EmailList, type ListStatus } from "@/lib/types";
 
 const STATUS_STYLES: Record<ListStatus, { label: string; className: string }> = {
@@ -26,15 +27,6 @@ const STATUS_STYLES: Record<ListStatus, { label: string; className: string }> = 
   completed: { label: "Completed", className: "bg-valid/12 text-[hsl(var(--valid))]" },
   failed: { label: "Failed", className: "bg-invalid/12 text-[hsl(var(--invalid))]" },
 };
-
-function download(url: string) {
-  const a = document.createElement("a");
-  a.href = url;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
 
 function SafeToSendCell({ list }: { list: EmailList }) {
   const rate = safeToSendRate(list.summary);
@@ -140,6 +132,14 @@ export function ListsTable({ lists }: { lists: EmailList[] }) {
                     <Button size="sm" variant="ghost" onClick={() => router.push(`/verification/lists/${list.id}`)}>
                       <Eye className="size-4" /> View
                     </Button>
+                    <DownloadMenu
+                      list={list}
+                      trigger={
+                        <Button size="sm" variant="ghost" aria-label="Download">
+                          <Download className="size-4" /> Download
+                        </Button>
+                      }
+                    />
                     <DropdownMenu
                       trigger={
                         <Button size="icon" variant="ghost" aria-label="More actions" disabled={busy}>
@@ -154,12 +154,6 @@ export function ListsTable({ lists }: { lists: EmailList[] }) {
                         <RefreshCw /> Re-verify list
                       </DropdownItem>
                       <DropdownSeparator />
-                      <DropdownItem onClick={() => download(listExportUrl(list.id, "csv"))}>
-                        <Download /> Download CSV
-                      </DropdownItem>
-                      <DropdownItem onClick={() => download(listExportUrl(list.id, "xlsx"))}>
-                        <FileDown /> Export XLSX
-                      </DropdownItem>
                       <DropdownItem
                         onClick={() => {
                           setRenameTarget(list);

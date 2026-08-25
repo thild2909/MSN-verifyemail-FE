@@ -38,6 +38,8 @@ function domainOf(website?: string | null): string | null {
 }
 
 export const MAX_PEOPLE_SEEDS = Number(process.env.APP_MAX_PEOPLE_SEEDS ?? 100000);
+// Find Leads tabs cache only the N most-recent runs so `.data/*.json` can't grow unbounded.
+export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 3);
 
 /** A company seed the job iterates over (also drives progress). */
 interface PeopleSeed extends PeopleSeedInput {
@@ -64,7 +66,11 @@ function load(): PeopleStoreData {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-      if (parsed && Array.isArray(parsed.jobs) && parsed.seeds && parsed.people) return parsed as PeopleStoreData;
+      if (parsed && Array.isArray(parsed.jobs) && parsed.seeds && parsed.people) {
+        const data = parsed as PeopleStoreData;
+        if (data.jobs.length > FIND_LEADS_HISTORY_LIMIT) { pruneHistory(data); persist(data); }
+        return data;
+      }
     }
   } catch { /* start empty */ }
   const empty: PeopleStoreData = { jobs: [], seeds: {}, people: {} };
@@ -84,6 +90,17 @@ function persist(d: PeopleStoreData) {
     fs.writeFileSync(DATA_FILE, JSON.stringify(d));
   } catch { /* best-effort */ }
 }
+/** Keep only the N most-recent jobs (by createdAt); drop older jobs + their seeds/people. */
+function pruneHistory(s: PeopleStoreData) {
+  if (s.jobs.length <= FIND_LEADS_HISTORY_LIMIT) return;
+  const keep = new Set(
+    s.jobs.slice().sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, FIND_LEADS_HISTORY_LIMIT).map((j) => j.id),
+  );
+  s.jobs = s.jobs.filter((j) => keep.has(j.id));
+  for (const id of Object.keys(s.seeds)) if (!keep.has(id)) delete s.seeds[id];
+  for (const id of Object.keys(s.people)) if (!keep.has(id)) delete s.people[id];
+}
+
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => { saveTimer = null; persist(store()); }, 1200);
@@ -310,6 +327,7 @@ export function createPeopleJob(input: CreatePeopleJobInput): { job: PeopleColle
   s.seeds[id] = capped.map((seed) => ({ ...seed, status: "pending", peopleFound: 0 }));
   s.people[id] = [];
   s.jobs.push(job);
+  pruneHistory(s);
   scheduleSave();
   return { job, truncated };
 }

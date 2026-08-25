@@ -77,8 +77,6 @@ export default function VerificationPage() {
               <UploadFlow />
             </CardContent>
           </Card>
-
-          <ListsSection />
         </div>
 
         {/* Right panel */}
@@ -86,6 +84,9 @@ export default function VerificationPage() {
           <SingleVerifyCard />
         </div>
       </div>
+
+      {/* Lists — full width */}
+      <ListsSection />
     </div>
   );
 }

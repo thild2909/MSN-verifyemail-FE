@@ -46,6 +46,17 @@ export function DetailDrawer({
             </div>
           )}
 
+          {record.custom && Object.keys(record.custom).length > 0 && (
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">Imported fields</p>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                {Object.entries(record.custom).map(([key, value]) => (
+                  <Field key={key} label={key} value={value} />
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="mt-5">
             <ResultDetails result={result} />
           </div>

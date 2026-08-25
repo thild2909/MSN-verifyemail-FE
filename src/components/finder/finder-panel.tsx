@@ -207,7 +207,7 @@ export function FinderPanel() {
           <EmptyState
             icon={Search}
             title="Find professional emails"
-            description="Enter a person's name and company domain — or just a domain — to discover possible business email addresses."
+            description="Enter a person's name and company domain, or just a domain, to discover possible business email addresses."
           />
         ) : (
           <Card>

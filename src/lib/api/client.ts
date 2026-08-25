@@ -283,6 +283,12 @@ export async function getCredits(): Promise<CreditBalance> {
   return apiGet<CreditBalance>("/api/v1/credits");
 }
 
+/** Reset the credit wallet to unused (remaining = allocation) and clear the ledger. */
+export async function resetCredits(): Promise<CreditBalance> {
+  const { data } = await apiPost<CreditBalance>("/api/v1/credits/reset", {});
+  return data;
+}
+
 export async function getTransactions(): Promise<CreditTransaction[]> {
   return apiGet<CreditTransaction[]>("/api/v1/credits/transactions");
 }
@@ -581,6 +587,143 @@ export async function getCollectedPeople(id: string, query: CollectPeopleQuery =
   if (query.minScore) params.set("minScore", String(query.minScore));
   if (query.sort) params.set("sort", query.sort);
   return apiGet<CollectPeoplePage>(`/api/v1/leads/people/${id}/people?${params.toString()}`);
+}
+
+/* ----------------------------- saved lead lists -------------------------- */
+
+/**
+ * Saved lead lists — the persisted side of Find Leads "Save" / "Add to list".
+ * These proxy through the Next.js server to BE-service's PostgreSQL, replacing
+ * the old localStorage-only store. An item carries a full snapshot (`data`) of
+ * the collected person/company plus extracted display columns.
+ */
+export type LeadKind = "person" | "company";
+
+export interface LeadListSummary {
+  total: number;
+  people: number;
+  companies: number;
+}
+export interface LeadList {
+  id: string;
+  name: string;
+  isSaved: boolean;
+  summary: LeadListSummary;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface LeadItem {
+  id: string;
+  listId: string;
+  kind: LeadKind;
+  refId: string;
+  jobId: string | null;
+  name: string | null;
+  company: string | null;
+  title: string | null;
+  email: string | null;
+  data: Record<string, unknown>;
+  createdAt: string;
+}
+/** One row to persist — `data` is the full crawler object. */
+export interface NewLeadItem {
+  kind: LeadKind;
+  refId: string;
+  jobId?: string | null;
+  name?: string | null;
+  company?: string | null;
+  title?: string | null;
+  email?: string | null;
+  data: Record<string, unknown>;
+}
+
+export async function getLeadLists(): Promise<LeadList[]> {
+  return apiGet<LeadList[]>("/api/v1/leads/lists");
+}
+
+export async function createLeadList(name: string): Promise<LeadList> {
+  const { data } = await apiPost<LeadList>("/api/v1/leads/lists", { name });
+  return data;
+}
+
+export async function renameLeadList(id: string, name: string): Promise<LeadList> {
+  const res = await fetch(`/api/v1/leads/lists/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Rename failed", res.status);
+  return json.data as LeadList;
+}
+
+export async function deleteLeadList(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/leads/lists/${id}`, { method: "DELETE" });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
+}
+
+export interface LeadItemsQuery {
+  kind?: string; // "all" | "person" | "company"
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+export interface LeadItemsPage {
+  items: LeadItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+export async function getLeadItems(listId: string, query: LeadItemsQuery = {}): Promise<LeadItemsPage> {
+  const params = new URLSearchParams();
+  if (query.kind && query.kind !== "all") params.set("kind", query.kind);
+  if (query.search) params.set("search", query.search);
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  return apiGet<LeadItemsPage>(`/api/v1/leads/lists/${listId}/items?${params.toString()}`);
+}
+
+// The API caps items per request; chunk large "Select all N" selections so they
+// still persist in one logical action.
+const LEAD_ITEM_CHUNK = 500;
+
+async function postLeadItemsChunked(path: string, items: NewLeadItem[]): Promise<{ added: number }> {
+  let added = 0;
+  for (let i = 0; i < items.length; i += LEAD_ITEM_CHUNK) {
+    const chunk = items.slice(i, i + LEAD_ITEM_CHUNK);
+    if (chunk.length === 0) continue;
+    const { data } = await apiPost<{ added: number }>(path, { items: chunk });
+    added += data.added;
+  }
+  return { added };
+}
+
+/** Add items to a named list (deduped by kind+refId). Returns how many were new. */
+export async function addLeadItems(listId: string, items: NewLeadItem[]): Promise<{ added: number }> {
+  return postLeadItemsChunked(`/api/v1/leads/lists/${listId}/items`, items);
+}
+
+/** Drop items into the built-in "Saved" list (the Save button). */
+export async function saveLeadItems(items: NewLeadItem[]): Promise<{ added: number }> {
+  return postLeadItemsChunked("/api/v1/leads/saved/items", items);
+}
+
+export async function removeLeadItems(listId: string, ids: string[]): Promise<{ removed: number }> {
+  let removed = 0;
+  for (let i = 0; i < ids.length; i += 5000) {
+    const chunk = ids.slice(i, i + 5000);
+    if (chunk.length === 0) continue;
+    const res = await fetch(`/api/v1/leads/lists/${listId}/items`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: chunk }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Remove failed", res.status);
+    removed += (json.data as { removed: number }).removed;
+  }
+  return { removed };
 }
 
 /* -------------------------------- jobs ----------------------------------- */

@@ -8,6 +8,8 @@ import path from "path";
 import { employeeBucket, type CollectSummary, type CollectedCompany, type CompanyCollectJob, type SourcedField } from "@/lib/leads/collect-types";
 
 export const MAX_COLLECT_COMPANIES = Number(process.env.APP_MAX_COLLECT_COMPANIES ?? 200);
+// Find Leads tabs cache only the N most-recent runs so `.data/*.json` can't grow unbounded.
+export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 3);
 
 interface CollectStoreData {
   jobs: CompanyCollectJob[];
@@ -26,7 +28,11 @@ function load(): CollectStoreData {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
-      if (parsed && Array.isArray(parsed.jobs) && parsed.companies) return parsed as CollectStoreData;
+      if (parsed && Array.isArray(parsed.jobs) && parsed.companies) {
+        const data = parsed as CollectStoreData;
+        if (data.jobs.length > FIND_LEADS_HISTORY_LIMIT) { pruneHistory(data); persist(data); }
+        return data;
+      }
     }
   } catch { /* start empty */ }
   const empty: CollectStoreData = { jobs: [], companies: {} };
@@ -49,6 +55,16 @@ function persist(d: CollectStoreData) {
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => { saveTimer = null; persist(store()); }, 1200);
+}
+
+/** Keep only the N most-recent jobs (by createdAt); drop older jobs + their companies. */
+function pruneHistory(s: CollectStoreData) {
+  if (s.jobs.length <= FIND_LEADS_HISTORY_LIMIT) return;
+  const keep = new Set(
+    s.jobs.slice().sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, FIND_LEADS_HISTORY_LIMIT).map((j) => j.id),
+  );
+  s.jobs = s.jobs.filter((j) => keep.has(j.id));
+  for (const id of Object.keys(s.companies)) if (!keep.has(id)) delete s.companies[id];
 }
 
 function emptySummary(total: number): CollectSummary {
@@ -194,6 +210,7 @@ export function createCollectJob(input: CreateCollectInput): { job: CompanyColle
   const s = store();
   s.companies[id] = capped.map((r, i) => blankCompany(`${id}_${i}`, id, r.company, r.location));
   s.jobs.push(job);
+  pruneHistory(s);
   scheduleSave();
   return { job, truncated };
 }

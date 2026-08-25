@@ -2,16 +2,14 @@
 import * as React from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { FileText, CheckCircle2, AlertTriangle, Loader2, X, ArrowRight, Download } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { FileDropzone } from "./file-dropzone";
-import { getCredits, createList, getList, ApiError, type CreateListContact } from "@/lib/api/client";
-import { estimateCredits } from "@/lib/credit-config";
+import { createList, getList, type CreateListContact } from "@/lib/api/client";
 import { formatNumber } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import type { EmailList } from "@/lib/types";
@@ -20,9 +18,11 @@ type Step = "idle" | "parsed" | "ready" | "processing" | "done";
 
 interface Parsed {
   fileName: string;
-  columns: string[];
-  rows: string[][];
-  uploadedRows: number;
+  columns: string[]; // ALL original columns, preserved as-is
+  rows: string[][]; // ALL original data rows
+  emailColumn: string; // auto-detected email column
+  totalRows: number;
+  skipped: number; // rows dropped because the email cell was empty
   uniqueEmails: number;
   duplicates: number;
 }
@@ -36,14 +36,12 @@ const TITLE_RE = /title|role|position|job/i;
 export function UploadFlow() {
   const [step, setStep] = React.useState<Step>("idle");
   const [parsed, setParsed] = React.useState<Parsed | null>(null);
-  const [emailColumn, setEmailColumn] = React.useState("");
   const [list, setList] = React.useState<EmailList | null>(null);
   const [creating, setCreating] = React.useState(false);
   const pollRef = React.useRef(false);
   const { toast } = useToast();
   const qc = useQueryClient();
   const router = useRouter();
-  const { data: credits } = useQuery({ queryKey: ["credits"], queryFn: getCredits });
 
   const reset = () => {
     pollRef.current = false;
@@ -59,19 +57,56 @@ export function UploadFlow() {
 
   const applyRows = (file: File, columns: string[], rows: string[][]) => {
     const cols = columns.length ? columns : ["email"];
-    const emailCol = cols.find((c) => EMAIL_LIKE.test(c)) ?? cols[0];
+    // Validation: the file MUST contain an email column. No fallback to column 0 —
+    // if none of the headers look like an email column, refuse the import.
+    const emailCol = cols.find((c) => EMAIL_LIKE.test(c));
+    if (!emailCol) {
+      toast({
+        variant: "error",
+        title: "No email column found",
+        description: "The file must include an email column to import.",
+      });
+      return;
+    }
+
     const idx = cols.indexOf(emailCol);
-    const emails = rows.map((r) => (r[idx] ?? "").trim().toLowerCase()).filter(Boolean);
-    const unique = new Set(emails);
+    const emails = rows.map((r) => (r[idx] ?? "").trim().toLowerCase());
+    const present = emails.filter(Boolean); // rows that actually have an email
+    const skipped = emails.length - present.length; // rows dropped for a missing email
+    const unique = new Set(present);
+
+    if (unique.size === 0) {
+      toast({
+        variant: "error",
+        title: "No valid emails",
+        description: "Every row is missing an email address in this file.",
+      });
+      return;
+    }
+
+    // Column-level sanity: a real email column must contain email-like values.
+    // Guards headerless files whose first column is not actually emails.
+    if (!present.some((e) => e.includes("@"))) {
+      toast({
+        variant: "error",
+        title: "No email column found",
+        description: "The file must include an email column to import.",
+      });
+      return;
+    }
+
+    // Keep ALL original columns + rows; only rows with an empty email are skipped
+    // later (buildContacts), never any column.
     setParsed({
       fileName: file.name,
       columns: cols,
       rows,
-      uploadedRows: emails.length || rows.length,
+      emailColumn: emailCol,
+      totalRows: rows.length,
+      skipped,
       uniqueEmails: unique.size,
-      duplicates: Math.max(0, emails.length - unique.size),
+      duplicates: Math.max(0, present.length - unique.size),
     });
-    setEmailColumn(emailCol);
     setStep("parsed");
   };
 
@@ -104,18 +139,29 @@ export function UploadFlow() {
 
   const buildContacts = (p: Parsed): CreateListContact[] => {
     const find = (re: RegExp) => p.columns.findIndex((c) => re.test(c));
-    const eIdx = p.columns.indexOf(emailColumn);
+    const eIdx = p.columns.indexOf(p.emailColumn);
     const fIdx = find(FIRST_RE), lIdx = find(LAST_RE), cIdx = find(COMPANY_RE), tIdx = find(TITLE_RE);
     const out: CreateListContact[] = [];
     for (const r of p.rows) {
       const email = (r[eIdx] ?? "").trim().toLowerCase();
-      if (!email) continue;
+      if (!email) continue; // skip rows with a missing email (reported as `skipped`)
+
+      // Preserve EVERY original column (except the email itself) so no field from
+      // the source file is lost — stored on the record as `custom`.
+      const custom: Record<string, string> = {};
+      p.columns.forEach((col, i) => {
+        if (i === eIdx) return;
+        const v = (r[i] ?? "").trim();
+        if (v) custom[col] = v;
+      });
+
       out.push({
         email,
         firstName: fIdx >= 0 ? r[fIdx]?.trim() || undefined : undefined,
         lastName: lIdx >= 0 ? r[lIdx]?.trim() || undefined : undefined,
         company: cIdx >= 0 ? r[cIdx]?.trim() || undefined : undefined,
         jobTitle: tIdx >= 0 ? r[tIdx]?.trim() || undefined : undefined,
+        custom: Object.keys(custom).length ? custom : undefined,
       });
     }
     return out;
@@ -129,24 +175,18 @@ export function UploadFlow() {
         name: parsed.fileName.replace(/\.[^.]+$/, ""),
         fileName: parsed.fileName,
         columns: parsed.columns,
-        emailColumn,
+        emailColumn: parsed.emailColumn,
         contacts: buildContacts(parsed),
       });
       setList(created);
       setStep("processing");
-      qc.invalidateQueries({ queryKey: ["credits"] });
       qc.invalidateQueries({ queryKey: ["lists"] });
       if (truncated > 0) {
         toast({ variant: "info", title: "List capped for this session", description: `${formatNumber(truncated)} extra emails were not queued.` });
       }
       poll(created.id);
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "INSUFFICIENT_CREDITS") {
-        toast({ variant: "error", title: "Insufficient credits", description: "Add credits to start verification." });
-        setStep("ready");
-      } else {
-        toast({ variant: "error", title: "Could not start verification" });
-      }
+    } catch {
+      toast({ variant: "error", title: "Could not start verification" });
     } finally {
       setCreating(false);
     }
@@ -179,8 +219,6 @@ export function UploadFlow() {
 
   /* ------------------------------ derived ------------------------------ */
 
-  const estimated = parsed ? estimateCredits("bulk_verification", parsed.uniqueEmails) : 0;
-  const insufficient = credits ? estimated > credits.totalRemaining : false;
   const summary = list?.summary;
   const verified = summary ? summary.valid + summary.invalid + summary.risky + summary.unknown : 0;
   const progress = list?.progress ?? 0;
@@ -211,7 +249,7 @@ export function UploadFlow() {
             </div>
             <div>
               <p className="text-sm font-semibold">{parsed?.fileName}</p>
-              <p className="text-xs text-muted-foreground">{formatNumber(parsed?.uploadedRows ?? 0)} rows detected</p>
+              <p className="text-xs text-muted-foreground">{formatNumber(parsed?.totalRows ?? 0)} rows detected</p>
             </div>
           </div>
           {step !== "processing" && (
@@ -226,17 +264,21 @@ export function UploadFlow() {
             <div className="flex items-center gap-2 rounded-lg bg-valid/10 px-3 py-2 text-sm text-[hsl(var(--valid))]">
               <CheckCircle2 className="size-4" /> Parsed — {formatNumber(parsed.uniqueEmails)} unique emails
             </div>
+            {parsed.skipped > 0 && (
+              <div className="flex items-center gap-2 rounded-lg bg-risky/10 px-3 py-2 text-sm text-[hsl(var(--risky))]">
+                <AlertTriangle className="size-4" />
+                {formatNumber(parsed.skipped)} {parsed.skipped === 1 ? "row" : "rows"} skipped — missing email
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-3">
-              <Stat label="Uploaded" value={parsed.uploadedRows} />
+              <Stat label="Uploaded" value={parsed.totalRows} />
               <Stat label="Duplicates" value={parsed.duplicates} />
               <Stat label="Unique emails" value={parsed.uniqueEmails} highlight />
             </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Email column</label>
-              <Select value={emailColumn} onChange={(e) => setEmailColumn(e.target.value)}>
-                {parsed.columns.map((c) => <option key={c} value={c}>{c}</option>)}
-              </Select>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Email column auto-detected: <span className="font-medium text-foreground">{parsed.emailColumn}</span>
+              {" · "}all {parsed.columns.length} columns preserved
+            </p>
             <Button className="w-full" onClick={() => setStep("ready")}>
               Continue <ArrowRight className="size-4" />
             </Button>
@@ -246,31 +288,14 @@ export function UploadFlow() {
         {step === "ready" && parsed && (
           <div className="space-y-4">
             <div className="rounded-lg border p-4">
-              <Row label="Unique emails" value={formatNumber(parsed.uniqueEmails)} />
-              <Row label="Estimated credits" value={formatNumber(estimated)} strong />
-              <Row label="Available credits" value={credits ? formatNumber(credits.totalRemaining) : "—"} />
+              <Row label="Unique emails" value={formatNumber(parsed.uniqueEmails)} strong />
             </div>
             <p className="rounded-lg bg-accent/50 px-3 py-2 text-xs text-accent-foreground">
               Verification runs on the server — you can leave this page and check the list later.
             </p>
-            {insufficient ? (
-              <div className="space-y-3 rounded-lg bg-invalid/10 p-4 text-sm">
-                <div className="flex items-center gap-2 font-medium text-[hsl(var(--invalid))]">
-                  <AlertTriangle className="size-4" /> Insufficient credits
-                </div>
-                <p className="text-muted-foreground">
-                  Required {formatNumber(estimated)}, available {formatNumber(credits?.totalRemaining ?? 0)}.
-                </p>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={() => router.push("/billing")}>Add credits</Button>
-                  <Button size="sm" variant="outline" onClick={reset}>Cancel</Button>
-                </div>
-              </div>
-            ) : (
-              <Button className="w-full" disabled={creating} onClick={start}>
-                {creating ? <Loader2 className="size-4 animate-spin" /> : "Start verification"}
-              </Button>
-            )}
+            <Button className="w-full" disabled={creating} onClick={start}>
+              {creating ? <Loader2 className="size-4 animate-spin" /> : "Start verification"}
+            </Button>
           </div>
         )}
 
