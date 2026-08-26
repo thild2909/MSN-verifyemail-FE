@@ -9,6 +9,7 @@
  */
 import "server-only";
 import { verifyWithBackend, type VerifyOutcome } from "@/lib/verifier/backend";
+import { isM365Domain, m365MailboxExists } from "@/lib/verifier/m365";
 import type { VerificationStatus } from "@/lib/types";
 
 interface CachedEntry {
@@ -67,13 +68,41 @@ export async function cachedVerify(
     if (hit) cache().delete(key);
   }
 
-  const outcome = await verifyWithBackend(email);
+  const outcome = await m365Confirmed(await verifyWithBackend(email), email);
   // Persist only real, DEFINITIVE engine results — never mock fallbacks or
   // transient (unknown/risky) verdicts.
   if (outcome.provider === "reacher" && CACHEABLE_STATUS.has(outcome.result.status)) {
     cache().set(key, { outcome, at: Date.now() });
   }
   return { ...outcome, cached: false };
+}
+
+/**
+ * M365 rescue: the Rust engine can't SMTP-verify Microsoft 365 mailboxes and
+ * returns `unknown`/`catch_all`/`invalid` for real, deliverable addresses. When
+ * the domain is M365 and the verdict is not already `valid`, confirm the mailbox
+ * out-of-band via GetCredentialType (see `@/lib/verifier/m365`). A confirmed
+ * mailbox is upgraded to `valid`; anything ambiguous is left exactly as the
+ * engine returned it. Only ever upgrades — never downgrades a real verdict.
+ */
+async function m365Confirmed(outcome: VerifyOutcome, email: string): Promise<VerifyOutcome> {
+  const r = outcome.result;
+  if (r.status === "valid" || r.status === "disposable" || !isM365Domain(r.mxRecords)) return outcome;
+  try {
+    if ((await m365MailboxExists(email)) !== "exists") return outcome;
+  } catch {
+    return outcome;
+  }
+  return {
+    ...outcome,
+    result: {
+      ...r,
+      status: "valid",
+      score: Math.max(r.score, 90),
+      suggestedAction: "Safe to send: Microsoft 365 confirms this mailbox exists.",
+      checks: { ...r.checks, mailbox: "pass" },
+    },
+  };
 }
 
 export function verifyCacheStats(): { size: number } {

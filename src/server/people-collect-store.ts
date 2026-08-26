@@ -469,13 +469,16 @@ export function setVerifyingPersonIds(jobId: string, ids: string[]) {
 }
 
 /**
- * A verdict counts as "already checked" ONLY if it came from the real engine.
- * Rows written by the retired mock verifier (provider "mock") hold fake verdicts
- * — both false "valid" and false "not_found" — so they must be re-checked and
- * never treated as final by the incremental Find & verify pass.
+ * A verdict counts as "already checked" (so the incremental pass may skip it)
+ * ONLY if it is a real, settled engine result. Two kinds are NOT settled and
+ * always get re-checked:
+ *   - `provider: "mock"` — fake verdicts from the retired mock verifier (both
+ *     false "valid" and false "not_found").
+ *   - `status: "unknown"` — the engine couldn't decide (greylisting, timeout,
+ *     M365 inconclusive); a retry can resolve it to a real answer.
  */
 function isRealVerdict(ev: CollectedPerson["emailVerification"]): boolean {
-  return !!ev && (ev.provider as string) !== "mock";
+  return !!ev && (ev.provider as string) !== "mock" && ev.status !== "unknown";
 }
 
 /**
