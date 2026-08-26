@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, ShieldCheck, ShieldAlert, Database } from "lucide-react";
+import { Download, ShieldCheck, ShieldAlert, ShieldX, Globe, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { getListRecords, listExportUrl } from "@/lib/api/client";
@@ -25,6 +25,8 @@ function download(url: string) {
  *
  *   Safe to send            → valid only               (recommended)
  *   Safe to send + Ok for All → valid + catch-all (accept-all)
+ *   Catch-all               → catch-all (accept-all) only
+ *   Invalid                 → invalid / risky / unknown (not valid, not catch-all)
  *   All emails              → everything
  */
 export function DownloadMenu({
@@ -51,6 +53,8 @@ export function DownloadMenu({
   const okForAll = catchAll?.total ?? 0;
   const safeOk = safe + okForAll;
   const all = list.summary.total;
+  // Everything that isn't valid and isn't catch-all: invalid / risky / unknown / …
+  const invalid = Math.max(0, all - safe - okForAll);
 
   // Preserve the imported file's type (csv/xlsx) so the download matches the upload.
   const format: "csv" | "xlsx" = /\.xlsx?$/i.test(list.fileName) ? "xlsx" : "csv";
@@ -81,6 +85,18 @@ export function DownloadMenu({
         label="Safe to send + Ok for All"
         count={safeOk}
         onClick={() => download(listExportUrl(list.id, format, "safe_ok"))}
+      />
+      <DownloadOption
+        icon={<Globe />}
+        label="Catch-all"
+        count={okForAll}
+        onClick={() => download(listExportUrl(list.id, format, "catch_all"))}
+      />
+      <DownloadOption
+        icon={<ShieldX />}
+        label="Invalid"
+        count={invalid}
+        onClick={() => download(listExportUrl(list.id, format, "unsafe"))}
       />
       <DropdownSeparator />
       <DownloadOption

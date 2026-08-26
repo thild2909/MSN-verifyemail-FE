@@ -16,6 +16,25 @@ export const VERIFICATION_STATUSES = [
 
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 
+/** Map any verification status to its top-level summary bucket. */
+export function statusBucket(
+  status: VerificationStatus,
+): "valid" | "invalid" | "risky" | "unknown" {
+  switch (status) {
+    case "valid":
+      return "valid";
+    case "invalid":
+      return "invalid";
+    case "risky":
+    case "catch_all":
+    case "role":
+    case "disposable":
+      return "risky";
+    default:
+      return "unknown";
+  }
+}
+
 /** The four top-level buckets used for summaries / safe-to-send. */
 export type VerificationBucket = "valid" | "invalid" | "risky" | "unknown";
 
@@ -175,7 +194,7 @@ export interface FinderOutcome {
   state: FinderState;
   smtpCalls: number; // backend verifications actually performed
   skipped: number; // candidate patterns we did NOT need to check
-  provider: "reacher" | "mock";
+  provider: "reacher";
   fromCache: boolean; // domain facts came from cache (0 or few live calls)
 }
 
@@ -337,6 +356,32 @@ export interface TeamMember {
   role: TeamRole;
   status: "active" | "invited";
   joinedAt: string;
+}
+
+/** Application user for login + user management (backed by BE-service). */
+export type UserRole = "admin" | "member";
+
+export interface AppUser {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A tracked login session shown on the Security page's "Active sessions". */
+export interface DeviceSession {
+  id: string;
+  browser: string;
+  os: string;
+  device: string;
+  mobile: boolean;
+  ip: string;
+  createdAt: string;
+  lastSeenAt: string;
+  current: boolean;
 }
 
 /* ------------------------------------------------------------------ */

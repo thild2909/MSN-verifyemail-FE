@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import * as store from "@/server/people-collect-store";
 import { verifyOnePersonEmail } from "@/server/people-verify";
+import { VerifierUnavailableError } from "@/lib/verifier/backend";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!personId) {
     return NextResponse.json({ success: false, error: { code: "BAD_REQUEST", message: "personId required." } }, { status: 400 });
   }
-  const result = await verifyOnePersonEmail(id, personId);
-  return NextResponse.json({ success: true, data: result });
+  try {
+    const result = await verifyOnePersonEmail(id, personId);
+    return NextResponse.json({ success: true, data: result });
+  } catch (err) {
+    if (err instanceof VerifierUnavailableError) {
+      return NextResponse.json(
+        { success: false, error: { code: "VERIFIER_UNAVAILABLE", message: "Verification engine unavailable — not checked. Please try again." } },
+        { status: 503 },
+      );
+    }
+    throw err;
+  }
 }

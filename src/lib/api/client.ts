@@ -5,19 +5,14 @@
  * bulk verification jobs, deep scan, and credits are all handled by the
  * Next.js server backend (`src/server/*` + `/api/v1/*` route handlers),
  * which delegates actual email checking to the Rust `check-if-email-exists`
- * engine. Finder/analytics/api-keys/integrations/team remain seed data.
+ * engine.
+ *
+ * There is NO mock/simulated data anywhere in this client. Features that do not
+ * yet have a real backend (API keys, webhooks, integrations, team, analytics,
+ * domain stats, saved finder searches) return honest EMPTY results rather than
+ * fabricated seed data — the UI shows an empty state until a real backend
+ * exists.
  */
-import { sleep } from "../utils";
-import {
-  MOCK_API_KEYS,
-  MOCK_WEBHOOKS,
-  MOCK_WEBHOOK_DELIVERIES,
-  MOCK_INTEGRATIONS,
-  MOCK_TEAM,
-  MOCK_DOMAIN_STATS,
-  MOCK_FINDER_SEARCHES,
-  buildAnalytics,
-} from "../mock/data";
 import type {
   AnalyticsPoint,
   ApiKey,
@@ -25,17 +20,21 @@ import type {
   CreditTransaction,
   DomainStat,
   BulkFinderResponse,
+  AppUser,
+  DeviceSession,
   EmailList,
   EmailRecord,
   FinderOutcome,
   FinderResult,
+  FinderSearch,
   Integration,
   TeamMember,
+  UserRole,
   VerificationResult,
   Webhook,
   WebhookDelivery,
 } from "../types";
-import { statusBucket } from "../mock/verification-engine";
+import { statusBucket } from "../types";
 import { seededRandom } from "../utils";
 import { cleanDomain } from "../finder/patterns";
 import type {
@@ -63,7 +62,7 @@ import type {
 
 export interface VerifyResponse {
   result: VerificationResult;
-  provider: "reacher" | "mock";
+  provider: "reacher";
   warning?: string;
 }
 
@@ -349,9 +348,43 @@ export async function findEmailsByDomain(domainInput: string): Promise<FinderRes
   }));
 }
 
-export async function getFinderSearches() {
-  await sleep(200);
-  return MOCK_FINDER_SEARCHES;
+export async function getFinderSearches(): Promise<FinderSearch[]> {
+  // No saved-search backend yet — return empty rather than fabricated history.
+  return [];
+}
+
+/* ---------------- Runtime app config (crawler secrets) ---------------- */
+
+export type AppConfigKey =
+  | "DEEPSEEK_API_KEY"
+  | "DEEPSEEK_MODEL"
+  | "CRAWLER_ROTATING_PROXY"
+  | "CRAWLER_PROXY_LIST_URL"
+  | "DECODO_AUTH"
+  | "GOOGLE_API_KEY"
+  | "GOOGLE_CX";
+
+export interface AppConfigField {
+  key: AppConfigKey;
+  secret: boolean;
+  hasValue: boolean;
+  /** Secrets: masked preview. Non-secrets: the plain value. */
+  value: string;
+  overridden: boolean;
+}
+export interface AppConfig {
+  fields: AppConfigField[];
+}
+
+export async function getAppConfig(): Promise<AppConfig> {
+  return apiGet<AppConfig>("/api/v1/settings");
+}
+
+export async function setAppConfig(patch: Partial<Record<AppConfigKey, string>>): Promise<AppConfig> {
+  const res = await fetch("/api/v1/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Save failed", res.status);
+  return json.data as AppConfig;
 }
 
 /* ---------------- Company collection + proxy config ---------------- */
@@ -446,7 +479,7 @@ export async function retryFailedCollect(id: string): Promise<{ reset: number; s
   return json.data;
 }
 
-export interface VerifyEmailsResult { verified: number; valid: number; found?: number; provider: "reacher" | "mock" | "mixed" | "none" }
+export interface VerifyEmailsResult { verified: number; valid: number; found?: number; provider: "reacher" | "none" }
 /** Verify collected contact emails via the backend. `all` re-checks every email. */
 export async function verifyCollectedEmails(id: string, all = false): Promise<VerifyEmailsResult> {
   const { data } = await apiPost<VerifyEmailsResult>(`/api/v1/leads/collect/${id}/verify-emails${all ? "?all=1" : ""}`, {});
@@ -517,14 +550,21 @@ export async function deletePeopleJob(id: string): Promise<void> {
   if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
 }
 
+/** Result of kicking off a people Find & verify pass (runs in the background). */
+export interface StartVerifyResult { started: boolean; pending: number; alreadyRunning?: boolean }
+
 /**
  * Find & verify a people job's emails. Default is incremental: saved verdicts
  * (including Not found) are kept; only unchecked people are looked up.
  * Pass `{ keep: false }` to wipe caches + prior results and re-search everyone.
+ *
+ * The pass runs in the background (a full job can far exceed the request
+ * timeout); this returns as soon as it has started. Watch the job's
+ * `verifyStatus` (polled by the People tab) for live progress and completion.
  */
-export async function verifyPeopleEmails(id: string, opts: { keep?: boolean } = {}): Promise<VerifyEmailsResult> {
+export async function verifyPeopleEmails(id: string, opts: { keep?: boolean } = {}): Promise<StartVerifyResult> {
   const q = opts.keep === false ? "?fresh=1" : "?keep=1";
-  const { data } = await apiPost<VerifyEmailsResult>(`/api/v1/leads/people/${id}/verify-emails${q}`, {});
+  const { data } = await apiPost<StartVerifyResult>(`/api/v1/leads/people/${id}/verify-emails${q}`, {});
   return data;
 }
 
@@ -535,7 +575,7 @@ export interface SinglePersonVerifyResult {
   email: string | null;
   found: boolean;
   valid: boolean;
-  provider: "reacher" | "mock" | "none";
+  provider: "reacher" | "none";
 }
 export async function verifyPersonEmail(jobId: string, personId: string): Promise<SinglePersonVerifyResult> {
   const { data } = await apiPost<SinglePersonVerifyResult>(`/api/v1/leads/people/${jobId}/verify-email`, { personId });
@@ -852,40 +892,114 @@ export async function getCrawledJobs(id: string, query: CrawledJobsQuery = {}): 
 /* --------------------------- API / webhooks ------------------------ */
 
 export async function getApiKeys(): Promise<ApiKey[]> {
-  await sleep(200);
-  return MOCK_API_KEYS;
+  // No API-key backend yet — honest empty state, never seeded keys.
+  return [];
 }
 
 export async function getWebhooks(): Promise<Webhook[]> {
-  await sleep(200);
-  return MOCK_WEBHOOKS;
+  return [];
 }
 
 export async function getWebhookDeliveries(): Promise<WebhookDelivery[]> {
-  await sleep(200);
-  return MOCK_WEBHOOK_DELIVERIES;
+  return [];
 }
 
 /* ------------------------ Integrations / team ---------------------- */
 
 export async function getIntegrations(): Promise<Integration[]> {
-  await sleep(200);
-  return MOCK_INTEGRATIONS;
+  return [];
 }
 
 export async function getTeam(): Promise<TeamMember[]> {
-  await sleep(200);
-  return MOCK_TEAM;
+  return [];
+}
+
+/* ------------------------- Auth & users ---------------------------- */
+
+/** Current signed-in user, or null when the session is missing/expired. */
+export async function getMe(): Promise<AppUser | null> {
+  const res = await fetch("/api/v1/auth/me", { cache: "no-store" });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json.success ? (json.data as AppUser) : null;
+}
+
+export async function login(email: string, password: string): Promise<AppUser> {
+  const { data } = await apiPost<AppUser>("/api/v1/auth/login", { email, password });
+  return data;
+}
+
+export async function logout(): Promise<void> {
+  await fetch("/api/v1/auth/logout", { method: "POST" });
+}
+
+export async function getUsers(): Promise<AppUser[]> {
+  return apiGet<AppUser[]>("/api/v1/users");
+}
+
+export interface CreateUserInput {
+  email: string;
+  name: string;
+  role: UserRole;
+  password: string;
+}
+
+export async function createUser(input: CreateUserInput): Promise<AppUser> {
+  const { data } = await apiPost<AppUser>("/api/v1/users", input);
+  return data;
+}
+
+export interface UpdateUserInput {
+  name?: string;
+  role?: UserRole;
+  isActive?: boolean;
+  password?: string;
+}
+
+export async function updateUser(id: string, input: UpdateUserInput): Promise<AppUser> {
+  const res = await fetch(`/api/v1/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Request failed", res.status, json.error);
+  return json.data as AppUser;
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/users/${id}`, { method: "DELETE" });
+  const json = await res.json().catch(() => ({ success: false }));
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Could not delete user", res.status, json.error);
+}
+
+/* ------------------------- Active sessions ------------------------- */
+
+export async function getSessions(): Promise<DeviceSession[]> {
+  return apiGet<DeviceSession[]>("/api/v1/auth/sessions");
+}
+
+/** Revoke one session. Returns whether the revoked one was the current device. */
+export async function revokeSession(id: string): Promise<{ id: string; current: boolean }> {
+  const res = await fetch(`/api/v1/auth/sessions/${id}`, { method: "DELETE" });
+  const json = await res.json().catch(() => ({ success: false }));
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Could not revoke session", res.status, json.error);
+  return json.data as { id: string; current: boolean };
+}
+
+/** Sign out every other device. Returns how many sessions were revoked. */
+export async function revokeOtherSessions(): Promise<number> {
+  const { data } = await apiPost<{ revoked: number }>("/api/v1/auth/sessions/revoke-others", {});
+  return data.revoked;
 }
 
 /* ----------------------------- Analytics --------------------------- */
 
-export async function getAnalytics(days: number): Promise<AnalyticsPoint[]> {
-  await sleep(300);
-  return buildAnalytics(days);
+export async function getAnalytics(_days: number): Promise<AnalyticsPoint[]> {
+  // No analytics backend yet — empty series, never fabricated trend data.
+  return [];
 }
 
 export async function getDomainStats(): Promise<DomainStat[]> {
-  await sleep(200);
-  return MOCK_DOMAIN_STATS;
+  return [];
 }

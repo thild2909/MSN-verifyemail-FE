@@ -469,16 +469,26 @@ export function setVerifyingPersonIds(jobId: string, ids: string[]) {
 }
 
 /**
+ * A verdict counts as "already checked" ONLY if it came from the real engine.
+ * Rows written by the retired mock verifier (provider "mock") hold fake verdicts
+ * — both false "valid" and false "not_found" — so they must be re-checked and
+ * never treated as final by the incremental Find & verify pass.
+ */
+function isRealVerdict(ev: CollectedPerson["emailVerification"]): boolean {
+  return !!ev && (ev.provider as string) !== "mock";
+}
+
+/**
  * Emails worth verifying: any person email we have (both pattern-guessed and
  * found — verifying the guess is the whole point). Pass `onlyUnverified` to skip
- * ones already checked.
+ * ones already checked (real-engine verdicts only; mock verdicts are re-checked).
  */
 export function emailTargets(jobId: string, onlyUnverified = true): { personId: string; email: string }[] {
   const list = store().people[jobId] ?? [];
   const out: { personId: string; email: string }[] = [];
   for (const p of list) {
     if (!p.email) continue;
-    if (onlyUnverified && p.emailVerification) continue;
+    if (onlyUnverified && isRealVerdict(p.emailVerification)) continue;
     out.push({ personId: p.id, email: String(p.email.value) });
   }
   return out;
@@ -575,7 +585,7 @@ export function peopleVerifyTargets(jobId: string, onlyUnverified = true): Perso
   const list = store().people[jobId] ?? [];
   const out: PersonVerifyTarget[] = [];
   for (const p of list) {
-    if (onlyUnverified && p.emailVerification) continue;
+    if (onlyUnverified && isRealVerdict(p.emailVerification)) continue;
     out.push(toVerifyTarget(p));
   }
   return out;

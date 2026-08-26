@@ -22,7 +22,6 @@ interface Parsed {
   fileName: string;
   columns: string[];
   rows: string[][];
-  simulated: boolean;
 }
 
 interface FoundRow {
@@ -72,9 +71,9 @@ export function BulkFinderPanel() {
   };
 
   const onFile = (file: File) => {
-    const finish = (columns: string[], data: string[][], simulated: boolean) => {
+    const finish = (columns: string[], data: string[][]) => {
       const cols = columns.length ? columns : ["first_name", "last_name", "company"];
-      setParsed({ fileName: file.name, columns: cols, rows: data, simulated });
+      setParsed({ fileName: file.name, columns: cols, rows: data });
       setMap({
         first: cols.find((c) => FIRST_RE.test(c)) ?? cols[0] ?? "",
         last: cols.find((c) => LAST_RE.test(c)) ?? cols[1] ?? "",
@@ -83,21 +82,26 @@ export function BulkFinderPanel() {
       setStep("mapping");
     };
 
+    const fail = (reason: string) => {
+      toast({ variant: "error", title: "Couldn't read this file", description: reason });
+      reset();
+    };
+
     if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) {
       Papa.parse(file, {
         skipEmptyLines: true,
         complete: (res) => {
           const data = res.data as string[][];
-          if (!data.length) return simulateFile(file, finish);
+          if (!data.length) return fail("The file has no rows. Upload a CSV with first name, last name and company/domain columns.");
           const header = data[0].map((h) => String(h).trim());
           const looksLikeHeader = header.some((h) => FIRST_RE.test(h) || LAST_RE.test(h) || DOMAIN_RE.test(h));
-          if (looksLikeHeader) finish(header, data.slice(1), false);
-          else finish(["first_name", "last_name", "company"], data, false);
+          if (looksLikeHeader) finish(header, data.slice(1));
+          else finish(["first_name", "last_name", "company"], data);
         },
-        error: () => simulateFile(file, finish),
+        error: () => fail("The CSV could not be parsed. Please check the file and try again."),
       });
     } else {
-      simulateFile(file, finish);
+      fail("Unsupported file type. Please upload a .csv or .txt file.");
     }
   };
 
@@ -380,12 +384,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {children}
     </div>
   );
-}
-
-function simulateFile(file: File, finish: (cols: string[], rows: string[][], simulated: boolean) => void) {
-  const est = Math.max(20, Math.round(file.size / 60));
-  const rows = Array.from({ length: est }, (_, i) => [`First${i}`, `Last${i}`, "example.com"]);
-  finish(["first_name", "last_name", "company"], rows, true);
 }
 
 function downloadExample() {

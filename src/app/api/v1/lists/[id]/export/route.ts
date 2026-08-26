@@ -31,7 +31,8 @@ function legacyCells(r: EmailRecord): (string | number)[] {
  *   all      → every record
  *   safe     → valid only              ("Safe to send")
  *   safe_ok  → valid + catch-all       ("Safe to send + Ok for All")
- *   <status> → exact status (results-table pills: valid/invalid/risky/…)
+ *   unsafe   → invalid / risky / unknown / … (everything that isn't valid or catch-all) ("Invalid")
+ *   <status> → exact status (results-table pills: valid/invalid/risky/catch_all/…)
  */
 function matchesFilter(status: string | undefined, filter: string): boolean {
   const s = status ?? "";
@@ -42,6 +43,8 @@ function matchesFilter(status: string | undefined, filter: string): boolean {
       return s === "valid";
     case "safe_ok":
       return s === "valid" || s === "catch_all";
+    case "unsafe":
+      return s !== "" && s !== "valid" && s !== "catch_all";
     default:
       return s === filter;
   }

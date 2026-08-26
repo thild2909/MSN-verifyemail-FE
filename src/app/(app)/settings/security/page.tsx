@@ -1,22 +1,52 @@
 "use client";
 import * as React from "react";
-import { ShieldCheck, Smartphone, Monitor } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ShieldCheck, Smartphone, Monitor, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { getSessions, revokeSession, revokeOtherSessions } from "@/lib/api/client";
 
-const SESSIONS = [
-  { device: "Chrome · Windows", location: "Sydney, AU", current: true, icon: Monitor },
-  { device: "Safari · iPhone", location: "Sydney, AU", current: false, icon: Smartphone },
-];
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
 export default function SecuritySettingsPage() {
+  const qc = useQueryClient();
   const { toast } = useToast();
   const [twoFa, setTwoFa] = React.useState(true);
+
+  const { data: sessions, isLoading } = useQuery({ queryKey: ["sessions"], queryFn: getSessions });
+
+  const revokeOne = useMutation({
+    mutationFn: revokeSession,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      toast({ variant: "success", title: "Session revoked" });
+    },
+    onError: (e) => toast({ variant: "error", title: "Could not revoke session", description: e instanceof Error ? e.message : undefined }),
+  });
+
+  const revokeOthers = useMutation({
+    mutationFn: revokeOtherSessions,
+    onSuccess: (n) => {
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      toast({ variant: "success", title: n > 0 ? `Signed out ${n} other device${n > 1 ? "s" : ""}` : "No other devices" });
+    },
+    onError: (e) => toast({ variant: "error", title: "Could not sign out devices", description: e instanceof Error ? e.message : undefined }),
+  });
+
+  const otherCount = (sessions ?? []).filter((s) => !s.current).length;
 
   return (
     <div className="space-y-6">
@@ -27,10 +57,10 @@ export default function SecuritySettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5"><Label>Current password</Label><Input type="password" placeholder="••••••••" /></div>
+            <div className="space-y-1.5"><Label>Current password</Label><PasswordInput placeholder="••••••••" /></div>
             <div />
-            <div className="space-y-1.5"><Label>New password</Label><Input type="password" placeholder="••••••••" /></div>
-            <div className="space-y-1.5"><Label>Confirm new password</Label><Input type="password" placeholder="••••••••" /></div>
+            <div className="space-y-1.5"><Label>New password</Label><PasswordInput placeholder="••••••••" /></div>
+            <div className="space-y-1.5"><Label>Confirm new password</Label><PasswordInput placeholder="••••••••" /></div>
           </div>
           <Button onClick={() => toast({ variant: "success", title: "Password updated" })}>Update password</Button>
         </CardContent>
@@ -53,26 +83,56 @@ export default function SecuritySettingsPage() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle className="text-base">Active sessions</CardTitle></CardHeader>
+        <CardHeader className="flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-base">Active sessions</CardTitle>
+            <CardDescription>Devices currently signed in to your account.</CardDescription>
+          </div>
+          {otherCount > 0 && (
+            <Button variant="outline" size="sm" disabled={revokeOthers.isPending} onClick={() => revokeOthers.mutate()}>
+              {revokeOthers.isPending && <Loader2 className="size-4 animate-spin" />}
+              Sign out other devices
+            </Button>
+          )}
+        </CardHeader>
         <CardContent className="space-y-2">
-          {SESSIONS.map((s) => (
-            <div key={s.device} className="flex items-center justify-between rounded-lg border p-3">
-              <div className="flex items-center gap-3">
-                <s.icon className="size-5 text-muted-foreground" />
-                <div>
-                  <p className="text-sm font-medium">{s.device}</p>
-                  <p className="text-xs text-muted-foreground">{s.location}</p>
-                </div>
-              </div>
-              {s.current ? (
-                <Badge variant="success">This device</Badge>
-              ) : (
-                <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => toast({ variant: "warning", title: "Session revoked" })}>
-                  Revoke
-                </Button>
-              )}
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="size-5 animate-spin" />
             </div>
-          ))}
+          ) : (sessions ?? []).length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">No active sessions.</p>
+          ) : (
+            (sessions ?? []).map((s) => {
+              const Icon = s.mobile ? Smartphone : Monitor;
+              return (
+                <div key={s.id} className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Icon className="size-5 text-muted-foreground" />
+                    <div>
+                      <p className="text-sm font-medium">{s.device}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {s.ip} · {s.current ? "Active now" : `Last active ${timeAgo(s.lastSeenAt)}`}
+                      </p>
+                    </div>
+                  </div>
+                  {s.current ? (
+                    <Badge variant="success">This device</Badge>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      disabled={revokeOne.isPending}
+                      onClick={() => revokeOne.mutate(s.id)}
+                    >
+                      Revoke
+                    </Button>
+                  )}
+                </div>
+              );
+            })
+          )}
         </CardContent>
       </Card>
     </div>

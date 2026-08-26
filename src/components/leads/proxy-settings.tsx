@@ -5,6 +5,7 @@ import { Plus, Trash2, Loader2, ShieldCheck, Server, Zap, Globe } from "lucide-r
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -283,7 +284,10 @@ export function ProxySettings({ open, onOpenChange }: { open: boolean; onOpenCha
                       </div>
                       {/* Row 2 — auth + status + controls */}
                       <Input className="sm:col-span-3" placeholder="Username (optional)" value={r.username} onChange={(e) => setRow(i, { username: e.target.value })} />
-                      <Input className="sm:col-span-3" type="password" placeholder={r.hasAuth ? "•••••• (unchanged)" : "Password (optional)"} value={r.password} onChange={(e) => setRow(i, { password: e.target.value })} />
+                      {/* Wrap in a grid child so col-span applies (PasswordInput's className lands on the inner input). */}
+                      <div className="col-span-2 sm:col-span-3">
+                        <PasswordInput placeholder={r.hasAuth ? "•••••• (unchanged)" : "Password (optional)"} value={r.password} onChange={(e) => setRow(i, { password: e.target.value })} />
+                      </div>
                       <Input className="sm:col-span-2" placeholder="Country" value={r.country} onChange={(e) => setRow(i, { country: e.target.value })} />
                       <div className="col-span-2 flex min-w-0 items-center justify-end gap-2 sm:col-span-4">
                         <span className={cn("min-w-0 truncate rounded-full px-2 py-0.5 text-[10px] font-medium", HEALTH_META[r.status].className)} title={r.exitIp ? `Exit IP ${r.exitIp}` : undefined}>{HEALTH_META[r.status].label}{r.lastLatencyMs ? ` ${r.lastLatencyMs}ms` : ""}{r.exitIp ? ` · ${r.exitIp}` : ""}</span>

@@ -5,7 +5,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
-import { SourceBadge, COLLECT_STATUS_META, SimulatedTag, isSimulatedSource, VerificationBadge, CompanyLogo } from "./collect-ui";
+import { SourceBadge, COLLECT_STATUS_META, VerificationBadge, CompanyLogo } from "./collect-ui";
 import type { CollectedCompany, CollectionAttempt, SourcedField } from "@/lib/leads/collect-types";
 
 export function CompanyCollectDrawer({ company, open, onOpenChange }: { company: CollectedCompany | null; open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -120,7 +120,6 @@ export function CompanyCollectDrawer({ company, open, onOpenChange }: { company:
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
                     <SourceBadge source={a.source} showLabel />
-                    {a.simulated && <SimulatedTag />}
                     {a.cacheHit && <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"><Database className="size-3" /> cache</span>}
                   </span>
                   <AttemptStatus a={a} />
@@ -151,7 +150,6 @@ function FieldRow({ label, field, copyable, onCopy }: { label: string; field: So
           </span>
         )}
         <SourceBadge source={field.source} />
-        {isSimulatedSource(field.source) && <SimulatedTag />}
         {copyable && <button onClick={() => onCopy(String(field.value))} className="rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label="Copy"><Copy className="size-3.5" /></button>}
       </div>
     </div>

@@ -12,6 +12,7 @@
  */
 import "server-only";
 import { cachedVerify } from "./verification";
+import { VerifierUnavailableError } from "@/lib/verifier/backend";
 import { findPersonEmail } from "./finder";
 import { llmFindEmailsViaCrawler } from "./crawler-client";
 import type { FinderOutcome } from "@/lib/types";
@@ -28,7 +29,7 @@ export interface VerifyPassResult {
   verified: number; // people whose email got a verdict this pass
   valid: number; // confirmed-deliverable
   found: number; // real emails DISCOVERED (upgraded from a guess)
-  provider: "reacher" | "mock" | "mixed" | "none";
+  provider: "reacher" | "none";
 }
 
 type PersonPatch = Partial<
@@ -41,11 +42,11 @@ type VerifyOneResult = {
   patch: PersonPatch;
   valid: boolean;
   found: boolean;
-  provider: "reacher" | "mock";
+  provider: "reacher";
   needsLlm?: boolean;
 };
 
-function notFoundPatch(provider: "reacher" | "mock"): VerifyOneResult {
+function notFoundPatch(provider: "reacher"): VerifyOneResult {
   return {
     patch: {
       email: null,
@@ -183,7 +184,7 @@ export interface SinglePersonVerifyResult {
   email: string | null;
   found: boolean;
   valid: boolean;
-  provider: "reacher" | "mock" | "none";
+  provider: "reacher" | "none";
 }
 
 /**
@@ -218,7 +219,10 @@ export async function verifyOnePersonEmail(jobId: string, personId: string): Pro
     let res: VerifyOneResult | null = null;
     try {
       res = await verifyOne(target);
-    } catch {
+    } catch (e) {
+      // The verification engine being unreachable is a real error, never a
+      // "not found" — surface it so the UI can tell the user to retry.
+      if (e instanceof VerifierUnavailableError) throw e;
       res = null;
     }
     return persistLookup(jobId, personId, res ?? notFoundPatch("reacher"));
@@ -240,7 +244,7 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
   let valid = 0;
   let found = 0;
   let sinceCommit = 0;
-  const providers = new Set<"reacher" | "mock">();
+  const providers = new Set<"reacher">();
   const pendingLlm: store.PersonVerifyTarget[] = [];
 
   const apply = (t: store.PersonVerifyTarget, res: VerifyOneResult) => {
@@ -262,7 +266,10 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
         let res: VerifyOneResult | null = null;
         try {
           res = await verifyOne(t, { skipLlm: true });
-        } catch {
+        } catch (e) {
+          // Engine unreachable → abort the whole pass with a real error rather
+          // than silently marking everyone "not found".
+          if (e instanceof VerifierUnavailableError) throw e;
           res = null;
         }
         if (!res) apply(t, notFoundPatch("reacher"));
@@ -274,20 +281,31 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
+  try {
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
 
-  if (pendingLlm.length > 0) {
-    store.setVerifyingPersonIds(jobId, pendingLlm.map((t) => t.personId));
-    const llmHits = await fillWithLlmEmails(pendingLlm);
-    for (const t of pendingLlm) {
-      apply(t, llmHits.get(t.personId) ?? notFoundPatch("reacher"));
+    if (pendingLlm.length > 0) {
+      store.setVerifyingPersonIds(jobId, pendingLlm.map((t) => t.personId));
+      const llmHits = await fillWithLlmEmails(pendingLlm);
+      for (const t of pendingLlm) {
+        apply(t, llmHits.get(t.personId) ?? notFoundPatch("reacher"));
+      }
     }
+  } catch (e) {
+    if (e instanceof VerifierUnavailableError) {
+      // Don't mark the pass "done" — persist whatever was verified and reset to
+      // idle so it can be retried, then surface the error to the route.
+      store.setVerifyingPersonIds(jobId, []);
+      store.commitVerification(jobId);
+      store.setJobVerifyStatus(jobId, "idle");
+    }
+    throw e;
   }
 
   store.setVerifyingPersonIds(jobId, []);
   store.commitVerification(jobId);
   store.setJobVerifyStatus(jobId, "done");
   store.sealMissedEmailLookups(jobId);
-  const provider = providers.size === 2 ? "mixed" : providers.has("reacher") ? "reacher" : providers.has("mock") ? "mock" : "none";
+  const provider: "reacher" | "none" = providers.has("reacher") ? "reacher" : "none";
   return { verified, valid, found, provider };
 }

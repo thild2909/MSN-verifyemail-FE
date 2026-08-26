@@ -35,7 +35,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
 
         <p className="relative z-10 text-xs text-sidebar-muted">
-          © 2026 Verifly. Demo interface. Not affiliated with any existing brand.
+          © 2026 Mind Supernova. All rights reserved.
         </p>
 
         <div className="pointer-events-none absolute -right-24 -top-24 size-96 rounded-full bg-sidebar-accent/20 blur-3xl" />

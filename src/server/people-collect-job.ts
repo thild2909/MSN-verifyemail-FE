@@ -5,7 +5,7 @@
  * No mock data. Email verification is NOT automatic — opt-in via "Verify emails".
  */
 import "server-only";
-import { resolvePeopleViaCrawler, resolvePersonViaCrawler, crawlerProxyAvailable, type CrawledPerson } from "./crawler-client";
+import { resolvePeopleViaCrawler, resolvePersonViaCrawler, resolveCompanyWebsiteViaCrawler, crawlerProxyAvailable, type CrawledPerson } from "./crawler-client";
 import type { PeopleSeedInput } from "@/lib/leads/people-types";
 import * as store from "./people-collect-store";
 
@@ -49,6 +49,26 @@ function personFromSeed(seed: PeopleSeedInput): CrawledPerson {
   };
 }
 
+/**
+ * Fill an EMPTY Website on an imported row via the crawler's website-only
+ * resolution (same tiered SERP logic as the Companies flow, Decodo first).
+ * Memoized per company+location so many people at one company cost ONE SERP
+ * resolution; failures resolve to null (the row still shows, without a domain).
+ */
+const websiteMemo = new Map<string, Promise<{ domain: string; provider: string } | null>>();
+function resolveWebsiteMemo(company: string, location: string): Promise<{ domain: string; provider: string } | null> {
+  const key = `${company.toLowerCase().trim()}|${location.toLowerCase().trim()}`;
+  let p = websiteMemo.get(key);
+  if (!p) {
+    if (websiteMemo.size > 1000) websiteMemo.clear();
+    p = resolveCompanyWebsiteViaCrawler(company, location)
+      .then((r) => (r.domain ? { domain: r.domain, provider: r.provider || "crawler" } : null))
+      .catch(() => null);
+    websiteMemo.set(key, p);
+  }
+  return p;
+}
+
 const CONCURRENCY = Math.max(1, Math.min(Number(process.env.CRAWLER_PEOPLE_CONCURRENCY ?? process.env.CRAWLER_CONCURRENCY ?? 3), 12));
 // Block-retry: seeds that came back rate-limited (blocked, nothing found) are
 // recoverable — re-run them after a backoff at low concurrency so a transient
@@ -88,7 +108,17 @@ async function run(id: string) {
         blocked.delete(index);
       } else if (isPerson && seedIsComplete(seed)) {
         // Already has LinkedIn/email from the CSV → show as-is, skip enrichment.
-        store.applySeedPeople(id, index, [personFromSeed(seed)]);
+        // An EMPTY Website is still filled: resolve it with the company-flow
+        // SERP crawl (Decodo real-Google first) so the row carries its domain.
+        const person = personFromSeed(seed);
+        if (!person.companyDomain) {
+          const resolved = await resolveWebsiteMemo(seed.company, seed.location ?? "");
+          if (resolved) {
+            person.companyDomain = resolved.domain;
+            person.collection.push({ source: "search", status: "ok", proxy: null, ms: 0, fieldsFound: 1, detail: `website resolved: ${resolved.domain}`, provider: resolved.provider });
+          }
+        }
+        store.applySeedPeople(id, index, [person]);
         blocked.delete(index);
       } else if (isPerson) {
         // Enrich mode: a known person → find that one profile.

@@ -52,18 +52,35 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
   const verify = useMutation({
     mutationFn: (id: string) => verifyPeopleEmails(id), // incremental: skip rows already looked up
     onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["people-jobs"] });
       qc.invalidateQueries({ queryKey: ["people-job", activeId] });
       qc.invalidateQueries({ queryKey: ["collect-people", activeId] });
-      toast(r.verified === 0
-        ? { variant: "info", title: "Already checked", description: "Every person already has a saved email result. Misses stay Not found." }
-        : {
-            variant: "success",
-            title: r.found ? `Found ${r.found} real email${r.found === 1 ? "" : "s"}` : "Emails verified",
-            description: `${r.valid}/${r.verified} deliverable${r.found ? ` · ${r.found} discovered by finder` : ""} · via ${r.provider}`,
-          });
+      if (r.alreadyRunning) {
+        toast({ variant: "info", title: "Already running", description: "A Find & verify pass is already in progress for this list." });
+      } else if (r.pending === 0) {
+        toast({ variant: "info", title: "Already checked", description: "Every person already has a saved email result. Misses stay Not found." });
+      } else {
+        toast({ variant: "success", title: `Finding & verifying ${formatNumber(r.pending)} email${r.pending === 1 ? "" : "s"}`, description: "Running in the background — the table updates live as each person is checked." });
+      }
     },
     onError: () => toast({ variant: "error", title: "Verification failed" }),
   });
+
+  // Toast when a background verify pass finishes (verifying → done) or is
+  // interrupted before finishing (verifying → idle, e.g. the engine was down).
+  const prevVerify = React.useRef<PeopleCollectJob["verifyStatus"] | undefined>(undefined);
+  React.useEffect(() => {
+    const vs = active?.verifyStatus;
+    if (prevVerify.current === "verifying") {
+      if (vs === "done" && active?.summary) {
+        const { emailsValid, emailsVerified } = active.summary;
+        toast({ variant: "success", title: "Find & verify complete", description: `${formatNumber(emailsValid)} deliverable of ${formatNumber(emailsVerified)} verified.` });
+      } else if (vs === "idle") {
+        toast({ variant: "error", title: "Verification interrupted", description: "The pass stopped before finishing — the verification engine may be unavailable. Click Find & verify to resume." });
+      }
+    }
+    prevVerify.current = vs;
+  }, [active?.verifyStatus, active?.summary, toast]);
 
   // "Retry failed" — re-crawl the coverage-gap companies (0 people found).
   const retryGaps = useMutation({

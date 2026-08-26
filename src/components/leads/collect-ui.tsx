@@ -4,9 +4,9 @@
  * status chips, and a sourced-field renderer (value + which source found it).
  */
 import * as React from "react";
-import { Linkedin, Globe, MapPin, Share2, Boxes, Search, Landmark, BookText, FlaskConical, ShieldCheck, ShieldX, ShieldAlert, ShieldQuestion, Sparkles, Brain, type LucideIcon } from "lucide-react";
+import { Linkedin, Globe, MapPin, Share2, Boxes, Search, Landmark, BookText, ShieldCheck, ShieldX, ShieldAlert, ShieldQuestion, Sparkles, Brain, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SIMULATED_SOURCES, type CollectStatus, type CollectionSource, type SourcedField, type EmailVerification, type LlmVerdict } from "@/lib/leads/collect-types";
+import { type CollectStatus, type CollectionSource, type SourcedField, type EmailVerification, type LlmVerdict } from "@/lib/leads/collect-types";
 
 export const SOURCE_META: Record<CollectionSource, { label: string; icon: LucideIcon; className: string }> = {
   search: { label: "Resolver", icon: Search, className: "bg-blue-100 text-blue-700" },
@@ -19,8 +19,6 @@ export const SOURCE_META: Record<CollectionSource, { label: string; icon: Lucide
   llm: { label: "AI (DeepSeek)", icon: Brain, className: "bg-fuchsia-100 text-fuchsia-700" },
   other: { label: "Other", icon: Boxes, className: "bg-amber-100 text-amber-700" },
 };
-
-export const isSimulatedSource = (s: CollectionSource) => SIMULATED_SOURCES.includes(s);
 
 /** Company logo: the real favicon for the resolved domain, initials on failure. */
 export function CompanyLogo({ domain, text, className }: { domain?: string | null; text: string; className?: string }) {
@@ -43,14 +41,6 @@ export function CompanyLogo({ domain, text, className }: { domain?: string | nul
   );
 }
 
-/** Small honest "Simulated" tag for gated sources whose values are mock. */
-export function SimulatedTag({ className }: { className?: string }) {
-  return (
-    <span className={cn("inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground", className)} title="This source is simulated (ToS-gated: mock values, real rotation/rate-limit behaviour)">
-      <FlaskConical className="size-3" /> Simulated
-    </span>
-  );
-}
 
 export function SourceBadge({ source, showLabel = false }: { source: CollectionSource; showLabel?: boolean }) {
   const m = SOURCE_META[source];
@@ -98,7 +88,6 @@ export function VerificationBadge({ ev, showScore = false }: { ev: EmailVerifica
   return (
     <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium", m.className)} title={title}>
       <m.icon className="size-3" /> {m.label}{showScore ? ` ${ev.score}` : ""}
-      {ev.provider === "mock" && <span className="opacity-60">·sim</span>}
     </span>
   );
 }

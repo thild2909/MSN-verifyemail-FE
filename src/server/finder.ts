@@ -78,7 +78,7 @@ function getFacts(domain: string): DomainFacts | undefined {
 }
 
 /** Learn a domain's winning pattern — from a REAL backend `valid` result only. */
-function learnWinningPattern(domain: string, winningPattern: string, provider: "reacher" | "mock"): void {
+function learnWinningPattern(domain: string, winningPattern: string, provider: "reacher"): void {
   if (provider !== "reacher") return; // never cache facts derived from the mock fallback
   cache().set(domain, { winningPattern, at: Date.now() });
 }
@@ -112,7 +112,7 @@ function outcome(
   state: FinderState,
   smtpCalls: number,
   skipped: number,
-  provider: "reacher" | "mock",
+  provider: "reacher",
   fromCache: boolean,
 ): FinderOutcome {
   return { result, state, smtpCalls, skipped, provider, fromCache };
@@ -136,7 +136,7 @@ export async function findPersonEmail(input: {
       "not_found",
       0,
       0,
-      "mock",
+      "reacher",
       false,
     );
   }
@@ -144,7 +144,7 @@ export async function findPersonEmail(input: {
   const total = candidates.length;
   const cached = getFacts(domain);
   let calls = 0; // real backend calls made (per-email cache hits don't count)
-  let provider: "reacher" | "mock" = "mock";
+  let provider: "reacher" = "reacher";
 
   // Check the learned winning pattern first so a known-format domain confirms
   // on the first call - but every candidate stays eligible and live-checked.

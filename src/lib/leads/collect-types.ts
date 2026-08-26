@@ -43,7 +43,7 @@ export interface EmailVerification {
   email: string;
   status: VerificationStatus | "not_found";
   score: number; // 0-100
-  provider: "reacher" | "mock";
+  provider: "reacher" | "none";
   verifiedAt: string; // ISO
 }
 

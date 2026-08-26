@@ -141,6 +141,42 @@ export async function resolveViaCrawler(name: string, location: string): Promise
   }
 }
 
+/* ------------------------ website-only resolution ------------------------ */
+
+export interface CompanyWebsiteResult {
+  website: string | null;
+  domain: string | null;
+  linkedin: string | null;
+  confidence: number; // 0..100
+  provider: string;
+  blocked: boolean;
+  cache_hit: boolean;
+}
+
+/**
+ * Resolve JUST a company's website through the crawler's tiered SERP resolution
+ * (same logic as the Companies flow; Decodo real-Google first when configured)
+ * without the full crawl. Used by the People import to fill rows whose Website
+ * column is empty. Throws on transport error.
+ */
+export async function resolveCompanyWebsiteViaCrawler(company: string, location: string): Promise<CompanyWebsiteResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/company-website`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ company, location }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /company-website responded ${res.status}`);
+    return (await res.json()) as CompanyWebsiteResult;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* ------------------------------- people ---------------------------------- */
 
 import type { CollectedPerson, PersonSeniority, PeopleSeedInput } from "@/lib/leads/people-types";
@@ -482,6 +518,17 @@ export async function crawlerProxyAvailable(): Promise<boolean> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/* --------------------------- runtime settings (Config tab) --------------- */
+
+/** Masked snapshot of the crawler's env-backed secrets (DeepSeek / proxy / search). */
+export function getSettingsRemote(): Promise<unknown> {
+  return proxyFetch("/settings");
+}
+/** Patch the crawler's runtime settings. Blank clears; masked value keeps existing. */
+export function setSettingsRemote(patch: unknown): Promise<unknown> {
+  return proxyFetch("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
 }
 
 /** Reachability probe for the crawler service. */

@@ -1,12 +1,12 @@
 "use client";
 import * as React from "react";
 import { createPortal } from "react-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Menu, Search, Bell, Moon, Sun, X } from "lucide-react";
 import { SidebarContent } from "./sidebar";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
+import { getMe, logout } from "@/lib/api/client";
 import { cn, initials } from "@/lib/utils";
-
-const USER = { name: "MindSupernova Labs", email: "labs@mindsupernova.com" };
 
 function useDarkMode() {
   const [dark, setDark] = React.useState(false);
@@ -31,6 +31,15 @@ export function Topbar() {
   const [mounted, setMounted] = React.useState(false);
   const { dark, toggle } = useDarkMode();
   React.useEffect(() => setMounted(true), []);
+
+  const { data: user } = useQuery({ queryKey: ["me"], queryFn: getMe });
+  const displayName = user?.name || "Account";
+  const displayEmail = user?.email ?? "";
+
+  const signOut = async () => {
+    await logout();
+    window.location.href = "/login";
+  };
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b bg-card/80 px-4 backdrop-blur lg:px-6">
@@ -64,22 +73,24 @@ export function Topbar() {
           trigger={
             <button className="ml-1 flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 hover:bg-muted">
               <span className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
-                {initials(USER.name)}
+                {initials(displayName)}
               </span>
-              <span className="hidden text-sm font-medium sm:block">{USER.name}</span>
+              <span className="hidden text-sm font-medium sm:block">{displayName}</span>
             </button>
           }
         >
           <div className="px-2.5 py-2">
-            <p className="text-sm font-medium">{USER.name}</p>
-            <p className="text-xs text-muted-foreground">{USER.email}</p>
+            <p className="text-sm font-medium">{displayName}</p>
+            {displayEmail && <p className="text-xs text-muted-foreground">{displayEmail}</p>}
           </div>
           <DropdownSeparator />
           <DropdownItem onClick={() => (window.location.href = "/settings/profile")}>Profile</DropdownItem>
-          <DropdownItem onClick={() => (window.location.href = "/settings/team")}>Team</DropdownItem>
+          {user?.role === "admin" && (
+            <DropdownItem onClick={() => (window.location.href = "/settings/team")}>Users</DropdownItem>
+          )}
           <DropdownItem onClick={() => (window.location.href = "/billing")}>Billing</DropdownItem>
           <DropdownSeparator />
-          <DropdownItem destructive onClick={() => (window.location.href = "/login")}>
+          <DropdownItem destructive onClick={signOut}>
             Sign out
           </DropdownItem>
         </DropdownMenu>

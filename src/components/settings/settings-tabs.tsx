@@ -1,19 +1,25 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { getMe } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { label: "Profile", href: "/settings/profile" },
-  { label: "Team", href: "/settings/team" },
+  { label: "Config", href: "/settings/config", adminOnly: true },
+  { label: "Users", href: "/settings/team", adminOnly: true },
   { label: "Security", href: "/settings/security" },
 ];
 
 export function SettingsTabs() {
   const pathname = usePathname();
+  const { data: user } = useQuery({ queryKey: ["me"], queryFn: getMe });
+  const tabs = TABS.filter((t) => !t.adminOnly || user?.role === "admin");
+
   return (
     <div className="flex gap-1 border-b">
-      {TABS.map((t) => {
+      {tabs.map((t) => {
         const active = pathname === t.href;
         return (
           <Link

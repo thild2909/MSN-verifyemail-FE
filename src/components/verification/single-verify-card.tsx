@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useMutation } from "@tanstack/react-query";
-import { AtSign, Loader2, ShieldCheck, Wifi, WifiOff } from "lucide-react";
+import { AtSign, Loader2, ShieldCheck, Wifi } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,17 +21,14 @@ export function SingleVerifyCard() {
     mutationFn: () => verifyEmail(email.trim()),
     onSuccess: (res) => {
       setResponse(res);
-      if (res.provider === "mock") {
-        toast({
-          variant: "warning",
-          title: "Backend offline: simulated result",
-          description: "Start the verification backend for real SMTP checks.",
-        });
-      } else {
-        toast({ variant: "success", title: "Verification complete", description: `${res.result.email} → ${res.result.status}` });
-      }
+      toast({ variant: "success", title: "Verification complete", description: `${res.result.email} → ${res.result.status}` });
     },
-    onError: () => toast({ variant: "error", title: "Verification failed", description: "Please try again." }),
+    onError: (err) =>
+      toast({
+        variant: "error",
+        title: "Verification failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+      }),
   });
 
   const result = response?.result ?? null;
@@ -86,15 +83,9 @@ export function SingleVerifyCard() {
                 <p className="truncate text-sm font-semibold">{result.email}</p>
                 <div className="mt-1.5 flex items-center gap-2">
                   <StatusBadge status={result.status} />
-                  {response?.provider === "reacher" ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-[hsl(var(--valid))]">
-                      <Wifi className="size-3" /> Live
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <WifiOff className="size-3" /> Simulated
-                    </span>
-                  )}
+                  <span className="inline-flex items-center gap-1 text-xs text-[hsl(var(--valid))]">
+                    <Wifi className="size-3" /> Live
+                  </span>
                 </div>
               </div>
               <ScoreRing score={result.score} tone={scoreTone(result.score)} />
