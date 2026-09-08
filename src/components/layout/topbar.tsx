@@ -2,8 +2,9 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Menu, Search, Bell, Moon, Sun, X } from "lucide-react";
+import { Menu, Search, Moon, Sun, X } from "lucide-react";
 import { SidebarContent } from "./sidebar";
+import { NotificationBell } from "./notification-bell";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { getMe, logout } from "@/lib/api/client";
 import { cn, initials } from "@/lib/utils";
@@ -64,10 +65,7 @@ export function Topbar() {
         <button onClick={toggle} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" aria-label="Toggle theme">
           {dark ? <Sun className="size-5" /> : <Moon className="size-5" />}
         </button>
-        <button className="relative rounded-lg p-2 text-muted-foreground hover:bg-muted" aria-label="Notifications">
-          <Bell className="size-5" />
-          <span className="absolute right-2 top-2 size-2 rounded-full bg-primary" />
-        </button>
+        <NotificationBell />
 
         <DropdownMenu
           trigger={

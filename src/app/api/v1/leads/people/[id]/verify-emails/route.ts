@@ -10,7 +10,9 @@ export const dynamic = "force-dynamic";
 /**
  * "Find & verify" — incremental by default: keep saved verdicts (including
  * Not found) and only look up people not yet checked. Pass `fresh=1` to wipe
- * caches + prior results and re-search everyone.
+ * caches + ALL prior results and re-search everyone. Pass `notfound=1` ("Retry
+ * notfound") to re-open only the misses (verdict Not found) and re-search just
+ * those, keeping every settled address.
  *
  * The pass runs in the BACKGROUND: a full job (hundreds/thousands of people,
  * each doing several SMTP lookups) far exceeds the proxy's request timeout, so
@@ -26,6 +28,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   const q = new URL(req.url).searchParams;
   const fresh = q.get("fresh") === "1" || q.get("keep") === "0";
+  const notfound = q.get("notfound") === "1";
 
   // A pass is already running — don't start a second, racing one.
   if (job.verifyStatus === "verifying") {
@@ -36,6 +39,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     clearVerifyCache();
     clearDomainCache();
     store.resetPeopleVerification(id);
+  } else if (notfound) {
+    // Retry only the misses: drop cached verdicts/domains so the finder actually
+    // re-searches (rather than replaying the same Not found), then re-open the
+    // not_found rows. Settled addresses are left as-is.
+    clearVerifyCache();
+    clearDomainCache();
+    store.resetPeopleNotFound(id);
   }
 
   const pending = store.peopleVerifyTargets(id, true).length;

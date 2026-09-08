@@ -106,6 +106,7 @@ export interface PeopleSummary {
   withLinkedin: number;
   emailsVerified: number;
   emailsValid: number;
+  emailsNotFound: number; // people whose lookup settled on "not found" (retriable)
 }
 
 export type PeopleCollectStatus = "collecting" | "completed" | "failed";
@@ -143,7 +144,7 @@ export interface PeopleCollectJob {
 
 /** Faceted filter state for the People table sidebar. */
 export interface PeopleFilters {
-  email: string[]; // Email Status: has | valid | catch_all | risky | invalid | unverified | none
+  email: string[]; // Email Status: has | valid | catch_all | risky | invalid | unverified | not_found | not_searched
   titles: string[]; // Job Titles: title contains any (OR)
   seniority: string[]; // founder | c_level | president | vp | other
   linkedin: boolean; // must have a LinkedIn URL
@@ -174,7 +175,8 @@ export function personHasFunding(p: Pick<CollectedPerson, "companyFunding">): bo
 /** Facet counts (over all people in the job) for the sidebar. */
 export interface PeopleFacets {
   seniority: Record<string, number>;
-  email: { has: number; valid: number; catch_all: number; risky: number; invalid: number; unverified: number; none: number };
+  // not_searched — no email, never looked up yet;  not_found — looked up, came back empty
+  email: { has: number; valid: number; catch_all: number; risky: number; invalid: number; unverified: number; not_searched: number; not_found: number };
   linkedin: { has: number };
   funded: { has: number };
   companies: { name: string; count: number }[];

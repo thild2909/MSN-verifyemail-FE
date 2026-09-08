@@ -36,7 +36,7 @@ export const NAV: NavSection[] = [
       { label: "Find Leads", href: "/find-leads", icon: Radar },
       { label: "Lists", href: "/lists", icon: ListChecks, match: ["/lists"] },
       { label: "Inbox Placement", href: "/inbox-placement", icon: Inbox, soon: true },
-      { label: "Blacklist Monitor", href: "/blacklist", icon: ShieldAlert, soon: true },
+      { label: "Blacklist Monitor", href: "/blacklist", icon: ShieldAlert },
     ],
   },
   {

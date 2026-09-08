@@ -27,7 +27,8 @@ export function PeopleFilterPanel({ filters, facets, onChange, onClear }: {
     { value: "risky", label: "Risky / unknown", hint: String(e?.risky ?? 0) },
     { value: "invalid", label: "Invalid", hint: String(e?.invalid ?? 0) },
     { value: "unverified", label: "Unverified", hint: String(e?.unverified ?? 0) },
-    { value: "none", label: "No email", hint: String(e?.none ?? 0) },
+    { value: "not_found", label: "Not found", hint: String(e?.not_found ?? 0) },
+    { value: "not_searched", label: "Not searched", hint: String(e?.not_searched ?? 0) },
   ].filter((o) => o.value === "has" || o.hint !== "0" || filters.email.includes(o.value));
 
   const seniorityOpts: Option[] = SENIORITY_ORDER

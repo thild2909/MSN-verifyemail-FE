@@ -1,14 +1,14 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Users, Trash2, Loader2, Crown, Building2, Mail, Linkedin, MailCheck, UserSearch, Star, Upload, Sparkles, RotateCw } from "lucide-react";
+import { Users, Trash2, Loader2, Crown, Building2, Mail, Linkedin, MailCheck, MailX, UserSearch, Star, Upload, Sparkles, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
-import { getPeopleJobs, getPeopleJob, deletePeopleJob, verifyPeopleEmails, llmVerifyPeople, retryPeopleGaps, ApiError } from "@/lib/api/client";
+import { getPeopleJobs, getPeopleJob, deletePeopleJob, verifyPeopleEmails, retryPeopleNotFound, llmVerifyPeople, retryPeopleGaps, ApiError } from "@/lib/api/client";
 import { CollectedPeopleTable } from "./collected-people-table";
 import { PersonDetailDrawer } from "./people-detail-drawer";
 import { PeopleImportFlow } from "./people-import-flow";
@@ -64,6 +64,25 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
       }
     },
     onError: () => toast({ variant: "error", title: "Verification failed" }),
+  });
+
+  // "Retry notfound" — re-open only the misses (Not found) and re-run the same
+  // Find & verify pass over just those, keeping every settled address.
+  const retryNotFound = useMutation({
+    mutationFn: (id: string) => retryPeopleNotFound(id),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["people-jobs"] });
+      qc.invalidateQueries({ queryKey: ["people-job", activeId] });
+      qc.invalidateQueries({ queryKey: ["collect-people", activeId] });
+      if (r.alreadyRunning) {
+        toast({ variant: "info", title: "Already running", description: "A Find & verify pass is already in progress for this list." });
+      } else if (r.pending === 0) {
+        toast({ variant: "info", title: "Nothing to retry", description: "No Not found people to re-search." });
+      } else {
+        toast({ variant: "success", title: `Retrying ${formatNumber(r.pending)} Not found`, description: "Re-searching the misses in the background — the table updates live." });
+      }
+    },
+    onError: () => toast({ variant: "error", title: "Retry failed" }),
   });
 
   // Toast when a background verify pass finishes (verifying → done) or is
@@ -126,6 +145,10 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
   const verifying = active?.verifyStatus === "verifying" || verify.isPending;
   const live = active?.status === "collecting" || verifying;
   const s = active?.summary;
+  // "Retry notfound" targets the "Not found" rows only — people that WERE looked up
+  // and came back empty (verdict not_found = summary.emailsNotFound). The separate
+  // "Not searched" rows (never looked up) are handled by the normal Find & verify.
+  const notFound = s?.emailsNotFound ?? 0;
   const seedLabel = active?.mode === "enrich" ? "Rows" : "Companies";
   // Coverage-gap companies (discover mode, crawl done, nobody found) that the AI
   // exec-fill can still try — so "AI verify" stays useful even at 0 people.
@@ -167,6 +190,12 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
             <Button size="sm" variant="outline" onClick={() => verify.mutate(active.id)} disabled={verifying || active.summary.people === 0} title="Find & verify emails that have not been checked yet. Results (including Not found) are saved so the same person is not searched twice.">
               {verifying ? <Loader2 className="size-4 animate-spin" /> : <MailCheck className="size-4" />}
               {verifying ? "Finding…" : "Find & verify"}
+            </Button>
+          )}
+          {active && notFound > 0 && (
+            <Button size="sm" variant="outline" onClick={() => retryNotFound.mutate(active.id)} disabled={verifying || retryNotFound.isPending} title={`Re-run Find & verify over the ${formatNumber(notFound)} “Not found” ${notFound === 1 ? "person" : "people"} (looked up before, came back empty), searching each one afresh. People who already have an email are left untouched.`}>
+              {retryNotFound.isPending ? <Loader2 className="size-4 animate-spin" /> : <MailX className="size-4" />}
+              Retry notfound ({formatNumber(notFound)})
             </Button>
           )}
           {active?.mode === "discover" && hasCoverageGaps && (

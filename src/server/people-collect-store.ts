@@ -69,6 +69,19 @@ function load(): PeopleStoreData {
       if (parsed && Array.isArray(parsed.jobs) && parsed.seeds && parsed.people) {
         const data = parsed as PeopleStoreData;
         if (data.jobs.length > FIND_LEADS_HISTORY_LIMIT) { pruneHistory(data); persist(data); }
+        // Backfill emailsNotFound for jobs saved before the field existed, so the
+        // "Retry notfound" button shows without waiting for a fresh recompute.
+        // Inline (not recompute()) — the global store isn't assigned yet here.
+        for (const job of data.jobs) {
+          if (job.summary && job.summary.emailsNotFound === undefined) {
+            job.summary.emailsNotFound = (data.people[job.id] ?? [])
+              .filter((p) => p.emailVerification?.status === "not_found").length;
+          }
+          // A verify pass runs in-process and cannot survive a restart, so any job
+          // left "verifying" on load is stale — reset to idle so Find & verify isn't
+          // permanently disabled and can resume the remaining "Not searched" rows.
+          if (job.verifyStatus === "verifying") { job.verifyStatus = "idle"; job.verifyingPersonIds = []; }
+        }
         return data;
       }
     }
@@ -107,7 +120,7 @@ function scheduleSave() {
 }
 
 function emptySummary(companies: number): PeopleSummary {
-  return { companies, companiesWithPeople: 0, rowsWithPeople: 0, people: 0, founders: 0, cLevel: 0, vps: 0, withEmail: 0, withLinkedin: 0, emailsVerified: 0, emailsValid: 0 };
+  return { companies, companiesWithPeople: 0, rowsWithPeople: 0, people: 0, founders: 0, cLevel: 0, vps: 0, withEmail: 0, withLinkedin: 0, emailsVerified: 0, emailsValid: 0, emailsNotFound: 0 };
 }
 
 /* -------------------------------- reads ---------------------------------- */
@@ -130,7 +143,7 @@ export function getSeedCoverage(jobId: string): { company: string; status: strin
 export interface PeopleQuery {
   page?: number; pageSize?: number; search?: string;
   ids?: string[]; // restrict to these person ids (AI Support "filter tagged rows")
-  email?: string[]; // has | valid | catch_all | risky | invalid | unverified | none
+  email?: string[]; // has | valid | catch_all | risky | invalid | unverified | not_found | not_searched
   titles?: string[]; // title contains  (OR)
   seniority?: string[]; // founder | c_level | president | vp | other
   linkedin?: boolean; // must have a LinkedIn URL
@@ -144,7 +157,7 @@ export interface PeopleQuery {
 }
 export interface PeopleFacets {
   seniority: Record<string, number>;
-  email: { has: number; valid: number; catch_all: number; risky: number; invalid: number; unverified: number; none: number };
+  email: { has: number; valid: number; catch_all: number; risky: number; invalid: number; unverified: number; not_searched: number; not_found: number };
   linkedin: { has: number };
   funded: { has: number };
   companies: { name: string; count: number }[];
@@ -163,28 +176,30 @@ export interface PeoplePage {
 /**
  * The one true email-status bucket for a person, mutually exclusive, matching
  * the real verification statuses so the filter/facets never mislabel a row:
- *   none        — no email at all (or the finder returned not_found)
- *   unverified  — has an email (imported/guessed) that was never checked
- *   valid       — SMTP-confirmed deliverable
- *   catch_all   — domain accepts everything; deliverability can't be confirmed
- *   risky       — risky / unknown / role address
- *   invalid     — invalid or disposable
+ *   not_searched — no email, never looked up yet (no verdict)
+ *   not_found    — looked up, finder returned nothing (verdict not_found)
+ *   unverified   — has an email (imported/guessed) that was never checked
+ *   valid        — SMTP-confirmed deliverable
+ *   catch_all    — domain accepts everything; deliverability can't be confirmed
+ *   risky        — risky / unknown / role address
+ *   invalid      — invalid or disposable
  */
-export type EmailStatusBucket = "none" | "unverified" | "valid" | "catch_all" | "risky" | "invalid";
+export type EmailStatusBucket = "not_searched" | "not_found" | "unverified" | "valid" | "catch_all" | "risky" | "invalid";
 export function emailStatusBucket(p: CollectedPerson): EmailStatusBucket {
-  if (!p.email) return "none";
   const s = p.emailVerification?.status;
+  // No address: split "never looked up" (not_searched) from "looked up, empty" (not_found).
+  if (!p.email) return s === "not_found" ? "not_found" : "not_searched";
   if (!s) return "unverified";
   if (s === "valid") return "valid";
   if (s === "catch_all") return "catch_all";
   if (s === "invalid" || s === "disposable") return "invalid";
-  if (s === "not_found") return "none";
+  if (s === "not_found") return "not_found";
   return "risky"; // risky | unknown | role
 }
 
 function peopleFacets(all: CollectedPerson[]): PeopleFacets {
   const seniority: Record<string, number> = {};
-  const email = { has: 0, valid: 0, catch_all: 0, risky: 0, invalid: 0, unverified: 0, none: 0 };
+  const email = { has: 0, valid: 0, catch_all: 0, risky: 0, invalid: 0, unverified: 0, not_searched: 0, not_found: 0 };
   const linkedin = { has: 0 };
   const funded = { has: 0 };
   const employees: Record<string, number> = {};
@@ -527,6 +542,30 @@ export function resetPeopleVerification(jobId?: string): number {
 }
 
 /**
+ * "Retry notfound": re-open ONLY the misses (verdict `not_found`) so the next
+ * Find & verify pass searches them again, while leaving every settled address
+ * (valid/invalid/risky/…) untouched. Unlike resetPeopleVerification this never
+ * wipes rows that already resolved to a real email. Clearing the verdict (and the
+ * sealed email/emailKind) makes the row a live verify target again. Returns how
+ * many misses were re-opened.
+ */
+export function resetPeopleNotFound(jobId: string): number {
+  const s = store();
+  let reset = 0;
+  for (const p of s.people[jobId] ?? []) {
+    if (p.emailVerification?.status === "not_found") {
+      p.emailVerification = null;
+      reset++;
+    }
+  }
+  const job = getPeopleJob(jobId);
+  if (job) { job.verifyStatus = "idle"; job.verifyingPersonIds = []; }
+  recompute(jobId); // clears emailsNotFound so the button count stays honest
+  persist(s);
+  return reset;
+}
+
+/**
  * After Find & verify finished, any row still missing a verdict is a confirmed
  * miss — persist `not_found` so Access email never comes back on reload.
  * No-op unless this job already completed a verify pass.
@@ -851,6 +890,8 @@ function recompute(jobId: string) {
     if (p.emailVerification && p.emailVerification.status !== "not_found") {
       s.emailsVerified++;
       if (p.emailVerification.status === "valid") s.emailsValid++;
+    } else if (p.emailVerification?.status === "not_found") {
+      s.emailsNotFound++;
     }
     companiesWith.add(p.companyId ?? p.company);
   }

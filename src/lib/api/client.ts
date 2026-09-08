@@ -28,6 +28,7 @@ import type {
   FinderResult,
   FinderSearch,
   Integration,
+  ReputationStatus,
   TeamMember,
   UserRole,
   VerificationResult,
@@ -568,6 +569,17 @@ export async function verifyPeopleEmails(id: string, opts: { keep?: boolean } = 
   return data;
 }
 
+/**
+ * "Retry notfound" (People tab): re-run the Find & verify pass over ONLY the
+ * misses (people whose lookup settled on Not found), dropping their cached
+ * verdicts so the finder searches them afresh. Settled addresses are untouched.
+ * Like verifyPeopleEmails, the pass runs in the background.
+ */
+export async function retryPeopleNotFound(id: string): Promise<StartVerifyResult> {
+  const { data } = await apiPost<StartVerifyResult>(`/api/v1/leads/people/${id}/verify-emails?notfound=1`, {});
+  return data;
+}
+
 /** Per-row "Access email": find + verify a SINGLE person's email on demand. */
 export interface SinglePersonVerifyResult {
   ok: boolean;
@@ -912,6 +924,24 @@ export async function getIntegrations(): Promise<Integration[]> {
 
 export async function getTeam(): Promise<TeamMember[]> {
   return [];
+}
+
+/* --------------------- Sending-IP reputation ----------------------- */
+
+/** Current sending-IP reputation status (which egress IPs are Spamhaus-blocked). */
+export async function getReputation(): Promise<ReputationStatus | null> {
+  const res = await fetch("/api/v1/reputation", { cache: "no-store" });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json?.success ? (json.data as ReputationStatus) : null;
+}
+
+/** Force a fresh reputation check (used by the Blacklist Monitor refresh). */
+export async function refreshReputation(): Promise<ReputationStatus | null> {
+  const res = await fetch("/api/v1/reputation", { method: "POST" });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return json?.success ? (json.data as ReputationStatus) : null;
 }
 
 /* ------------------------- Auth & users ---------------------------- */

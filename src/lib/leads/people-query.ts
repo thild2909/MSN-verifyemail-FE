@@ -15,21 +15,22 @@ export interface PeopleQuery {
 }
 export interface PeoplePage { people: CollectedPerson[]; total: number; page: number; pageSize: number; facets: PeopleFacets }
 
-export type EmailStatusBucket = "none" | "unverified" | "valid" | "catch_all" | "risky" | "invalid";
+export type EmailStatusBucket = "not_searched" | "not_found" | "unverified" | "valid" | "catch_all" | "risky" | "invalid";
 export function emailStatusBucket(p: CollectedPerson): EmailStatusBucket {
-  if (!p.email) return "none";
   const s = p.emailVerification?.status;
+  // No address: split "never looked up" (not_searched) from "looked up, empty" (not_found).
+  if (!p.email) return s === "not_found" ? "not_found" : "not_searched";
   if (!s) return "unverified";
   if (s === "valid") return "valid";
   if (s === "catch_all") return "catch_all";
   if (s === "invalid" || s === "disposable") return "invalid";
-  if (s === "not_found") return "none";
+  if (s === "not_found") return "not_found";
   return "risky"; // risky | unknown | role
 }
 
 export function peopleFacets(all: CollectedPerson[]): PeopleFacets {
   const seniority: Record<string, number> = {};
-  const email = { has: 0, valid: 0, catch_all: 0, risky: 0, invalid: 0, unverified: 0, none: 0 };
+  const email = { has: 0, valid: 0, catch_all: 0, risky: 0, invalid: 0, unverified: 0, not_searched: 0, not_found: 0 };
   const linkedin = { has: 0 };
   const funded = { has: 0 };
   const employees: Record<string, number> = {};

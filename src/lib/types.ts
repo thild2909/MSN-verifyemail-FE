@@ -402,3 +402,39 @@ export interface DomainStat {
   total: number;
   validRate: number;
 }
+
+/* --------------------- Sending-IP reputation --------------------- */
+
+export type IpReputationCategory = "reputation_block" | "ok" | "connect_error" | "timeout";
+
+export interface IpReputation {
+  ip: string;
+  blocked: boolean;
+  category: IpReputationCategory;
+  code: number | null;
+  message: string;
+  mx: string;
+  ms: number;
+  checkedAt: string;
+}
+
+export interface ReputationSummary {
+  total: number;
+  blocked: number;
+  clean: number;
+  anyBlocked: boolean;
+  allBlocked: boolean;
+  cleanIps: string[];
+  blockedIps: string[];
+  unknownIps: string[];
+}
+
+export interface ReputationStatus {
+  refDomain: string;
+  refMx: string | null;
+  checkedAt: string | null;
+  ttlMs: number;
+  ips: IpReputation[];
+  summary: ReputationSummary;
+  checking: boolean;
+}
