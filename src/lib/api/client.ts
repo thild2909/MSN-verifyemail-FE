@@ -359,6 +359,8 @@ export async function getFinderSearches(): Promise<FinderSearch[]> {
 export type AppConfigKey =
   | "DEEPSEEK_API_KEY"
   | "DEEPSEEK_MODEL"
+  | "OPENAI_API_KEY"
+  | "OPENAI_MODEL"
   | "CRAWLER_ROTATING_PROXY"
   | "CRAWLER_PROXY_LIST_URL"
   | "DECODO_AUTH"

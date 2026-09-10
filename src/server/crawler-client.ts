@@ -177,6 +177,37 @@ export async function resolveCompanyWebsiteViaCrawler(company: string, location:
   }
 }
 
+export interface CompanyEmailDomainResult {
+  company: string;
+  location: string;
+  domain: string | null; // the domain the company actually sends mail from
+  email: string | null; // the support/contact address it was derived from
+}
+
+/**
+ * Discover the domain a company ACTUALLY sends email from, via the crawler's
+ * Decodo support-email lookup ("email support <company>"). Used by "Find &
+ * verify" when no name pattern resolves at the website domain — the company may
+ * use a different email domain. Throws on transport error.
+ */
+export async function resolveCompanyEmailDomainViaCrawler(company: string, location: string): Promise<CompanyEmailDomainResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/company-email-domain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ company, location }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /company-email-domain responded ${res.status}`);
+    return (await res.json()) as CompanyEmailDomainResult;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* ------------------------------- people ---------------------------------- */
 
 import type { CollectedPerson, PersonSeniority, PeopleSeedInput } from "@/lib/leads/people-types";
@@ -455,6 +486,86 @@ export async function tagPeopleViaCrawler(prompt: string, records: TagPersonReco
     });
     if (!res.ok) throw new Error(`crawler-service /llm/tag-people responded ${res.status}`);
     return (await res.json()) as PeopleTagResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ------------------------------ Find with AI ----------------------------- */
+
+export type AiReportRow = Record<string, string>;
+export type AiProvider = "deepseek" | "openai";
+export interface AiReportColumn { key: string; label: string }
+export interface AiReportRejection { company: string; reason: string }
+export interface AiReportResponse {
+  configured: boolean;
+  provider?: AiProvider;
+  mode?: "knowledge" | "research";
+  summary?: string;
+  columns?: AiReportColumn[];
+  rows?: AiReportRow[];
+  rejections?: AiReportRejection[];
+  tokens?: number;
+  model?: string;
+}
+
+export interface AiReportRequestOpts {
+  provider: AiProvider;
+  model?: string;
+  smartSearch?: boolean;
+  reasoningEffort?: "low" | "medium" | "high";
+}
+
+/** Run the LLM-only company-report generator with the chosen provider + options. */
+export async function aiReportViaCrawler(
+  prompt: string,
+  instructions: string | null,
+  limit: number,
+  opts: AiReportRequestOpts,
+): Promise<AiReportResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/llm/ai-report`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        instructions: instructions ?? null,
+        limit,
+        provider: opts.provider,
+        model: opts.model,
+        smartSearch: opts.smartSearch,
+        reasoningEffort: opts.reasoningEffort,
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /llm/ai-report responded ${res.status}`);
+    return (await res.json()) as AiReportResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface AiProviderInfo {
+  id: AiProvider;
+  label: string;
+  configured: boolean;
+  model: string;
+  models?: string[];
+  options?: { smartSearch?: boolean; reasoningEffort?: boolean };
+}
+
+/** Which AI providers are configured on the crawler-service. */
+export async function getAiProvidersViaCrawler(): Promise<AiProviderInfo[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const res = await fetch(`${BASE}/llm/providers`, { signal: controller.signal, cache: "no-store" });
+    if (!res.ok) throw new Error(`crawler-service /llm/providers responded ${res.status}`);
+    const json = (await res.json()) as { providers?: AiProviderInfo[] };
+    return json.providers ?? [];
   } finally {
     clearTimeout(timer);
   }

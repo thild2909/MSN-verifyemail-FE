@@ -14,7 +14,8 @@ import "server-only";
 import { cachedVerify } from "./verification";
 import { VerifierUnavailableError } from "@/lib/verifier/backend";
 import { findPersonEmail } from "./finder";
-import { llmFindEmailsViaCrawler } from "./crawler-client";
+import { cleanDomain } from "@/lib/finder/patterns";
+import { llmFindEmailsViaCrawler, resolveCompanyEmailDomainViaCrawler } from "./crawler-client";
 import type { FinderOutcome } from "@/lib/types";
 import type { EmailVerification } from "@/lib/leads/collect-types";
 import type { CollectedPerson } from "@/lib/leads/people-types";
@@ -93,6 +94,29 @@ function patchFromFinder(o: FinderOutcome): VerifyOneResult {
   return notFoundPatch(o.provider);
 }
 
+// The company's real email-sending domain may differ from its website domain
+// (e.g. mail on a parent/brand domain). On by default; set to "0" to disable.
+const ALT_DOMAIN_LAYER = (process.env.PEOPLE_VERIFY_ALT_DOMAIN ?? "1") !== "0";
+
+/**
+ * Discover the domain a company actually sends mail from (Decodo "email support
+ * <company>"), memoized per company+location so everyone at one company costs at
+ * most ONE SERP lookup. Failures memoize as null. Returns null on any error.
+ */
+const altDomainMemo = new Map<string, Promise<string | null>>();
+function altEmailDomainFor(company: string, location: string | null): Promise<string | null> {
+  const key = `${company.toLowerCase().trim()}|${(location ?? "").toLowerCase().trim()}`;
+  let p = altDomainMemo.get(key);
+  if (!p) {
+    if (altDomainMemo.size > 1000) altDomainMemo.clear();
+    p = resolveCompanyEmailDomainViaCrawler(company, location ?? "")
+      .then((r) => r.domain)
+      .catch(() => null);
+    altDomainMemo.set(key, p);
+  }
+  return p;
+}
+
 /** Verify one person, discovering the real email when we only have a guess. */
 async function verifyOne(
   t: store.PersonVerifyTarget,
@@ -109,6 +133,22 @@ async function verifyOne(
     const outcome = await findPersonEmail({ firstName: t.firstName, lastName: t.lastName, domain: t.domain! });
     const res = patchFromFinder(outcome);
     if (res.found || outcome.state === "accept_all") return res;
+
+    // Alt-domain layer: no pattern confirmed a mailbox at the website domain
+    // (not_found), or that domain has no mail server at all (no_mx) — the company
+    // may send mail from a DIFFERENT domain. Discover it from a published support
+    // email; if it differs from the website domain, re-run the SAME name patterns
+    // against it. A confirmed hit there is the person's real address.
+    if (ALT_DOMAIN_LAYER && (outcome.state === "not_found" || outcome.state === "no_mx")) {
+      const alt = await altEmailDomainFor(t.company, t.location);
+      if (alt && cleanDomain(alt) !== cleanDomain(t.domain!)) {
+        const altOutcome = await findPersonEmail({ firstName: t.firstName, lastName: t.lastName, domain: alt });
+        if (altOutcome.state === "verified" || altOutcome.state === "accept_all") {
+          return patchFromFinder(altOutcome);
+        }
+      }
+    }
+
     if (outcome.state === "no_mx") return res;
     if (opts.skipLlm) return { ...res, needsLlm: true };
     const llm = await fillWithLlmEmails([t]);

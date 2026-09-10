@@ -26,12 +26,14 @@ interface GroupDef {
 
 const GROUPS: GroupDef[] = [
   {
-    title: "AI verify (DeepSeek)",
-    description: "LLM cross-check of crawled companies & founders.",
+    title: "AI models",
+    description: "LLM for cross-check and Find with AI. DeepSeek is the default; add an OpenAI key to use ChatGPT.",
     icon: Bot,
     fields: [
-      { key: "DEEPSEEK_API_KEY", label: "API key", placeholder: "sk-…", help: "platform.deepseek.com key.", mono: true },
-      { key: "DEEPSEEK_MODEL", label: "Model", placeholder: "deepseek-chat", mono: true },
+      { key: "DEEPSEEK_API_KEY", label: "DeepSeek API key", placeholder: "sk-…", help: "platform.deepseek.com key.", mono: true },
+      { key: "DEEPSEEK_MODEL", label: "DeepSeek model", placeholder: "deepseek-chat", mono: true },
+      { key: "OPENAI_API_KEY", label: "OpenAI API key", placeholder: "sk-…", help: "platform.openai.com key — enables the ChatGPT option in Find with AI.", mono: true },
+      { key: "OPENAI_MODEL", label: "OpenAI model", placeholder: "gpt-4o-mini", mono: true },
     ],
   },
   {

@@ -603,6 +603,7 @@ export interface PersonVerifyTarget {
   firstName: string;
   lastName: string;
   domain: string | null;
+  location: string | null; // for the support-email domain lookup (namesake-proofing)
   email: string | null;
   emailKind: CollectedPerson["emailKind"];
   title: string | null;
@@ -617,6 +618,7 @@ function toVerifyTarget(p: CollectedPerson): PersonVerifyTarget {
     firstName: p.firstName,
     lastName: p.lastName,
     domain,
+    location: p.location ?? null,
     email: p.email ? String(p.email.value) : null,
     emailKind: p.emailKind,
     title: p.title?.value ? String(p.title.value) : null,
