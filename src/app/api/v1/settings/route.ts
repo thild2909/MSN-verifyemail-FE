@@ -15,6 +15,7 @@ const SETTING_KEYS = [
   "DECODO_AUTH",
   "GOOGLE_API_KEY",
   "GOOGLE_CX",
+  "WEBSHARE_PROXY_LIST_URL",
 ] as const;
 
 const patchSchema = z

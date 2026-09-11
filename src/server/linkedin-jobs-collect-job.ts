@@ -63,6 +63,11 @@ async function runCrawl(id: string) {
 
   await Promise.all(Array.from({ length: Math.min(CRAWL_CONCURRENCY, queries.length || 1) }, () => worker()));
   store.finalizeLinkedInSearch(id);
+
+  // Company employees + industry are collected as PART OF the crawl (user
+  // requirement): once discovery finishes, automatically run the enrich pass so
+  // the "Company employees" column fills in without a manual "Qualify" click.
+  if (store.enrichTargets(id).length > 0) startLinkedInEnrich(id);
 }
 
 async function runEnrich(id: string) {

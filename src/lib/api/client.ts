@@ -366,7 +366,8 @@ export type AppConfigKey =
   | "OPENAI_MODEL"
   | "DECODO_AUTH"
   | "GOOGLE_API_KEY"
-  | "GOOGLE_CX";
+  | "GOOGLE_CX"
+  | "WEBSHARE_PROXY_LIST_URL";
 
 export interface AppConfigField {
   key: AppConfigKey;
@@ -850,6 +851,24 @@ export async function getCrawledJobs(id: string, query: CrawledJobsQuery = {}): 
   if (query.workModes?.length) params.set("workModes", query.workModes.join(","));
   if (query.postedWithinDays) params.set("postedWithinDays", String(query.postedWithinDays));
   return apiGet<CrawledJobsPage>(`/api/v1/leads/jobs/${id}/results?${params.toString()}`);
+}
+
+/* ------------------------------ Proxy pool ------------------------- */
+
+export interface ProxyStatus {
+  configured: boolean;
+  reachable: boolean;
+  total: number;
+  tested: number;
+  working: number;
+  results: { ip: string; status: number | null; ok: boolean; ms: number }[];
+  error?: string;
+}
+
+/** Test the rotating-proxy pool: confirms the list downloads + probes sample IPs. */
+export async function testProxy(): Promise<ProxyStatus> {
+  const { data } = await apiPost<ProxyStatus>("/api/v1/proxy/test", {});
+  return data;
 }
 
 /* --------------------------- LinkedIn jobs ------------------------- */

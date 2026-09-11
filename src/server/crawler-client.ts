@@ -660,6 +660,11 @@ export function setSettingsRemote(patch: unknown): Promise<unknown> {
   return svcFetch("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
 }
 
+/** Test the proxy pool: confirms the list still downloads + probes sample IPs. */
+export function testProxyRemote(): Promise<unknown> {
+  return svcFetch("/proxy/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+}
+
 /** Reachability probe for the crawler service. */
 export async function pingCrawler(): Promise<{ online: boolean; url: string; provider?: string; error?: string }> {
   const controller = new AbortController();

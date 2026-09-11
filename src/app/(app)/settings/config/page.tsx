@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Bot, Search, KeyRound, Info } from "lucide-react";
+import { Loader2, Bot, Search, KeyRound, Info, Shuffle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,20 @@ const GROUPS: GroupDef[] = [
       { key: "DECODO_AUTH", label: "Decodo auth", placeholder: "base64(user:pass)", help: "Decodo SERP + Web Scraping API Basic-auth token. Powers all crawling.", mono: true },
       { key: "GOOGLE_API_KEY", label: "Google API key", placeholder: "AIza…", mono: true },
       { key: "GOOGLE_CX", label: "Google CX", placeholder: "Programmable Search engine ID", mono: true },
+    ],
+  },
+  {
+    title: "Proxy rotation (Layer 1)",
+    description: "System-wide rotating proxy pool for crawling. When set, all crawlers try a rotating proxy IP first (Layer 1) to avoid IP blocks; the residential scraper (Decodo) is the Layer 2 fallback only when a proxy is blocked. Leave blank to crawl direct.",
+    icon: Shuffle,
+    fields: [
+      {
+        key: "WEBSHARE_PROXY_LIST_URL",
+        label: "Proxy-list URL (Webshare)",
+        placeholder: "https://proxy.webshare.io/api/v2/proxy/list/download/…",
+        help: "Webshare “Download proxy list” URL (ip:port:user:pass lines). The crawler fetches this list and rotates through the IPs.",
+        mono: true,
+      },
     ],
   },
 ];

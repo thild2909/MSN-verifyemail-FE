@@ -70,7 +70,8 @@ export interface NormalizedTitle { roleFamily: string | null; primaryLanguage: s
 export function normalizeTitle(title: string): NormalizedTitle {
   const s = title || "";
   return {
-    roleFamily: firstMatch(ROLE_RULES, s),
+    // Never empty: fall back to "Other" so the Role column always has a value.
+    roleFamily: firstMatch(ROLE_RULES, s) ?? "Other",
     primaryLanguage: firstMatch(LANG_RULES, s),
     seniorityLevel: firstMatch(SENIORITY_RULES, s) ?? "Mid",
   };

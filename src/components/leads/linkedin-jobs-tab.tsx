@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Radar, Trash2, Loader2, Briefcase, Building2, Ban, Layers, RotateCw, CheckCircle2, Sparkles } from "lucide-react";
+import { Radar, Trash2, Loader2, Briefcase, Building2, Ban, Layers, RotateCw, CheckCircle2, Sparkles, Shuffle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
@@ -15,6 +15,7 @@ import {
 import { DEFAULT_LINKEDIN_FILTERS, type LinkedInJobFilters, type LinkedInSearchJob, type LinkedInQueryCoverage } from "@/lib/leads/linkedin-jobs-types";
 import { CollectedLinkedInJobsTable, type FindPeopleFromLinkedInPayload } from "./collected-linkedin-jobs-table";
 import { LinkedInJobsCrawlDialog } from "./linkedin-jobs-crawl-dialog";
+import { ProxyDialog } from "./proxy-dialog";
 import { StatsBar } from "./stats-bar";
 
 export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: string) => void }) {
@@ -23,6 +24,7 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
   const [filters, setFilters] = React.useState<LinkedInJobFilters>(DEFAULT_LINKEDIN_FILTERS);
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [crawlOpen, setCrawlOpen] = React.useState(false);
+  const [proxyOpen, setProxyOpen] = React.useState(false);
 
   const { data: jobs } = useQuery({
     queryKey: ["linkedin-searches"],
@@ -92,11 +94,14 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
   const canQualify = !!active && !live && !enriching && (s ? s.qualified > s.enriched : false);
 
   const modals = (
-    <LinkedInJobsCrawlDialog
-      open={crawlOpen}
-      onOpenChange={setCrawlOpen}
-      onCreated={(id) => { qc.invalidateQueries({ queryKey: ["linkedin-searches"] }); setActiveId(id); }}
-    />
+    <>
+      <LinkedInJobsCrawlDialog
+        open={crawlOpen}
+        onOpenChange={setCrawlOpen}
+        onCreated={(id) => { qc.invalidateQueries({ queryKey: ["linkedin-searches"] }); setActiveId(id); }}
+      />
+      <ProxyDialog open={proxyOpen} onOpenChange={setProxyOpen} />
+    </>
   );
 
   if (!jobs || jobs.length === 0) {
@@ -106,7 +111,12 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
           icon={Briefcase}
           title="Scrape hiring companies from LinkedIn"
           description="Discover open technical roles from LinkedIn's public job search, normalize and dedupe them, then qualify the hiring companies by size & industry — turning job posts into leads."
-          action={<Button onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> Scrape LinkedIn jobs</Button>}
+          action={
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> Scrape LinkedIn jobs</Button>
+              <Button variant="outline" onClick={() => setProxyOpen(true)}><Shuffle className="size-4" /> Proxy</Button>
+            </div>
+          }
         />
         {modals}
       </div>
@@ -134,6 +144,7 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
               <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{retryable}</span>
             </Button>
           )}
+          <Button size="sm" variant="outline" onClick={() => setProxyOpen(true)}><Shuffle className="size-4" /> Proxy</Button>
           <Button size="sm" onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> New scrape</Button>
           {active && <button onClick={() => remove.mutate(active.id)} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete scrape">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
         </div>
