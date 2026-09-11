@@ -5,14 +5,16 @@ import { LeadsTabs } from "./leads-tabs";
 import { CompaniesTab } from "./companies-tab";
 import { PeopleTab } from "./people-tab";
 import { JobsTab } from "./jobs-tab";
+import { LinkedInJobsTab } from "./linkedin-jobs-tab";
 import { FindWithAiTab } from "./find-with-ai-tab";
 import type { LeadsTab } from "@/lib/leads/types";
 
-const TAB_TITLE: Record<LeadsTab, string> = { people: "Find people", companies: "Find companies", jobs: "Find jobs", ai: "Find with AI" };
+const TAB_TITLE: Record<LeadsTab, string> = { people: "Find people", companies: "Find companies", jobs: "Find jobs", linkedin: "Scrape LinkedIn jobs", ai: "Find with AI" };
 const TAB_SUB: Record<LeadsTab, string> = {
   people: "Find founders and C-level with a verified work email.",
   companies: "Get each company's website, email, LinkedIn and key details.",
   jobs: "Track who is hiring and their open roles.",
+  linkedin: "Discover open technical roles on LinkedIn, then qualify the hiring companies by size & industry.",
   ai: "Tell the AI what companies you are looking for. It searches the web and gives you a ranked list of matching companies. You can also upload a brief to guide the search.",
 };
 
@@ -58,6 +60,8 @@ export function FindLeads() {
         <CompaniesTab onNavigatePeople={(jobId) => { setPeopleJobId(jobId); setTab("people"); }} />
       ) : tab === "jobs" ? (
         <JobsTab onNavigatePeople={(jobId) => { setPeopleJobId(jobId); setTab("people"); }} />
+      ) : tab === "linkedin" ? (
+        <LinkedInJobsTab onNavigatePeople={(jobId) => { setPeopleJobId(jobId); setTab("people"); }} />
       ) : (
         <FindWithAiTab />
       )}

@@ -15,7 +15,7 @@ import { cachedVerify } from "./verification";
 import { VerifierUnavailableError } from "@/lib/verifier/backend";
 import { findPersonEmail } from "./finder";
 import { cleanDomain } from "@/lib/finder/patterns";
-import { llmFindEmailsViaCrawler, resolveCompanyEmailDomainViaCrawler } from "./crawler-client";
+import { llmFindEmailsViaCrawler, resolveCompanyEmailDomainViaCrawler, resolvePersonEmailsViaCrawler } from "./crawler-client";
 import type { FinderOutcome } from "@/lib/types";
 import type { EmailVerification } from "@/lib/leads/collect-types";
 import type { CollectedPerson } from "@/lib/leads/people-types";
@@ -34,7 +34,7 @@ export interface VerifyPassResult {
 }
 
 type PersonPatch = Partial<
-  Pick<CollectedPerson, "email" | "emailKind" | "emailVerification">
+  Pick<CollectedPerson, "email" | "emailKind" | "emailVerification" | "companyEmail">
 >;
 
 const now = () => new Date().toISOString();
@@ -45,6 +45,10 @@ type VerifyOneResult = {
   found: boolean;
   provider: "reacher";
   needsLlm?: boolean;
+  // Company support/contact email discovered by the alt-domain layer. Carried
+  // top-level (not in `patch`) so it survives the LLM hand-off and is merged in
+  // at persist time regardless of the person-email verdict.
+  companyEmail?: string;
 };
 
 function notFoundPatch(provider: "reacher"): VerifyOneResult {
@@ -98,19 +102,69 @@ function patchFromFinder(o: FinderOutcome): VerifyOneResult {
 // (e.g. mail on a parent/brand domain). On by default; set to "0" to disable.
 const ALT_DOMAIN_LAYER = (process.env.PEOPLE_VERIFY_ALT_DOMAIN ?? "1") !== "0";
 
+// Public-sources layer: scrape the person's actually-published email from the
+// web (Decodo SERP) when pattern + alt-domain fail. Free tier (a SERP call +
+// a few SMTP checks), so on by default; set to "0" to disable.
+const PUBLIC_SOURCES_LAYER = (process.env.PEOPLE_VERIFY_PUBLIC_SOURCES ?? "1") !== "0";
+
 /**
- * Discover the domain a company actually sends mail from (Decodo "email support
- * <company>"), memoized per company+location so everyone at one company costs at
- * most ONE SERP lookup. Failures memoize as null. Returns null on any error.
+ * Public-sources layer: fetch the person's published email candidates from the
+ * web and SMTP-verify each in score order. The first backend-confirmed mailbox
+ * is the person's real address. Returns a found result, or null when nothing
+ * scrapes/confirms — the caller then falls through to the LLM guess.
  */
-const altDomainMemo = new Map<string, Promise<string | null>>();
-function altEmailDomainFor(company: string, location: string | null): Promise<string | null> {
+async function findViaPublicSources(t: store.PersonVerifyTarget): Promise<VerifyOneResult | null> {
+  let emails: string[];
+  try {
+    emails = await resolvePersonEmailsViaCrawler({
+      name: t.name,
+      first: t.firstName,
+      last: t.lastName,
+      company: t.company,
+      domain: t.domain,
+      location: t.location,
+    });
+  } catch {
+    return null;
+  }
+  for (const email of emails) {
+    let v: Awaited<ReturnType<typeof cachedVerify>>;
+    try {
+      v = await cachedVerify(email);
+    } catch {
+      continue;
+    }
+    if (v.result.status === "valid") {
+      return {
+        patch: {
+          email: { value: email, source: "website", confidence: 85 },
+          emailKind: "found",
+          emailVerification: { email, status: "valid", score: v.result.score, provider: v.provider, verifiedAt: now() },
+        },
+        valid: true,
+        found: true,
+        provider: v.provider,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Discover the domain a company actually sends mail from AND the published
+ * support/contact email it was derived from (Decodo "email support <company>"),
+ * memoized per company+location so everyone at one company costs at most ONE SERP
+ * lookup. Failures memoize as null. Returns null on any error.
+ */
+type AltEmailHit = { domain: string | null; email: string | null };
+const altDomainMemo = new Map<string, Promise<AltEmailHit | null>>();
+function altEmailDomainFor(company: string, location: string | null): Promise<AltEmailHit | null> {
   const key = `${company.toLowerCase().trim()}|${(location ?? "").toLowerCase().trim()}`;
   let p = altDomainMemo.get(key);
   if (!p) {
     if (altDomainMemo.size > 1000) altDomainMemo.clear();
     p = resolveCompanyEmailDomainViaCrawler(company, location ?? "")
-      .then((r) => r.domain)
+      .then((r) => ({ domain: r.domain, email: r.email }))
       .catch(() => null);
     altDomainMemo.set(key, p);
   }
@@ -139,20 +193,35 @@ async function verifyOne(
     // may send mail from a DIFFERENT domain. Discover it from a published support
     // email; if it differs from the website domain, re-run the SAME name patterns
     // against it. A confirmed hit there is the person's real address.
+    let companyEmail: string | undefined;
     if (ALT_DOMAIN_LAYER && (outcome.state === "not_found" || outcome.state === "no_mx")) {
       const alt = await altEmailDomainFor(t.company, t.location);
-      if (alt && cleanDomain(alt) !== cleanDomain(t.domain!)) {
-        const altOutcome = await findPersonEmail({ firstName: t.firstName, lastName: t.lastName, domain: alt });
+      // The layer surfaced the company's published support/contact address —
+      // keep it on the row (unless a value was already imported) so the Company
+      // panel can show it, even when this person's own mailbox never resolves.
+      companyEmail = !t.companyEmail && alt?.email ? alt.email : undefined;
+      if (alt?.domain && cleanDomain(alt.domain) !== cleanDomain(t.domain!)) {
+        const altOutcome = await findPersonEmail({ firstName: t.firstName, lastName: t.lastName, domain: alt.domain });
         if (altOutcome.state === "verified" || altOutcome.state === "accept_all") {
-          return patchFromFinder(altOutcome);
+          return { ...patchFromFinder(altOutcome), companyEmail };
         }
       }
     }
 
-    if (outcome.state === "no_mx") return res;
-    if (opts.skipLlm) return { ...res, needsLlm: true };
+    // Public-sources layer: pattern + alt-domain didn't confirm a mailbox — the
+    // person may have a DIFFERENT published address (personal/parent domain, or a
+    // format our patterns don't cover). Scrape it from the web and verify. A hit
+    // here is a real, confirmed address; carry any companyEmail we discovered.
+    if (PUBLIC_SOURCES_LAYER && (outcome.state === "not_found" || outcome.state === "no_mx")) {
+      const pub = await findViaPublicSources(t);
+      if (pub) return { ...pub, companyEmail };
+    }
+
+    if (outcome.state === "no_mx") return { ...res, companyEmail };
+    if (opts.skipLlm) return { ...res, needsLlm: true, companyEmail };
     const llm = await fillWithLlmEmails([t]);
-    return llm.get(t.personId) ?? res;
+    const chosen = llm.get(t.personId) ?? res;
+    return { ...chosen, companyEmail: chosen.companyEmail ?? companyEmail };
   }
 
   if (t.email) {
@@ -231,8 +300,13 @@ export interface SinglePersonVerifyResult {
  * Per-row "Access email" — find + verify ONE person's email on demand and patch
  * that row. Same pipeline as the bulk pass, scoped to a single record.
  */
+/** Fold the top-level companyEmail (if discovered) into the patch to persist. */
+function patchToPersist(res: VerifyOneResult): PersonPatch {
+  return res.companyEmail ? { ...res.patch, companyEmail: res.companyEmail } : res.patch;
+}
+
 function persistLookup(jobId: string, personId: string, res: VerifyOneResult): SinglePersonVerifyResult {
-  store.updatePersonResolved(jobId, personId, res.patch);
+  store.updatePersonResolved(jobId, personId, patchToPersist(res));
   store.markPersonVerifying(jobId, personId, false);
   store.commitVerification(jobId);
   const ev = res.patch.emailVerification ?? null;
@@ -286,9 +360,11 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
   let sinceCommit = 0;
   const providers = new Set<"reacher">();
   const pendingLlm: store.PersonVerifyTarget[] = [];
+  // companyEmail discovered before a row deferred to LLM — re-applied after.
+  const deferredCompanyEmail = new Map<string, string>();
 
   const apply = (t: store.PersonVerifyTarget, res: VerifyOneResult) => {
-    store.updatePersonResolved(jobId, t.personId, res.patch);
+    store.updatePersonResolved(jobId, t.personId, patchToPersist(res));
     store.markPersonVerifying(jobId, t.personId, false);
     providers.add(res.provider);
     verified++;
@@ -313,8 +389,10 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
           res = null;
         }
         if (!res) apply(t, notFoundPatch("reacher"));
-        else if (res.needsLlm) pendingLlm.push(t);
-        else apply(t, res);
+        else if (res.needsLlm) {
+          if (res.companyEmail) deferredCompanyEmail.set(t.personId, res.companyEmail);
+          pendingLlm.push(t);
+        } else apply(t, res);
       } finally {
         store.markPersonVerifying(jobId, t.personId, false);
       }
@@ -328,7 +406,9 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
       store.setVerifyingPersonIds(jobId, pendingLlm.map((t) => t.personId));
       const llmHits = await fillWithLlmEmails(pendingLlm);
       for (const t of pendingLlm) {
-        apply(t, llmHits.get(t.personId) ?? notFoundPatch("reacher"));
+        const r = llmHits.get(t.personId) ?? notFoundPatch("reacher");
+        const ce = deferredCompanyEmail.get(t.personId);
+        apply(t, ce && !r.companyEmail ? { ...r, companyEmail: ce } : r);
       }
     }
   } catch (e) {

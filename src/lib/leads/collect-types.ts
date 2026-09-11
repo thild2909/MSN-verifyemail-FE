@@ -1,16 +1,11 @@
 /**
- * Find Leads — Company multi-source collection + proxy configuration model.
+ * Find Leads — Company multi-source collection model.
  *
  * A collection job imports companies (Company Name + Location required) and
  * "collects" a full company profile the way Clay/Apollo do — from several
  * sources (LinkedIn, website, Google Maps, social, other), each field tagged
- * with the source that provided it. Collection runs through a configurable
- * PROXY layer (rotation + delay + backoff) so it can avoid rate limits.
- *
- * NOTE: gated-source scraping (LinkedIn/Google Maps) is SIMULATED in this demo
- * — the field values are deterministic mock. The proxy layer, rotation and
- * rate-limit handling are real, configurable, and drive the collection log, so
- * a real collector can be slotted in behind the same interface later.
+ * with the source that provided it. The crawl runs in the BE-service crawler,
+ * which fetches DIRECT and falls back to Decodo's web scraper when blocked.
  */
 import type { VerificationStatus } from "@/lib/types";
 
@@ -229,93 +224,3 @@ export interface CompaniesFacets {
   employees: Record<string, number>; // bucket value -> count
 }
 
-/* --------------------------------- proxies ------------------------------- */
-
-export const PROXY_TYPES = ["http", "https", "socks5"] as const;
-export type ProxyType = (typeof PROXY_TYPES)[number];
-
-export const ROTATION_STRATEGIES = ["round_robin", "random", "sticky_per_domain"] as const;
-export type RotationStrategy = (typeof ROTATION_STRATEGIES)[number];
-
-export type ProxyHealth = "untested" | "healthy" | "slow" | "dead";
-
-export interface ProxyEntry {
-  id: string;
-  label: string;
-  host: string;
-  port: number;
-  type: ProxyType;
-  hasAuth: boolean; // credentials present (never returned in the clear)
-  username?: string;
-  country?: string;
-  enabled: boolean;
-  status: ProxyHealth;
-  lastLatencyMs?: number;
-  exitIp?: string; // the IP seen by the target when tested through this proxy
-}
-
-/** Rotating residential endpoint status (from the crawler service). */
-export interface RotatingProxy {
-  active: boolean; // in effect (overrides the static pool)
-  source: "env" | "config" | "none";
-  editable: boolean; // false when locked by an env var
-  endpoint: string; // masked (password hidden)
-  status?: ProxyHealth;
-  lastLatencyMs?: number;
-  exitIp?: string;
-  error?: string;
-}
-
-/** Webshare list download pool (CRAWLER_PROXY_LIST_URL). */
-export interface ProxyPoolList {
-  active: boolean;
-  source: "env" | "none";
-  count: number;
-  lastLoadedAt?: number;
-  error?: string;
-}
-
-/** Static residential pool — retry-only fallback after datacenter IPs fail. */
-export interface ProxyRetryPool {
-  active: boolean;
-  source: "env" | "none";
-  count: number;
-  lastLoadedAt?: number;
-  error?: string;
-}
-
-export interface ProxyTestProgress {
-  running: boolean;
-  total: number;
-  done: number;
-  healthy: number;
-  slow: number;
-  dead: number;
-  currentHost?: string;
-  startedAt?: number;
-  finishedAt?: number;
-}
-
-export interface ProxyConfig {
-  enabled: boolean; // route collection through the proxy pool
-  rotation: RotationStrategy;
-  concurrency: number; // max parallel requests
-  delayMs: number; // base polite delay between requests
-  backoffMs: number; // wait added on a rate-limit before retrying
-  maxRetries: number;
-  proxies: ProxyEntry[];
-  rotating?: RotatingProxy;
-  poolList?: ProxyPoolList;
-  retryPool?: ProxyRetryPool;
-  testProgress?: ProxyTestProgress;
-}
-
-export const DEFAULT_PROXY_CONFIG: ProxyConfig = {
-  enabled: false,
-  rotation: "round_robin",
-  concurrency: 3,
-  delayMs: 800,
-  backoffMs: 2000,
-  maxRetries: 2,
-  proxies: [],
-};

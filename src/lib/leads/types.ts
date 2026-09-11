@@ -6,7 +6,7 @@
  * across all three tabs. All data is deterministic mock (see ./data.ts).
  */
 
-export type LeadsTab = "people" | "companies" | "jobs" | "ai";
+export type LeadsTab = "people" | "companies" | "jobs" | "linkedin" | "ai";
 
 /* ------------------------------- shared enums ---------------------------- */
 

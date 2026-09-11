@@ -10,8 +10,8 @@ export const dynamic = "force-dynamic";
 const SETTING_KEYS = [
   "DEEPSEEK_API_KEY",
   "DEEPSEEK_MODEL",
-  "CRAWLER_ROTATING_PROXY",
-  "CRAWLER_PROXY_LIST_URL",
+  "OPENAI_API_KEY",
+  "OPENAI_MODEL",
   "DECODO_AUTH",
   "GOOGLE_API_KEY",
   "GOOGLE_CX",

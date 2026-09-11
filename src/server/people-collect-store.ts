@@ -607,6 +607,7 @@ export interface PersonVerifyTarget {
   email: string | null;
   emailKind: CollectedPerson["emailKind"];
   title: string | null;
+  companyEmail: string | null; // existing employer email (don't clobber an imported value)
 }
 function toVerifyTarget(p: CollectedPerson): PersonVerifyTarget {
   let domain = p.companyDomain;
@@ -622,6 +623,7 @@ function toVerifyTarget(p: CollectedPerson): PersonVerifyTarget {
     email: p.email ? String(p.email.value) : null,
     emailKind: p.emailKind,
     title: p.title?.value ? String(p.title.value) : null,
+    companyEmail: p.companyEmail ?? null,
   };
 }
 
@@ -732,7 +734,7 @@ export function setPersonLlm(jobId: string, personId: string, v: CollectedPerson
 export function updatePersonResolved(
   jobId: string,
   personId: string,
-  patch: Partial<Pick<CollectedPerson, "linkedin" | "title" | "seniority" | "confidence" | "email" | "emailKind" | "location" | "emailVerification" | "collection">>,
+  patch: Partial<Pick<CollectedPerson, "linkedin" | "title" | "seniority" | "confidence" | "email" | "emailKind" | "location" | "emailVerification" | "companyEmail" | "collection">>,
 ) {
   const p = store().people[jobId]?.find((x) => x.id === personId);
   if (!p) return;

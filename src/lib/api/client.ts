@@ -39,9 +39,6 @@ import { statusBucket } from "../types";
 import { seededRandom } from "../utils";
 import { cleanDomain } from "../finder/patterns";
 import type {
-  ProxyConfig,
-  ProxyType,
-  RotationStrategy,
   CompanyCollectJob,
   CollectedCompany,
   CompaniesFacets,
@@ -58,6 +55,12 @@ import type {
   JobSource,
   JobSourceCoverage,
 } from "../leads/job-collect-types";
+import type {
+  CollectedLinkedInJob,
+  LinkedInScrapeParams,
+  LinkedInSearchJob,
+  LinkedInQueryCoverage,
+} from "../leads/linkedin-jobs-types";
 
 /* --------------------------- Verification -------------------------- */
 
@@ -361,8 +364,6 @@ export type AppConfigKey =
   | "DEEPSEEK_MODEL"
   | "OPENAI_API_KEY"
   | "OPENAI_MODEL"
-  | "CRAWLER_ROTATING_PROXY"
-  | "CRAWLER_PROXY_LIST_URL"
   | "DECODO_AUTH"
   | "GOOGLE_API_KEY"
   | "GOOGLE_CX";
@@ -390,59 +391,7 @@ export async function setAppConfig(patch: Partial<Record<AppConfigKey, string>>)
   return json.data as AppConfig;
 }
 
-/* ---------------- Company collection + proxy config ---------------- */
-
-export async function getProxyConfig(): Promise<ProxyConfig> {
-  return apiGet<ProxyConfig>("/api/v1/proxies");
-}
-
-export interface ProxyEntryInput {
-  id?: string;
-  label: string;
-  host: string;
-  port: number;
-  type: ProxyType;
-  username?: string;
-  password?: string;
-  country?: string;
-  enabled: boolean;
-}
-export interface ProxyConfigInput {
-  enabled: boolean;
-  rotation: RotationStrategy;
-  concurrency: number;
-  delayMs: number;
-  backoffMs: number;
-  maxRetries: number;
-  proxies: ProxyEntryInput[];
-  rotating?: { enabled: boolean; endpoint?: string };
-}
-
-export async function setProxyConfig(cfg: ProxyConfigInput): Promise<ProxyConfig> {
-  const res = await fetch("/api/v1/proxies", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
-  const json = await res.json();
-  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Save failed", res.status);
-  return json.data as ProxyConfig;
-}
-
-export async function testProxies(opts?: { id?: string; all?: boolean; onProgress?: (p: import("@/lib/leads/collect-types").ProxyTestProgress) => void }): Promise<ProxyConfig> {
-  const all = opts?.all ?? !opts?.id;
-  const { data: started } = await apiPost<ProxyConfig>("/api/v1/proxies/test", opts?.id ? { id: opts.id, all } : { all });
-  if (!all || !started.testProgress?.running) return started;
-
-  let cfg = started;
-  if (started.testProgress) opts?.onProgress?.(started.testProgress);
-  while (cfg.testProgress?.running) {
-    await new Promise((r) => setTimeout(r, 1200));
-    cfg = await apiGet<ProxyConfig>("/api/v1/proxies/test/status");
-    if (cfg.testProgress) opts?.onProgress?.(cfg.testProgress);
-  }
-  return cfg;
-}
-
-export async function getProxyTestStatus(): Promise<ProxyConfig> {
-  return apiGet<ProxyConfig>("/api/v1/proxies/test/status");
-}
+/* ---------------- Company collection ---------------- */
 
 export async function getCollectJobs(): Promise<CompanyCollectJob[]> {
   return apiGet<CompanyCollectJob[]>("/api/v1/leads/collect");
@@ -901,6 +850,67 @@ export async function getCrawledJobs(id: string, query: CrawledJobsQuery = {}): 
   if (query.workModes?.length) params.set("workModes", query.workModes.join(","));
   if (query.postedWithinDays) params.set("postedWithinDays", String(query.postedWithinDays));
   return apiGet<CrawledJobsPage>(`/api/v1/leads/jobs/${id}/results?${params.toString()}`);
+}
+
+/* --------------------------- LinkedIn jobs ------------------------- */
+
+export async function getLinkedInSearches(): Promise<LinkedInSearchJob[]> {
+  return apiGet<LinkedInSearchJob[]>("/api/v1/leads/linkedin-jobs");
+}
+
+export async function getLinkedInSearch(id: string): Promise<(LinkedInSearchJob & { coverage: LinkedInQueryCoverage[] }) | undefined> {
+  try {
+    return await apiGet<LinkedInSearchJob & { coverage: LinkedInQueryCoverage[] }>(`/api/v1/leads/linkedin-jobs/${id}`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return undefined;
+    throw e;
+  }
+}
+
+export async function createLinkedInSearch(input: { name: string; params: LinkedInScrapeParams }): Promise<LinkedInSearchJob> {
+  const { data } = await apiPost<LinkedInSearchJob>("/api/v1/leads/linkedin-jobs", input);
+  return data;
+}
+
+export async function deleteLinkedInSearch(id: string): Promise<void> {
+  const res = await fetch(`/api/v1/leads/linkedin-jobs/${id}`, { method: "DELETE" });
+  const json = await res.json();
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Delete failed", res.status);
+}
+
+/** Opt-in "Qualify companies": fetch detail + scrape company pages for qualified roles. */
+export async function qualifyLinkedInCompanies(id: string): Promise<{ id: string; targets: number }> {
+  const { data } = await apiPost<{ id: string; targets: number }>(`/api/v1/leads/linkedin-jobs/${id}/qualify`, {});
+  return data;
+}
+
+export async function retryBlockedLinkedInQueries(id: string): Promise<{ id: string; queries: string[] }> {
+  const { data } = await apiPost<{ id: string; queries: string[] }>(`/api/v1/leads/linkedin-jobs/${id}/retry`, {});
+  return data;
+}
+
+export interface CollectedLinkedInJobsQuery {
+  page?: number; pageSize?: number; search?: string;
+  roleFamilies?: string[]; countries?: string[]; seniorities?: string[];
+  remoteOnly?: boolean; qualifiedOnly?: boolean; minScore?: number; postedWithinDays?: number;
+}
+export interface CollectedLinkedInJobsPage {
+  jobs: CollectedLinkedInJob[]; total: number; page: number; pageSize: number;
+  facets: { roleFamilies: Record<string, number>; countries: Record<string, number>; seniorities: Record<string, number>; companies: { name: string; count: number }[] };
+}
+export async function getCollectedLinkedInJobs(id: string, query: CollectedLinkedInJobsQuery = {}): Promise<CollectedLinkedInJobsPage> {
+  const params = new URLSearchParams();
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  if (query.search) params.set("search", query.search);
+  if (query.roleFamilies?.length) params.set("roleFamilies", query.roleFamilies.join(","));
+  if (query.countries?.length) params.set("countries", query.countries.join(","));
+  if (query.seniorities?.length) params.set("seniorities", query.seniorities.join(","));
+  if (query.remoteOnly) params.set("remoteOnly", "1");
+  if (query.qualifiedOnly) params.set("qualifiedOnly", "1");
+  if (query.minScore) params.set("minScore", String(query.minScore));
+  if (query.postedWithinDays) params.set("postedWithinDays", String(query.postedWithinDays));
+  return apiGet<CollectedLinkedInJobsPage>(`/api/v1/leads/linkedin-jobs/${id}/results?${params.toString()}`);
 }
 
 /* --------------------------- API / webhooks ------------------------ */

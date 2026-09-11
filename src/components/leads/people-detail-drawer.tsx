@@ -73,9 +73,10 @@ export function PersonDetailDrawer({ person, open, onOpenChange }: { person: Col
             <Row icon={Building2} label="Company">{person.company}</Row>
           </Section>
 
-          {(person.companyDomain || person.companyIndustry || person.companyEmployees || person.companyPhone || person.companyLinkedin || person.companyFoundedYear || person.companyRevenue || person.companyFunding) && (
+          {(person.companyDomain || person.companyIndustry || person.companyEmployees || person.companyPhone || person.companyEmail || person.companyLinkedin || person.companyFoundedYear || person.companyRevenue || person.companyFunding) && (
             <Section title="Company">
               {person.companyDomain && <Row icon={Globe} label="Website"><a href={`https://${person.companyDomain}`} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{person.companyDomain}</a></Row>}
+              {person.companyEmail && <Row icon={Mail} label="Company email"><a href={`mailto:${person.companyEmail}`} className="font-medium text-primary hover:underline">{person.companyEmail}</a></Row>}
               {person.companyLinkedin && <Row icon={Linkedin} label="Company LinkedIn"><a href={linkedinHref(person.companyLinkedin)} target="_blank" rel="noreferrer" className="font-medium text-primary hover:underline">{person.companyLinkedin.replace(/^https?:\/\/(www\.)?/i, "")}</a></Row>}
               {person.companyIndustry && <Row icon={Briefcase} label="Industry">{person.companyIndustry}</Row>}
               {person.companyEmployees && <Row icon={Users} label="Employees">{person.companyEmployees}</Row>}

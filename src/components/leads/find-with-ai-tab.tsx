@@ -28,6 +28,37 @@ type Message =
   | { id: string; role: "error"; text: string };
 
 const uid = () => Math.random().toString(36).slice(2);
+const MAX_PROMPT_CHARS = 60_000;
+
+// Compact a previous report into the minimum the model needs to refine it:
+// just the identifying + filterable fields, capped to a sensible number of rows.
+// Summary / notes / website are dropped — they cost tokens and dilute accuracy.
+const HISTORY_ROW_CAP = 30;
+function reportToText(r: ReportPayload): string {
+  const rows = r.rows ?? [];
+  const lines = rows.slice(0, HISTORY_ROW_CAP).map((row, i) => {
+    const parts = [row.company, row.country, row.employees, row.role].map((s) => (s || "").trim()).filter(Boolean);
+    return `${i + 1}. ${parts.join(" | ")}`;
+  });
+  const more = rows.length > HISTORY_ROW_CAP ? `\n…(+${rows.length - HISTORY_ROW_CAP} more)` : "";
+  return `Current list (${rows.length} companies):\n${lines.join("\n")}${more}`;
+}
+
+// Build the conversation context to send with a follow-up prompt, Claude-style:
+// keep the accumulated user criteria (short, essential) plus ONLY the most recent
+// report (the list being refined). Older reports are superseded → dropped.
+function buildHistory(msgs: Message[]): { role: "user" | "assistant"; text: string }[] {
+  const userTurns: { role: "user" | "assistant"; text: string }[] = [];
+  let lastReport: ReportPayload | null = null;
+  for (const m of msgs) {
+    if (m.role === "user") userTurns.push({ role: "user", text: m.text.slice(0, 700) });
+    else if (m.role === "assistant") lastReport = m.report; // keep only the latest
+    // error bubbles are skipped
+  }
+  const turns = userTurns.slice(-6); // recent criteria only
+  if (lastReport) turns.push({ role: "assistant", text: reportToText(lastReport) });
+  return turns;
+}
 
 type ProviderId = "deepseek" | "openai";
 type Effort = "low" | "medium" | "high";
@@ -156,8 +187,20 @@ export function FindWithAiTab() {
   }
 
   async function send() {
-    const prompt = input.trim();
-    if (!prompt || loading) return;
+    const rawPrompt = input.trim();
+    if (!rawPrompt || loading) return;
+    // Clamp very long input rather than letting the request fail; tell the user.
+    const prompt = rawPrompt.slice(0, MAX_PROMPT_CHARS);
+    if (rawPrompt.length > MAX_PROMPT_CHARS) {
+      toast({ variant: "warning", title: "Prompt shortened", description: `Only the first ${MAX_PROMPT_CHARS.toLocaleString()} characters were used. For long briefs, use the Brief button.` });
+    }
+    const history = buildHistory(messages); // prior turns (before this new one)
+    // The latest report becomes the base table the follow-up patches (server keeps
+    // unchanged rows + quota; the model only returns the change set).
+    const lastReport = [...messages].reverse().find((m) => m.role === "assistant") as Extract<Message, { role: "assistant" }> | undefined;
+    const base = lastReport?.report
+      ? { columns: lastReport.report.columns ?? [], rows: (lastReport.report.rows ?? []).slice(0, 40) }
+      : undefined;
     const userMsg: Message = { id: uid(), role: "user", text: prompt, fileName: file?.fileName };
     setMessages((m) => [...m, userMsg]);
     setInput("");
@@ -174,10 +217,13 @@ export function FindWithAiTab() {
           model: currentModel || undefined,
           smartSearch: showSmart ? smartSearch : undefined,
           reasoningEffort: showEffort ? effort : undefined,
+          history: history.length ? history : undefined,
+          base,
         }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json?.error?.message || "Report generation failed.");
+      if (json.data?.notice) toast({ variant: "warning", title: "Heads up", description: String(json.data.notice) });
       setMessages((m) => [...m, { id: uid(), role: "assistant", report: json.data as ReportPayload }]);
     } catch (err) {
       setMessages((m) => [...m, { id: uid(), role: "error", text: (err as Error).message }]);

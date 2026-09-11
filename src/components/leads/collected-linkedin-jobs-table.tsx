@@ -1,0 +1,335 @@
+"use client";
+import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ExternalLink, MapPin, Briefcase, Search, SlidersHorizontal, ChevronDown, Users, Download, X, Loader2, CheckCircle2, Building2 } from "lucide-react";
+import { cn, formatNumber } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/common/empty-state";
+import { useToast } from "@/components/ui/toast";
+import { getCollectedLinkedInJobs, type CollectedLinkedInJobsQuery, type CollectedLinkedInJobsPage } from "@/lib/api/client";
+import { toCsv, downloadCsv } from "@/lib/leads/csv";
+import type { CollectedLinkedInJob, LinkedInJobFilters } from "@/lib/leads/linkedin-jobs-types";
+import type { PeopleSeedInput } from "@/lib/leads/people-types";
+import { CompanyLogo, ScoreBar } from "./leads-ui";
+import { LinkedInJobsFilterSidebar } from "./linkedin-jobs-filter-sidebar";
+import { MobileFilterDrawer, openFiltersFor } from "./filter-drawer";
+
+const PAGE_SIZE = 25;
+
+export interface FindPeopleFromLinkedInPayload {
+  seeds: PeopleSeedInput[];
+  count: number;
+}
+
+function Check({ checked, indeterminate, onChange }: { checked: boolean; indeterminate?: boolean; onChange: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onChange(); }}
+      role="checkbox"
+      aria-checked={indeterminate ? "mixed" : checked}
+      className={cn(
+        "flex size-4 items-center justify-center rounded border transition-colors",
+        checked || indeterminate ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-primary/50",
+      )}
+    >
+      {indeterminate ? (
+        <span className="h-0.5 w-2 rounded bg-current" />
+      ) : checked ? (
+        <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : null}
+    </button>
+  );
+}
+
+function postedLabel(j: CollectedLinkedInJob): string {
+  if (j.postedDaysAgo == null) return j.postedText ?? "—";
+  if (j.postedDaysAgo <= 0) return "Today";
+  if (j.postedDaysAgo === 1) return "Yesterday";
+  if (j.postedDaysAgo < 7) return `${j.postedDaysAgo}d ago`;
+  if (j.postedDaysAgo < 30) return `${Math.round(j.postedDaysAgo / 7)}w ago`;
+  return "30+ days ago";
+}
+
+/** Dedupe selected roles to one seed per distinct employer. */
+function seedsFromJobs(jobs: CollectedLinkedInJob[]): PeopleSeedInput[] {
+  const byCompany = new Map<string, PeopleSeedInput>();
+  for (const j of jobs) {
+    const company = j.company?.trim();
+    if (!company || company === "—") continue;
+    const key = company.toLowerCase();
+    if (byCompany.has(key)) continue;
+    byCompany.set(key, { company, location: j.city ?? j.country ?? j.location ?? "", domain: j.companyWebsite ?? null });
+  }
+  return [...byCompany.values()];
+}
+
+function countActive(f: LinkedInJobFilters): number {
+  let n = f.roleFamilies.length + f.countries.length + f.seniorities.length;
+  if (f.remoteOnly) n++;
+  if (!f.qualifiedOnly) n++; // qualified-only is the default; showing all is an active choice
+  if (f.minScore > 0) n++;
+  if (f.postedWithinDays > 0) n++;
+  return n;
+}
+
+/**
+ * LinkedIn roles table. Mirrors the Jobs table (filter sidebar, search toolbar,
+ * pagination, row selection → floating bulk bar). Extra columns surface the
+ * pipeline output: role family, fit score, company industry/size, and a
+ * "Qualified" marker. Bulk actions: Find people (seed a people crawl from the
+ * selected employers) + Export.
+ */
+export function CollectedLinkedInJobsTable({
+  jobId, live, filters, onChangeFilters, onClearFilters, onFindPeople, findingPeople,
+}: {
+  jobId: string;
+  live: boolean;
+  filters: LinkedInJobFilters;
+  onChangeFilters: (patch: Partial<LinkedInJobFilters>) => void;
+  onClearFilters: () => void;
+  onFindPeople?: (payload: FindPeopleFromLinkedInPayload) => void;
+  findingPeople?: boolean;
+}) {
+  const { toast } = useToast();
+  const [showFilters, setShowFilters] = React.useState(true);
+  const [mobileFilters, setMobileFilters] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const [debounced, setDebounced] = React.useState("");
+  const [page, setPage] = React.useState(1);
+  React.useEffect(() => { const t = setTimeout(() => setDebounced(search), 300); return () => clearTimeout(t); }, [search]);
+
+  const query: Omit<CollectedLinkedInJobsQuery, "page" | "pageSize" | "search"> = React.useMemo(() => ({
+    roleFamilies: filters.roleFamilies,
+    countries: filters.countries,
+    seniorities: filters.seniorities,
+    remoteOnly: filters.remoteOnly,
+    qualifiedOnly: filters.qualifiedOnly,
+    minScore: filters.minScore > 0 ? filters.minScore : undefined,
+    postedWithinDays: filters.postedWithinDays > 0 ? filters.postedWithinDays : undefined,
+  }), [filters]);
+
+  const queryKeyStr = JSON.stringify(query);
+  const effQuery = React.useMemo(() => ({ ...query, search: debounced }), [queryKeyStr, debounced]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { setPage(1); }, [jobId, debounced, queryKeyStr]);
+
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
+  const [allMatching, setAllMatching] = React.useState(false);
+  React.useEffect(() => { setSelectedIds(new Set()); setAllMatching(false); }, [jobId, debounced, queryKeyStr]);
+
+  const { data, isLoading, isPlaceholderData } = useQuery({
+    queryKey: ["linkedin-jobs", jobId, effQuery, page],
+    queryFn: () => getCollectedLinkedInJobs(jobId, { ...effQuery, page, pageSize: PAGE_SIZE }),
+    refetchInterval: live ? 2000 : false,
+    placeholderData: (prev) => prev,
+  });
+
+  const rows = data?.jobs ?? [];
+  const total = data?.total ?? 0;
+  const facets: CollectedLinkedInJobsPage["facets"] | undefined = data?.facets;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageIds = rows.map((r) => r.id);
+
+  const effectiveCount = allMatching ? total : selectedIds.size;
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => allMatching || selectedIds.has(id));
+  const someSelected = effectiveCount > 0;
+
+  const rowChecked = (id: string) => allMatching || selectedIds.has(id);
+  const toggleRow = (id: string) => {
+    if (allMatching) { setAllMatching(false); setSelectedIds(new Set(pageIds.filter((x) => x !== id))); return; }
+    setSelectedIds((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+  const selectThisPage = () => { setAllMatching(false); setSelectedIds((s) => { const n = new Set(s); pageIds.forEach((id) => n.add(id)); return n; }); };
+  const selectAll = () => { setSelectedIds(new Set()); setAllMatching(true); };
+  const clearSelection = () => { setSelectedIds(new Set()); setAllMatching(false); };
+  const toggleHeader = () => { if (someSelected) clearSelection(); else selectThisPage(); };
+
+  const resolveSelected = React.useCallback(async (): Promise<CollectedLinkedInJob[]> => {
+    const all = await getCollectedLinkedInJobs(jobId, { ...query, search: debounced, page: 1, pageSize: 100000 });
+    return allMatching ? all.jobs : all.jobs.filter((j) => selectedIds.has(j.id));
+  }, [jobId, queryKeyStr, debounced, allMatching, selectedIds]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [busy, setBusy] = React.useState<null | "export" | "people">(null);
+
+  const onExport = async () => {
+    setBusy("export");
+    try {
+      const sel = await resolveSelected();
+      const headers = ["Title", "Company", "Location", "Country", "Role family", "Seniority", "Employment", "Industry", "Employees", "Fit", "Qualified", "Posted", "URL"];
+      const csv = toCsv(headers, sel.map((j) => [
+        j.title, j.company, j.location ?? "", j.country ?? "", j.roleFamily ?? "", j.seniorityLevel ?? "",
+        j.employmentType ?? "", j.companyIndustry ?? "", j.companyEmployeeRange ?? "", String(j.fitScore),
+        j.qualified ? "yes" : "no", postedLabel(j), j.jobUrl,
+      ]));
+      downloadCsv(`linkedin-jobs-${jobId}`, csv);
+      toast({ variant: "success", title: `Exported ${formatNumber(sel.length)} roles` });
+    } catch { toast({ variant: "error", title: "Export failed" }); }
+    finally { setBusy(null); }
+  };
+
+  const findPeople = async () => {
+    if (!onFindPeople) return;
+    setBusy("people");
+    try {
+      const sel = await resolveSelected();
+      const seeds = seedsFromJobs(sel);
+      if (seeds.length === 0) { toast({ variant: "error", title: "No employers to search", description: "The selected roles have no company name." }); return; }
+      onFindPeople({ seeds, count: seeds.length });
+    } catch { toast({ variant: "error", title: "Couldn't start", description: "Try again." }); }
+    finally { setBusy(null); }
+  };
+
+  const activeFilterCount = countActive(filters);
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      {showFilters && (
+        <aside className="hidden w-64 shrink-0 flex-col overflow-hidden border-r bg-muted/10 md:flex">
+          <LinkedInJobsFilterSidebar filters={filters} onChange={onChangeFilters} activeCount={activeFilterCount} onClear={onClearFilters} facets={facets} />
+        </aside>
+      )}
+      <MobileFilterDrawer open={mobileFilters} onClose={() => setMobileFilters(false)}>
+        <LinkedInJobsFilterSidebar filters={filters} onChange={onChangeFilters} activeCount={activeFilterCount} onClear={onClearFilters} facets={facets} />
+      </MobileFilterDrawer>
+
+      <div className="relative flex min-w-0 flex-1 flex-col">
+        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
+          <div className="relative w-full min-w-[200px] sm:w-auto sm:flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search role, company or location…" className="h-9 pl-9" />
+          </div>
+          <span className="text-sm text-muted-foreground"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> roles</span>
+          <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="ml-auto h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
+            <SlidersHorizontal className="size-4" /> Filters{activeFilterCount > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{activeFilterCount}</span>}
+          </Button>
+        </div>
+
+        <div className="min-h-0 flex-1">
+          {isLoading && !data ? (
+            <div className="space-y-2 p-4">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          ) : total === 0 ? (
+            <EmptyState
+              icon={Briefcase}
+              title={live ? "Scraping LinkedIn…" : "No roles found"}
+              description={live ? "Roles appear here as each query returns." : "No roles matched the current filter. Try turning off “Qualified only” or clearing filters."}
+              className="m-6"
+            />
+          ) : (
+            <div className={cn("scrollbar-thin h-full overflow-auto transition-opacity", isPlaceholderData && "opacity-60")}>
+              <table className="w-full border-collapse text-[13px]">
+                <thead className="sticky top-0 z-10 bg-card">
+                  <tr className="border-b text-left font-medium text-muted-foreground">
+                    <th className="w-10 px-3 py-2.5">
+                      <div className="flex items-center gap-1">
+                        <Check checked={allMatching || allPageSelected} indeterminate={someSelected && !allMatching && !allPageSelected} onChange={toggleHeader} />
+                        <DropdownMenu align="start" trigger={<button className="rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label="Selection options"><ChevronDown className="size-3.5" /></button>}>
+                          <DropdownItem onClick={selectThisPage}>Select this page ({pageIds.length})</DropdownItem>
+                          <DropdownItem onClick={selectAll}>Select all {formatNumber(total)}</DropdownItem>
+                          {someSelected && <><DropdownSeparator /><DropdownItem onClick={clearSelection}>Clear selection</DropdownItem></>}
+                        </DropdownMenu>
+                      </div>
+                    </th>
+                    <th className="px-3 py-2.5">Job</th>
+                    <th className="px-3 py-2.5">Company</th>
+                    <th className="px-3 py-2.5">Company employees</th>
+                    <th className="px-3 py-2.5">Location</th>
+                    <th className="px-3 py-2.5">Role</th>
+                    <th className="w-32 px-3 py-2.5">Fit</th>
+                    <th className="px-3 py-2.5">Posted</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((j) => {
+                    const selected = rowChecked(j.id);
+                    return (
+                      <tr key={j.id} className={cn("group border-b transition-colors hover:bg-muted/40", selected && "bg-primary/[0.04]")}>
+                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                          <Check checked={selected} onChange={() => toggleRow(j.id)} />
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <a href={j.jobUrl || undefined} target="_blank" rel="noreferrer" className="text-left font-medium hover:text-primary hover:underline">{j.title}</a>
+                            {j.qualified && <CheckCircle2 className="size-3.5 shrink-0 text-[hsl(var(--valid))]" aria-label="Qualified" />}
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                            {j.remote && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">Remote</span>}
+                            {j.seniorityLevel && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{j.seniorityLevel}</span>}
+                            {j.employmentType && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{j.employmentType}</span>}
+                            {j.primaryLanguage && <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">{j.primaryLanguage}</span>}
+                            {!j.qualified && j.rejectReason && <span className="rounded bg-amber-500/12 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-400">{j.rejectReason}</span>}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-2">
+                            <CompanyLogo text={j.companyLogoText} seed={j.company} />
+                            {j.companyLinkedinUrl ? (
+                              <a href={j.companyLinkedinUrl} target="_blank" rel="noopener noreferrer" className="line-clamp-1 hover:text-primary hover:underline">{j.company}</a>
+                            ) : (
+                              <span className="line-clamp-1">{j.company}</span>
+                            )}
+                          </div>
+                          {j.companyIndustry && <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{j.companyIndustry}</div>}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                          {j.companyEmployeeRange ? <span className="inline-flex items-center gap-1"><Building2 className="size-3 opacity-60" />{j.companyEmployeeRange}</span> : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
+                          {j.location ? <span className="inline-flex items-center gap-1"><MapPin className="size-3 opacity-60" />{j.location}</span> : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{j.roleFamily ?? "—"}</td>
+                        <td className="px-3 py-2"><ScoreBar value={j.fitScore} /></td>
+                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{postedLabel(j)}</td>
+                        <td className="px-2 py-2">
+                          {j.jobUrl && (
+                            <a href={j.jobUrl} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100" aria-label="Open role">
+                              <ExternalLink className="size-4" />
+                            </a>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {total > 0 && (
+          <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-muted-foreground">
+            <span>{formatNumber(total)} roles</span>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="h-8" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+              <span className="tabular-nums">Page {page} / {totalPages}</span>
+              <Button size="sm" variant="outline" className="h-8" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+            </div>
+          </div>
+        )}
+
+        {someSelected && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
+            <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
+              <span className="flex items-center gap-2 pr-1 text-sm font-semibold">
+                <span className="rounded-md bg-primary px-2 py-0.5 text-primary-foreground tabular-nums">{formatNumber(effectiveCount)}</span> selected
+              </span>
+              {!allMatching && total > selectedIds.size && (
+                <button onClick={selectAll} className="text-xs font-medium text-primary hover:underline">Select all {formatNumber(total)}</button>
+              )}
+              <div className="h-6 w-px bg-border" />
+              {onFindPeople && (
+                <Button size="sm" onClick={findPeople} disabled={findingPeople || busy !== null}>{findingPeople || busy === "people" ? <Loader2 className="size-4 animate-spin" /> : <Users className="size-4" />} Find people</Button>
+              )}
+              <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null}>{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
+              <button onClick={clearSelection} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

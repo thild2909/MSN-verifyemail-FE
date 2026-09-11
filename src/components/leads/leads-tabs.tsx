@@ -1,5 +1,5 @@
 "use client";
-import { User, Building2, Briefcase, Sparkles } from "lucide-react";
+import { User, Building2, Briefcase, Sparkles, Linkedin } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LeadsTab } from "@/lib/leads/types";
 
@@ -7,6 +7,7 @@ const TABS: { key: LeadsTab; label: string; icon: React.ElementType }[] = [
   { key: "people", label: "People", icon: User },
   { key: "companies", label: "Companies", icon: Building2 },
   { key: "jobs", label: "Jobs", icon: Briefcase },
+  { key: "linkedin", label: "LinkedIn Jobs", icon: Linkedin },
   { key: "ai", label: "Find with AI", icon: Sparkles },
 ];
 

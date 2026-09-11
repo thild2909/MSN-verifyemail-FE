@@ -208,6 +208,39 @@ export async function resolveCompanyEmailDomainViaCrawler(company: string, locat
   }
 }
 
+/**
+ * Public-sources PERSON-email lookup. Scrapes the person's actually-published
+ * email from indexed pages (Decodo SERP) and returns scored candidate addresses
+ * (best first) for the caller to SMTP-verify. Throws on transport error.
+ */
+export async function resolvePersonEmailsViaCrawler(input: {
+  name: string; first: string; last: string; company: string; domain: string | null; location: string | null;
+}): Promise<string[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/person-emails`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: input.name,
+        first: input.first,
+        last: input.last,
+        company: input.company,
+        domain: input.domain ?? undefined,
+        location: input.location ?? "",
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /person-emails responded ${res.status}`);
+    const data = (await res.json()) as { emails?: string[] };
+    return data.emails ?? [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* ------------------------------- people ---------------------------------- */
 
 import type { CollectedPerson, PersonSeniority, PeopleSeedInput } from "@/lib/leads/people-types";
@@ -509,11 +542,15 @@ export interface AiReportResponse {
   model?: string;
 }
 
+export interface AiReportChatTurn { role: "user" | "assistant"; text: string }
+
 export interface AiReportRequestOpts {
   provider: AiProvider;
   model?: string;
   smartSearch?: boolean;
   reasoningEffort?: "low" | "medium" | "high";
+  history?: AiReportChatTurn[];
+  base?: { columns: AiReportColumn[]; rows: AiReportRow[] };
 }
 
 /** Run the LLM-only company-report generator with the chosen provider + options. */
@@ -537,6 +574,8 @@ export async function aiReportViaCrawler(
         model: opts.model,
         smartSearch: opts.smartSearch,
         reasoningEffort: opts.reasoningEffort,
+        history: opts.history,
+        base: opts.base,
       }),
       signal: controller.signal,
       cache: "no-store",
@@ -571,9 +610,9 @@ export async function getAiProvidersViaCrawler(): Promise<AiProviderInfo[]> {
   }
 }
 
-/* --------------------------- proxy config (pool) ------------------------- */
+/* --------------------------- crawl backend probe ------------------------- */
 
-async function proxyFetch(path: string, init?: RequestInit): Promise<unknown> {
+async function svcFetch(path: string, init?: RequestInit): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
   try {
@@ -585,30 +624,12 @@ async function proxyFetch(path: string, init?: RequestInit): Promise<unknown> {
   }
 }
 
-/** The crawler-service proxy pool config (settings + sanitized proxies). */
-export function getProxyConfigRemote(): Promise<unknown> {
-  return proxyFetch("/proxies");
-}
-export function setProxyConfigRemote(cfg: unknown): Promise<unknown> {
-  return proxyFetch("/proxies", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
-}
-export function testProxiesRemote(opts?: { id?: string; all?: boolean }): Promise<unknown> {
-  return proxyFetch("/proxies/test", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(opts?.id ? { id: opts.id, all: opts.all } : { all: opts?.all ?? true }),
-  });
-}
-export function getProxyTestStatusRemote(): Promise<unknown> {
-  return proxyFetch("/proxies/test/status");
-}
-
 /**
- * Does the crawler currently have a working proxy rotation (rotating endpoint or
- * a datacenter pool)? When it does NOT, a search that comes back `blocked` will
- * be blocked identically on retry (same server IP), so the people job skips its
- * block-retry passes to avoid a long, futile tail. Defaults to `true` on any
- * error so we never suppress retries when we simply couldn't ask.
+ * Is a recovery backend (Decodo) configured on the crawler? When it is NOT, a
+ * search that comes back `blocked` will be blocked identically on retry (same
+ * direct server IP), so the people job skips its block-retry passes to avoid a
+ * long, futile tail. Defaults to `true` on any error so we never suppress
+ * retries when we simply couldn't ask.
  */
 export async function crawlerProxyAvailable(): Promise<boolean> {
   const controller = new AbortController();
@@ -616,14 +637,11 @@ export async function crawlerProxyAvailable(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
     if (!res.ok) return true;
-    const j = (await res.json()) as {
-      proxyActive?: boolean;
-      proxies?: { active?: number; enabled?: boolean };
-    };
-    // Newer crawler builds report this directly; fall back to deriving it from the
-    // pool stats (mirrors the crawler's own hasRotationPool: enabled + ≥5 IPs).
+    const j = (await res.json()) as { decodoActive?: boolean; proxyActive?: boolean };
+    // Newer builds report `decodoActive`; `proxyActive` is kept as an alias.
+    if (typeof j.decodoActive === "boolean") return j.decodoActive;
     if (typeof j.proxyActive === "boolean") return j.proxyActive;
-    return !!(j.proxies?.enabled && (j.proxies?.active ?? 0) >= 5);
+    return true;
   } catch {
     return true;
   } finally {
@@ -633,13 +651,13 @@ export async function crawlerProxyAvailable(): Promise<boolean> {
 
 /* --------------------------- runtime settings (Config tab) --------------- */
 
-/** Masked snapshot of the crawler's env-backed secrets (DeepSeek / proxy / search). */
+/** Masked snapshot of the crawler's env-backed secrets (DeepSeek / Decodo / search). */
 export function getSettingsRemote(): Promise<unknown> {
-  return proxyFetch("/settings");
+  return svcFetch("/settings");
 }
 /** Patch the crawler's runtime settings. Blank clears; masked value keeps existing. */
 export function setSettingsRemote(patch: unknown): Promise<unknown> {
-  return proxyFetch("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+  return svcFetch("/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
 }
 
 /** Reachability probe for the crawler service. */

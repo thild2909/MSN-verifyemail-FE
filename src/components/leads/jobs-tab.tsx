@@ -1,20 +1,19 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Radar, Trash2, Loader2, Server, ShieldCheck, ShieldOff, Globe, Briefcase, Building2, Ban, Layers, RotateCw } from "lucide-react";
+import { Radar, Trash2, Loader2, Briefcase, Building2, Ban, Layers, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
-import { getJobSearches, getJobSearch, deleteJobSearch, retryBlockedJobSources, getProxyConfig, createPeopleJob } from "@/lib/api/client";
+import { getJobSearches, getJobSearch, deleteJobSearch, retryBlockedJobSources, createPeopleJob } from "@/lib/api/client";
 import { DEFAULT_JOB_FILTERS, type JobFilters } from "@/lib/leads/types";
 import { JOB_SOURCE_LABEL, type JobCollectJob, type JobSourceCoverage } from "@/lib/leads/job-collect-types";
 import { WORK_MODE_LABEL } from "./leads-ui";
 import { CollectedJobsTable, type FindPeopleFromJobsPayload } from "./collected-jobs-table";
 import { JobCrawlDialog, type CrawlSeed } from "./job-crawl-dialog";
-import { ProxySettings } from "./proxy-settings";
 import { StatsBar } from "./stats-bar";
 import type { CrawledJobsQuery } from "@/lib/api/client";
 
@@ -50,14 +49,12 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
   const [filters, setFilters] = React.useState<JobFilters>(DEFAULT_JOB_FILTERS);
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [crawlOpen, setCrawlOpen] = React.useState(false);
-  const [proxyOpen, setProxyOpen] = React.useState(false);
 
   const { data: jobs } = useQuery({
     queryKey: ["job-searches"],
     queryFn: getJobSearches,
     refetchInterval: (q) => (q.state.data as JobCollectJob[] | undefined)?.some((j) => j.status === "collecting") ? 2000 : false,
   });
-  const { data: proxy } = useQuery({ queryKey: ["proxy-config"], queryFn: getProxyConfig });
 
   React.useEffect(() => { if (!activeId && jobs && jobs.length) setActiveId(jobs[0].id); }, [jobs, activeId]);
 
@@ -107,8 +104,6 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
   const patch = (p: Partial<JobFilters>) => setFilters((f) => ({ ...f, ...p }));
   const clear = () => setFilters(DEFAULT_JOB_FILTERS);
 
-  const enabledProxies = proxy?.proxies.filter((p) => p.enabled).length ?? 0;
-  const rotatingActive = proxy?.rotating?.active ?? false;
   const live = active?.status === "collecting";
   const s = active?.summary;
   const retryable = active?.coverage?.filter((c) => c.status === "blocked" || c.status === "failed").length ?? 0;
@@ -121,7 +116,6 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
         seed={seedFromFilters(filters)}
         onCreated={(id) => { qc.invalidateQueries({ queryKey: ["job-searches"] }); setActiveId(id); }}
       />
-      <ProxySettings open={proxyOpen} onOpenChange={(o) => { setProxyOpen(o); if (!o) qc.invalidateQueries({ queryKey: ["proxy-config"] }); }} />
     </>
   );
 
@@ -135,7 +129,6 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
           action={
             <div className="flex items-center gap-2">
               <Button onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> Crawl job boards</Button>
-              <Button variant="outline" onClick={() => setProxyOpen(true)}><Server className="size-4" /> Proxy settings</Button>
             </div>
           }
         />
@@ -153,10 +146,6 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
         </Select>
         {active && <span className="text-xs text-muted-foreground">{formatNumber(active.summary.jobs)} roles · {active.sources.map((x) => JOB_SOURCE_LABEL[x]).join(", ")}</span>}
         <div className="ml-auto flex max-w-full items-center gap-2 overflow-x-auto scrollbar-thin [&>*]:shrink-0 sm:overflow-visible">
-          <button onClick={() => setProxyOpen(true)} className={cn("inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted", rotatingActive || proxy?.enabled ? "border-[hsl(var(--valid))]/40 text-[hsl(var(--valid))]" : "border-input text-muted-foreground")}>
-            {rotatingActive ? <Globe className="size-3.5" /> : proxy?.enabled ? <ShieldCheck className="size-3.5" /> : <ShieldOff className="size-3.5" />}
-            {rotatingActive ? "Rotating residential" : proxy?.enabled ? `Proxies on · ${enabledProxies}` : "Proxies off"}
-          </button>
           {active && retryable > 0 && !live && (
             <Button size="sm" variant="outline" onClick={() => retry.mutate(active.id)} disabled={retry.isPending}>
               {retry.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />} Retry blocked
@@ -175,7 +164,6 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
           <Stat icon={Layers} label="Sources" value={`${formatNumber(s.sourcesDone)}/${formatNumber(s.sources)}`} />
           <Stat icon={Building2} label="Employers" value={formatNumber(s.companies)} />
           <Stat icon={RotateCw} label="Pages" value={formatNumber(s.pagesCrawled)} />
-          <Stat icon={RotateCw} label="Proxy rotations" value={formatNumber(s.proxyRotations)} />
           {s.blocked > 0 && <Stat icon={Ban} label="Blocked" value={formatNumber(s.blocked)} tone="risky" />}
           {live && (
             <div className="flex min-w-[160px] flex-1 items-center gap-2">

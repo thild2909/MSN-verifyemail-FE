@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Bot, Server, Search, KeyRound, Info } from "lucide-react";
+import { Loader2, Bot, Search, KeyRound, Info } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,20 +37,11 @@ const GROUPS: GroupDef[] = [
     ],
   },
   {
-    title: "Proxy",
-    description: "Route crawling through residential IPs to avoid rate limits.",
-    icon: Server,
-    fields: [
-      { key: "CRAWLER_ROTATING_PROXY", label: "Rotating endpoint", placeholder: "http://user-rotate:pass@p.webshare.io:80", help: "Webshare backbone — a fresh IP per request.", mono: true },
-      { key: "CRAWLER_PROXY_LIST_URL", label: "Proxy list download URL", placeholder: "https://proxy.webshare.io/api/v2/proxy/list/download/…", help: "A Webshare list-download link. When set, it takes precedence over the rotating endpoint.", mono: true },
-    ],
-  },
-  {
-    title: "Search",
-    description: "Higher-accuracy search providers (optional — keyless Brave is the default).",
+    title: "Search & crawl",
+    description: "Decodo is the crawl backend (real-Google SERP + residential web scraper). Google API is an optional higher-accuracy alternative.",
     icon: Search,
     fields: [
-      { key: "DECODO_AUTH", label: "Decodo SERP auth", placeholder: "base64(user:pass)", help: "Decodo / Smartproxy SERP API Basic-auth token.", mono: true },
+      { key: "DECODO_AUTH", label: "Decodo auth", placeholder: "base64(user:pass)", help: "Decodo SERP + Web Scraping API Basic-auth token. Powers all crawling.", mono: true },
       { key: "GOOGLE_API_KEY", label: "Google API key", placeholder: "AIza…", mono: true },
       { key: "GOOGLE_CX", label: "Google CX", placeholder: "Programmable Search engine ID", mono: true },
     ],
