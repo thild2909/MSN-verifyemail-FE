@@ -34,9 +34,11 @@ export const viewport: Viewport = {
   // area, so the notch / home-indicator never overlap content. We intentionally
   // do NOT use `cover` — the safe-area utility classes stay as harmless no-ops.
   viewportFit: "contain",
+  // Match the app background so the iOS status-bar / notch strip blends with the
+  // app instead of showing the indigo brand colour.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#4f46e5" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b1020" },
+    { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b101e" },
   ],
 };
 

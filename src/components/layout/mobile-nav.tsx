@@ -100,7 +100,11 @@ export function MobileTabBar() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-safe backdrop-blur lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur lg:hidden"
+      // Keep a comfortable gap under the tab row: the home-indicator inset when
+      // there is one (viewport-fit:cover), otherwise a small fixed breathing gap
+      // (contain mode reports a 0 inset, which left the labels flush to the edge).
+      style={{ paddingBottom: "max(env(safe-area-inset-bottom), 0.75rem)" }}
       aria-label="Primary"
     >
       <div className="mx-auto flex h-14 max-w-lg items-stretch">

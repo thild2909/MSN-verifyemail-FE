@@ -157,9 +157,10 @@
   .h-safe-bottom {
     height: env(safe-area-inset-bottom);
   }
-  /* Clear the mobile bottom tab bar (3.5rem) + home indicator. */
+  /* Clear the mobile bottom tab bar: its row (3.5rem) + the same bottom gap the
+     bar itself uses (home-indicator inset, or a small fixed minimum). */
   .pb-nav {
-    padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(3.5rem + max(env(safe-area-inset-bottom), 0.75rem));
   }
 }
 
