@@ -86,8 +86,9 @@ export function ResultsTable({ listId, live = false }: { listId: string; live?: 
         </Button>
       </div>
 
-      {/* Filter pills */}
-      <div className="flex flex-wrap gap-1.5">
+      {/* Filter pills — a horizontal, swipeable rail on mobile (saves vertical
+          space vs. wrapping to 3 rows); wraps normally from sm up. */}
+      <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
         {FILTERS.map((f) => (
           <button
             key={f}
@@ -96,7 +97,7 @@ export function ResultsTable({ listId, live = false }: { listId: string; live?: 
               setPage(1);
             }}
             className={cn(
-              "rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
+              "shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
               status === f ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70",
             )}
           >
@@ -105,8 +106,37 @@ export function ResultsTable({ listId, live = false }: { listId: string; live?: 
         ))}
       </div>
 
-      {/* Table */}
-      <div className="rounded-xl border">
+      {/* Mobile: result cards (tap to open detail) */}
+      <div className="space-y-2 md:hidden">
+        {isLoading ? (
+          Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[68px] w-full rounded-xl" />)
+        ) : data && data.records.length ? (
+          data.records.map((r) => (
+            <div
+              key={r.id}
+              onClick={() => openRecord(r)}
+              className="cursor-pointer rounded-xl border bg-card p-3 transition-colors active:bg-muted/40"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="min-w-0 flex-1 break-all font-medium">{r.email}</p>
+                {r.result && <StatusBadge status={r.result.status} />}
+              </div>
+              <div className="mt-1.5 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span className="min-w-0 truncate">
+                  {r.firstName ? `${r.firstName} ${r.lastName ?? ""}`.trim() : "—"}
+                  {r.company ? ` · ${r.company}` : ""}
+                </span>
+                <span className="shrink-0 tabular-nums">Score {r.result?.score ?? "—"}</span>
+              </div>
+            </div>
+          ))
+        ) : (
+          <p className="rounded-xl border py-10 text-center text-sm text-muted-foreground">No emails match your filters.</p>
+        )}
+      </div>
+
+      {/* Desktop: table */}
+      <div className="hidden overflow-x-auto rounded-xl border md:block">
         <Table>
           <TableHeader>
             <TableRow>

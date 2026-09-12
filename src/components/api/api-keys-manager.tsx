@@ -13,6 +13,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } fr
 import { getApiKeys, getWebhooks, getWebhookDeliveries } from "@/lib/api/client";
 import { WEBHOOK_EVENTS } from "@/lib/types";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { cn, formatNumber, formatDate, formatDateTime } from "@/lib/utils";
 
 export function ApiKeysManager() {
@@ -20,6 +21,7 @@ export function ApiKeysManager() {
   const { data: webhooks } = useQuery({ queryKey: ["webhooks"], queryFn: getWebhooks });
   const { data: deliveries } = useQuery({ queryKey: ["webhookDeliveries"], queryFn: getWebhookDeliveries });
   const { toast } = useToast();
+  const confirm = useConfirm();
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [newName, setNewName] = React.useState("");
@@ -53,6 +55,36 @@ export function ApiKeysManager() {
           </Button>
         </CardHeader>
         <CardContent>
+          {/* Mobile: key cards */}
+          <div className="space-y-3 md:hidden">
+            {(keys ?? []).map((k) => (
+              <div key={k.id} className="rounded-xl border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate font-medium">{k.name}</p>
+                  <Badge variant={k.status === "active" ? "success" : "muted"}>{k.status}</Badge>
+                </div>
+                <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{k.maskedKey}</p>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>Created {formatDate(k.createdAt)}</span>
+                  <span>Last used {k.lastUsedAt ? formatDate(k.lastUsedAt) : "Never"}</span>
+                  <span className="tabular-nums">{formatNumber(k.requests)} req</span>
+                </div>
+                {k.status === "active" && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-3 w-full text-destructive hover:text-destructive"
+                    onClick={async () => { if (await confirm({ title: "Revoke API key?", description: `“${k.name}” will stop working immediately. Any integration using it will fail. This can’t be undone.`, confirmText: "Revoke" })) toast({ variant: "warning", title: "Key revoked", description: k.name }); }}
+                  >
+                    Revoke key
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden overflow-x-auto md:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -72,7 +104,7 @@ export function ApiKeysManager() {
                   <TableCell><Badge variant={k.status === "active" ? "success" : "muted"}>{k.status}</Badge></TableCell>
                   <TableCell className="text-right">
                     {k.status === "active" && (
-                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => toast({ variant: "warning", title: "Key revoked", description: k.name })}>
+                      <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={async () => { if (await confirm({ title: "Revoke API key?", description: `“${k.name}” will stop working immediately. Any integration using it will fail. This can’t be undone.`, confirmText: "Revoke" })) toast({ variant: "warning", title: "Key revoked", description: k.name }); }}>
                         Revoke
                       </Button>
                     )}
@@ -81,6 +113,7 @@ export function ApiKeysManager() {
               ))}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
 
@@ -109,6 +142,7 @@ export function ApiKeysManager() {
           {/* Delivery log */}
           <div>
             <p className="mb-2 text-sm font-medium">Recent deliveries</p>
+            <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
             <Table>
               <TableHeader>
                 <TableRow><TableHead>Event</TableHead><TableHead>Response</TableHead><TableHead>Status</TableHead><TableHead>Time</TableHead></TableRow>
@@ -126,6 +160,7 @@ export function ApiKeysManager() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -93,8 +93,82 @@ export function ListsTable({ lists }: { lists: EmailList[] }) {
     onError: () => toast({ variant: "error", title: "Could not delete" }),
   });
 
+  const rowActions = (list: EmailList, busy: boolean) => (
+    <DropdownMenu
+      trigger={
+        <Button size="icon" variant="ghost" aria-label="More actions" disabled={busy}>
+          {busy ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-4" />}
+        </Button>
+      }
+    >
+      <DropdownItem onClick={() => router.push(`/verification/lists/${list.id}`)}>
+        <Eye /> View details
+      </DropdownItem>
+      <DropdownItem onClick={() => reprocess.mutate(list.id)}>
+        <RefreshCw /> Re-verify list
+      </DropdownItem>
+      <DropdownSeparator />
+      <DropdownItem onClick={() => { setRenameTarget(list); setRenameValue(list.name); }}>
+        <Pencil /> Rename
+      </DropdownItem>
+      <DropdownSeparator />
+      <DropdownItem destructive onClick={() => setDeleteTarget(list)}>
+        <Trash2 /> Delete
+      </DropdownItem>
+    </DropdownMenu>
+  );
+
   return (
     <>
+      {/* Mobile: stacked cards (a real mobile layout, not a shrunk table). */}
+      <div className="space-y-3 md:hidden">
+        {lists.map((list) => {
+          const s = STATUS_STYLES[list.status];
+          const busy = busyId === list.id;
+          return (
+            <div
+              key={list.id}
+              className="cursor-pointer rounded-xl border bg-card p-4 transition-colors active:bg-muted/40"
+              onClick={() => router.push(`/verification/lists/${list.id}`)}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{list.name}</p>
+                  <p className="text-xs text-muted-foreground">{formatDate(list.createdAt)}</p>
+                </div>
+                <Badge className={cn("shrink-0 border-transparent", s.className)}>{s.label}</Badge>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Unique emails</p>
+                  <p className="font-semibold tabular-nums">{formatNumber(list.uniqueEmails)}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Safe to send</p>
+                  <SafeToSendCell list={list} />
+                </div>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <Progress value={list.progress} className="flex-1" />
+                <span className="text-xs tabular-nums text-muted-foreground">{list.progress}%</span>
+              </div>
+              <div className="mt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <Button size="sm" variant="outline" className="flex-1" onClick={() => router.push(`/verification/lists/${list.id}`)}>
+                  <Eye className="size-4" /> View
+                </Button>
+                <DownloadMenu
+                  list={list}
+                  trigger={<Button size="sm" variant="outline" aria-label="Download"><Download className="size-4" /></Button>}
+                />
+                {rowActions(list, busy)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop / tablet: full table. */}
+      <div className="hidden overflow-x-auto md:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -140,33 +214,7 @@ export function ListsTable({ lists }: { lists: EmailList[] }) {
                         </Button>
                       }
                     />
-                    <DropdownMenu
-                      trigger={
-                        <Button size="icon" variant="ghost" aria-label="More actions" disabled={busy}>
-                          {busy ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-4" />}
-                        </Button>
-                      }
-                    >
-                      <DropdownItem onClick={() => router.push(`/verification/lists/${list.id}`)}>
-                        <Eye /> View details
-                      </DropdownItem>
-                      <DropdownItem onClick={() => reprocess.mutate(list.id)}>
-                        <RefreshCw /> Re-verify list
-                      </DropdownItem>
-                      <DropdownSeparator />
-                      <DropdownItem
-                        onClick={() => {
-                          setRenameTarget(list);
-                          setRenameValue(list.name);
-                        }}
-                      >
-                        <Pencil /> Rename
-                      </DropdownItem>
-                      <DropdownSeparator />
-                      <DropdownItem destructive onClick={() => setDeleteTarget(list)}>
-                        <Trash2 /> Delete
-                      </DropdownItem>
-                    </DropdownMenu>
+                    {rowActions(list, busy)}
                   </div>
                 </TableCell>
               </TableRow>
@@ -174,6 +222,7 @@ export function ListsTable({ lists }: { lists: EmailList[] }) {
           })}
         </TableBody>
       </Table>
+      </div>
 
       {/* Rename dialog */}
       <Dialog open={!!renameTarget} onOpenChange={(o) => !o && setRenameTarget(null)}>

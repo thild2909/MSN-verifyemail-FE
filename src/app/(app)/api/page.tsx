@@ -70,10 +70,13 @@ export default function ApiPage() {
         <CardHeader><CardTitle className="text-base">Endpoints</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           {ENDPOINTS.map((e) => (
-            <div key={e.path} className="flex items-center gap-3 rounded-lg border p-3">
-              <span className={`w-14 rounded-md px-2 py-0.5 text-center text-xs font-bold ${METHOD_COLORS[e.method]}`}>{e.method}</span>
-              <code className="font-mono text-sm">{e.path}</code>
-              <span className="ml-auto hidden text-sm text-muted-foreground sm:block">{e.desc}</span>
+            <div key={e.path} className="rounded-lg border p-3">
+              <div className="flex items-center gap-3">
+                <span className={`w-14 shrink-0 rounded-md px-2 py-0.5 text-center text-xs font-bold ${METHOD_COLORS[e.method]}`}>{e.method}</span>
+                <code className="min-w-0 break-all font-mono text-sm">{e.path}</code>
+                <span className="ml-auto hidden text-sm text-muted-foreground sm:block">{e.desc}</span>
+              </div>
+              <p className="mt-1.5 pl-[4.25rem] text-xs text-muted-foreground sm:hidden">{e.desc}</p>
             </div>
           ))}
           <Link href="/api/docs" className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">

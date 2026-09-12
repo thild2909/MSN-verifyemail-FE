@@ -29,7 +29,9 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
   if (!mounted || !open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    // Bottom-sheet on phones (docked to the bottom edge, slides up), a centred
+    // modal from `sm` up. p-0 on mobile lets the sheet span the full width.
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
       <div
         className="absolute inset-0 bg-black/50 animate-fade-in"
         onClick={() => onOpenChange(false)}
@@ -38,10 +40,14 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
         role="dialog"
         aria-modal="true"
         className={cn(
-          "relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto animate-fade-in rounded-xl border bg-card p-4 shadow-xl sm:p-6",
+          "relative z-10 flex max-h-[92dvh] w-full max-w-lg flex-col overflow-y-auto border bg-card p-4 shadow-xl",
+          "animate-slide-up rounded-t-2xl pb-[calc(1rem+env(safe-area-inset-bottom))]",
+          "sm:max-h-[90vh] sm:animate-fade-in sm:rounded-xl sm:p-6 sm:pb-6",
           className,
         )}
       >
+        {/* Grab handle — a familiar bottom-sheet affordance on touch, hidden on desktop. */}
+        <div className="mx-auto mb-2 h-1 w-10 shrink-0 rounded-full bg-border sm:hidden" aria-hidden />
         <button
           onClick={() => onOpenChange(false)}
           className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

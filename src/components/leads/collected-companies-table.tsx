@@ -189,14 +189,14 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
         <CompanyFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_COMPANY_FILTERS)} />
       </MobileFilterDrawer>
       <div className="relative flex min-w-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-        <div className="relative w-full min-w-[200px] sm:w-auto sm:flex-1">
+      <div className="flex items-center gap-2 border-b px-4 py-2">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search company or location…" className="h-9 pl-9" />
         </div>
-        <span className="text-sm text-muted-foreground"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> companies</span>
-        <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="ml-auto h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-          <SlidersHorizontal className="size-4" /> Filters{filtersActive > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{filtersActive}</span>}
+        <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> companies</span>
+        <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9 shrink-0 sm:ml-auto" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
+          <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{filtersActive}</span>}
         </Button>
       </div>
 
@@ -206,7 +206,42 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
         ) : total === 0 ? (
           <EmptyState icon={Inbox} title="No companies match" description="Try clearing the search or filter." className="m-6" />
         ) : (
-          <div className={cn("scrollbar-thin h-full overflow-auto transition-opacity", isPlaceholderData && "opacity-60")}>
+          <>
+          {/* Mobile: company cards */}
+          <div className={cn("scrollbar-thin h-full space-y-2 overflow-auto p-3 transition-opacity md:hidden", isPlaceholderData && "opacity-60")}>
+            {rows.map((c) => {
+              const st = COLLECT_STATUS_META[c.status];
+              const selected = rowChecked(c.id);
+              return (
+                <div key={c.id} onClick={() => onOpenCompany(c)} className={cn("rounded-xl border p-3 transition-colors active:bg-muted/40", selected && "border-primary/40 bg-primary/[0.04]")}>
+                  <div className="flex items-start gap-2.5">
+                    <div className="pt-0.5" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(c.id)} /></div>
+                    <CompanyLogo domain={c.domainGuess} text={c.logoText || c.inputName.slice(0, 2).toUpperCase()} className="size-9 shrink-0 text-[11px]" />
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center gap-1.5 truncate font-medium">{c.inputName}{c.llmVerification && <LlmBadge v={c.llmVerification} />}</p>
+                      <p className="truncate text-xs text-muted-foreground">{c.inputLocation}{c.domainGuess ? ` · ${c.domainGuess}` : ""}</p>
+                    </div>
+                    {c.status === "collecting"
+                      ? <Loader2 className="size-3.5 shrink-0 animate-spin text-[hsl(var(--risky))]" />
+                      : <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", st.className)}>{st.label}</span>}
+                  </div>
+                  <div className="mt-2 space-y-1 pl-[26px] text-xs">
+                    {(c.contactEmail?.value != null || c.emailVerification) && (
+                      <div className="flex min-w-0 items-center gap-1.5"><Sourced field={c.contactEmail} />{c.emailVerification && <VerificationBadge ev={c.emailVerification} />}</div>
+                    )}
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
+                      {c.employees?.value != null && <span>Emp <Sourced field={c.employees} /></span>}
+                      {c.industry?.value != null && <span className="min-w-0"><Sourced field={c.industry} /></span>}
+                      {c.website?.value != null && <span className="min-w-0"><Sourced field={c.website} /></span>}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop: table */}
+          <div className={cn("scrollbar-thin hidden h-full overflow-auto transition-opacity md:block", isPlaceholderData && "opacity-60")}>
             <table className="w-full border-collapse text-[13px]">
               <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b text-left text-muted-foreground">
@@ -282,6 +317,7 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 

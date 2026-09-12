@@ -256,6 +256,49 @@ export function FinderPanel() {
                   {STATE_UI[finderState].label}
                 </div>
               )}
+              {/* Mobile: result cards */}
+              <div className="space-y-2 px-4 pb-4 md:hidden">
+                {!search.isPending && results.map((r) => (
+                  <div key={r.id} className="rounded-xl border p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        {mode === "domain" && r.name && <p className="truncate text-sm font-medium">{r.name}</p>}
+                        {mode === "domain" && r.jobTitle && <p className="truncate text-xs text-muted-foreground">{r.jobTitle}</p>}
+                        <p className={cn("mt-0.5 break-all text-sm font-medium", r.state && !scoreIsMeaningful(r.state) && "text-muted-foreground")}>{r.email}</p>
+                        {mode === "person" && r.bestGuess && (
+                          <span className="mt-1 inline-block rounded-full bg-[hsl(var(--valid))]/12 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[hsl(var(--valid))]">Best guess</span>
+                        )}
+                      </div>
+                      <div className="shrink-0">
+                        {verifyingIds.has(r.id) ? (
+                          <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Spinner className="size-3 animate-spin" /> Verifying…</span>
+                        ) : r.state ? (
+                          <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium", STATE_UI[r.state].className)}>
+                            {React.createElement(STATE_UI[r.state].icon, { className: "size-3" })}
+                            {STATE_UI[r.state].chip}
+                          </span>
+                        ) : r.status === "unverified" ? (
+                          <span className="text-xs text-muted-foreground">Unverified</span>
+                        ) : (
+                          <StatusBadge status={r.status} />
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      {r.state && scoreIsMeaningful(r.state) ? <ScoreBar value={r.score} /> : <span className="text-xs text-muted-foreground">No score</span>}
+                      <div className="flex gap-1">
+                        <Button size="icon" variant="ghost" onClick={() => copy(r.email)} aria-label="Copy"><Copy className="size-4" /></Button>
+                        <Button size="sm" variant="outline" disabled={verifyingIds.has(r.id)} onClick={() => verifyRow(r)}>
+                          {verifyingIds.has(r.id) ? <Spinner className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} Verify
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop: table */}
+              <div className="hidden md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -321,6 +364,7 @@ export function FinderPanel() {
                       ))}
                 </TableBody>
               </Table>
+              </div>
               </>
               )}
             </CardContent>

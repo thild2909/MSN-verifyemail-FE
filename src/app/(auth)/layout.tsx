@@ -2,7 +2,7 @@ import { MailCheck, ShieldCheck, Zap, Search } from "lucide-react";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-[100dvh]">
       {/* Brand panel */}
       <div className="relative hidden w-1/2 flex-col justify-between overflow-hidden bg-sidebar p-12 text-sidebar-foreground lg:flex">
         <div className="flex items-center gap-2.5">
@@ -43,8 +43,17 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </div>
 
       {/* Form panel */}
-      <div className="flex w-full items-center justify-center bg-background px-6 py-12 lg:w-1/2">
-        <div className="w-full max-w-sm">{children}</div>
+      <div className="flex w-full items-center justify-center bg-background px-6 py-10 pb-safe pt-safe lg:w-1/2 lg:py-12">
+        <div className="w-full max-w-sm">
+          {/* Compact brand for mobile, where the brand panel is hidden. */}
+          <div className="mb-8 flex items-center gap-2.5 lg:hidden">
+            <div className="flex size-10 items-center justify-center rounded-lg bg-sidebar">
+              <MailCheck className="size-6 text-white" />
+            </div>
+            <span className="text-lg font-bold">Verifly</span>
+          </div>
+          {children}
+        </div>
       </div>
     </div>
   );

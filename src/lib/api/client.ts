@@ -489,7 +489,7 @@ export async function getPeopleJob(id: string): Promise<PeopleCollectJob | null>
 }
 
 export type CreatePeopleInput =
-  | { name: string; seeds: PeopleSeedInput[] }
+  | { name: string; seeds: PeopleSeedInput[]; apolloUrl?: string }
   | { name: string; fromCompanyJob: string; companyIds?: string[]; allMatching?: boolean; search?: string; filter?: string };
 
 export async function createPeopleJob(input: CreatePeopleInput): Promise<{ job: PeopleCollectJob; truncated: number }> {

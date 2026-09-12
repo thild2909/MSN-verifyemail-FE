@@ -81,8 +81,28 @@ export function ReputationMonitor() {
         </div>
       )}
 
-      {/* Per-IP table */}
-      <Card className="overflow-hidden">
+      {/* Per-IP — mobile cards */}
+      <div className="space-y-2 md:hidden">
+        {isLoading && <Card className="p-6 text-center text-sm text-muted-foreground">Testing sending IPs…</Card>}
+        {isError && !isLoading && <Card className="p-6 text-center text-sm text-[hsl(var(--invalid))]">Could not load reputation status.</Card>}
+        {!isLoading && s?.ips.length === 0 && <Card className="p-6 text-center text-sm text-muted-foreground">No public sending IPs detected on this host.</Card>}
+        {s?.ips.map((r) => (
+          <Card key={r.ip} className="p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-xs">{r.ip}</span>
+              {statusBadge(r)}
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>Code <span className="tabular-nums text-foreground">{r.code ?? "—"}</span></span>
+              <span>{fmtTime(r.checkedAt)}</span>
+            </div>
+            {r.message && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={r.message}>{r.message}</p>}
+          </Card>
+        ))}
+      </div>
+
+      {/* Per-IP table — desktop */}
+      <Card className="hidden overflow-hidden md:block">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="border-b bg-muted/40 text-left text-xs text-muted-foreground">

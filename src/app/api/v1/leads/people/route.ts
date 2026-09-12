@@ -57,7 +57,7 @@ const seedSchema = z.object({
 const createSchema = z.union([
   // Accept large uploads; the store dedups + truncates to MAX_PEOPLE_SEEDS and
   // reports `truncated`, so a big file never hard-fails here.
-  z.object({ name: z.string().trim().min(1).max(120), seeds: z.array(seedSchema).min(1).max(100000) }),
+  z.object({ name: z.string().trim().min(1).max(120), seeds: z.array(seedSchema).min(1).max(100000), apolloUrl: z.string().trim().max(2000).optional() }),
   z.object({
     name: z.string().trim().min(1).max(120),
     fromCompanyJob: z.string().trim().min(1),
@@ -124,7 +124,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const { job, truncated } = store.createPeopleJob({ name: parsed.data.name, seeds });
+  const apolloUrl = "apolloUrl" in parsed.data ? parsed.data.apolloUrl : undefined;
+  const { job, truncated } = store.createPeopleJob({ name: parsed.data.name, seeds, apolloUrl });
   startPeopleJob(job.id);
   return NextResponse.json({ success: true, data: job, truncated }, { status: 201 });
 }

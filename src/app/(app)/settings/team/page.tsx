@@ -60,6 +60,53 @@ export default function UsersSettingsPage() {
               <Loader2 className="size-5 animate-spin" />
             </div>
           ) : (
+            <>
+            {/* Mobile: user cards */}
+            <div className="space-y-3 md:hidden">
+              {(users ?? []).map((u) => {
+                const isSelf = u.id === me?.id;
+                return (
+                  <div key={u.id} className="rounded-xl border p-3">
+                    <div className="flex items-start gap-3">
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold">
+                        {initials(u.name || u.email)}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium">
+                          {u.name || "—"}
+                          {isSelf && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                      </div>
+                      <DropdownMenu
+                        trigger={
+                          <button className="-mr-1 rounded-lg p-1.5 text-muted-foreground hover:bg-muted" aria-label="Actions">
+                            <MoreHorizontal className="size-4" />
+                          </button>
+                        }
+                      >
+                        <DropdownItem onClick={() => setEditUser(u)}>Edit</DropdownItem>
+                        <DropdownSeparator />
+                        <DropdownItem destructive disabled={isSelf} onClick={() => !isSelf && setDeleteTarget(u)}>
+                          Delete
+                        </DropdownItem>
+                      </DropdownMenu>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Badge variant={u.role === "admin" ? "default" : "muted"}>{u.role}</Badge>
+                      <Badge variant={u.isActive ? "success" : "warning"}>{u.isActive ? "active" : "inactive"}</Badge>
+                      <span className="ml-auto text-xs text-muted-foreground">{fmtDate(u.createdAt)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+              {(users ?? []).length === 0 && (
+                <p className="py-8 text-center text-sm text-muted-foreground">No users yet.</p>
+              )}
+            </div>
+
+            {/* Desktop: table */}
+            <div className="hidden overflow-x-auto md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -129,6 +176,8 @@ export default function UsersSettingsPage() {
                 )}
               </TableBody>
             </Table>
+            </div>
+            </>
           )}
         </CardContent>
       </Card>

@@ -112,9 +112,11 @@ export default function ApiDocsPage() {
 }`}</Code>
           <div className="divide-y">
             {ERRORS.map(([code, http, desc]) => (
-              <div key={code} className="flex items-center gap-4 py-2.5 text-sm">
-                <code className="w-52 shrink-0 font-mono text-primary">{code}</code>
-                <span className="w-10 shrink-0 tabular-nums text-muted-foreground">{http}</span>
+              <div key={code} className="flex flex-col gap-0.5 py-2.5 text-sm sm:flex-row sm:items-center sm:gap-4">
+                <div className="flex items-center gap-3">
+                  <code className="font-mono text-primary sm:w-52 sm:shrink-0">{code}</code>
+                  <span className="tabular-nums text-muted-foreground sm:w-10 sm:shrink-0">{http}</span>
+                </div>
                 <span className="text-muted-foreground">{desc}</span>
               </div>
             ))}

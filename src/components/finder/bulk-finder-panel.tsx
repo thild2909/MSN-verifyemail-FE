@@ -304,7 +304,38 @@ export function BulkFinderPanel() {
               </div>
             )}
 
-            <div className="rounded-xl border">
+            {/* Mobile: result cards */}
+            <div className="space-y-2 md:hidden">
+              {rows.map((r) => (
+                <div key={r.id} className="rounded-xl border p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{r.name}</p>
+                      <p className={cn("break-all text-xs", scoreIsMeaningful(r.state) ? "text-foreground" : "text-muted-foreground")}>{r.email}</p>
+                      <p className="truncate text-xs text-muted-foreground">{r.domain}</p>
+                    </div>
+                    <span className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium", FINDER_STATE_META[r.state].className)}>
+                      {React.createElement(FINDER_STATE_META[r.state].icon, { className: "size-3" })}
+                      {FINDER_STATE_META[r.state].chip}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    {scoreIsMeaningful(r.state) ? <ScoreBar value={r.score} /> : <span className="text-xs text-muted-foreground">No score</span>}
+                    <div className="flex gap-1">
+                      <Button size="icon" variant="ghost" aria-label="Copy" onClick={() => { navigator.clipboard?.writeText(r.email); toast({ variant: "success", title: "Copied", description: r.email }); }}>
+                        <Copy className="size-4" />
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={verifyingIds.has(r.id)} onClick={() => verifyRow(r)}>
+                        {verifyingIds.has(r.id) ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />} Verify
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: table */}
+            <div className="hidden rounded-xl border md:block">
               <Table>
                 <TableHeader>
                   <TableRow>

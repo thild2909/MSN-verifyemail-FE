@@ -2,13 +2,15 @@
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Upload, Building2, Trash2, Loader2, Globe, Mail, Phone, Linkedin, RotateCw, AlertTriangle, Search, Landmark, Database, MailCheck, Sparkles,
+  Upload, Building2, Trash2, Loader2, Globe, Mail, Phone, Linkedin, RotateCw, AlertTriangle, Search, Landmark, Database, MailCheck, Sparkles, MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
 import { getCollectJobs, getCollectJob, deleteCollectJob, retryFailedCollect, verifyCollectedEmails, createPeopleJob, llmVerifyCompanies, ApiError } from "@/lib/api/client";
 import { CompanyImportFlow } from "./company-import-flow";
@@ -20,6 +22,7 @@ import type { CollectedCompany, CompanyCollectJob } from "@/lib/leads/collect-ty
 export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: string) => void }) {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [importOpen, setImportOpen] = React.useState(false);
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [drawer, setDrawer] = React.useState<CollectedCompany | null>(null);
@@ -156,11 +159,29 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Tab toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 md:py-2.5">
-        <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 w-full sm:w-56">
-          {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
-        </Select>
-        {active && <span className="text-xs text-muted-foreground">{formatNumber(active.total)} companies</span>}
-        <div className="ml-auto flex max-w-full items-center gap-2 overflow-x-auto scrollbar-thin [&>*]:shrink-0 sm:overflow-visible">
+        <div className="flex w-full items-center gap-2 sm:contents">
+          <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 min-w-0 flex-1 sm:w-56 sm:flex-none">
+            {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
+          </Select>
+          {/* Mobile-only compact actions */}
+          <div className="flex items-center gap-1.5 sm:hidden">
+            <Button size="icon" className="size-9 shrink-0" onClick={() => setImportOpen(true)} aria-label="Import companies"><Upload className="size-4" /></Button>
+            <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="size-9 shrink-0" aria-label="Actions"><MoreHorizontal className="size-4" /></Button>}>
+              {active && <DropdownItem disabled={verifying} onClick={() => verify.mutate(active.id)}><MailCheck /> Verify emails</DropdownItem>}
+              {active && <DropdownItem disabled={llmVerify.isPending} onClick={() => llmVerify.mutate(active.id)}><Sparkles /> AI verify</DropdownItem>}
+              {active && <DropdownItem disabled={retryFailed.isPending || active.status === "collecting"} onClick={() => retryFailed.mutate(active.id)}><RotateCw /> Retry failed</DropdownItem>}
+              {active && (
+                <>
+                  <DropdownSeparator />
+                  <DropdownItem destructive onClick={async () => { if (await confirm({ title: "Delete collection?", description: `“${active.name}” and its ${formatNumber(active.total)} companies will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }}><Trash2 /> Delete collection</DropdownItem>
+                </>
+              )}
+            </DropdownMenu>
+          </div>
+        </div>
+        {active && <span className="hidden text-xs text-muted-foreground sm:inline">{formatNumber(active.total)} companies</span>}
+        {/* Desktop inline actions */}
+        <div className="ml-auto hidden items-center gap-2 sm:flex">
           {active && (
             <Button size="sm" variant="outline" onClick={() => verify.mutate(active.id)} disabled={verifying}>
               {verifying ? <Loader2 className="size-4 animate-spin" /> : <MailCheck className="size-4" />}
@@ -180,7 +201,7 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
               Retry failed
             </Button>
           )}
-          {active && <button onClick={() => remove.mutate(active.id)} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete collection">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
+          {active && <button onClick={async () => { if (await confirm({ title: "Delete collection?", description: `“${active.name}” and its ${formatNumber(active.total)} companies will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete collection">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
         </div>
       </div>
 

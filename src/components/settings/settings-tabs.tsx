@@ -18,7 +18,7 @@ export function SettingsTabs() {
   const tabs = TABS.filter((t) => !t.adminOnly || user?.role === "admin");
 
   return (
-    <div className="flex gap-1 border-b">
+    <div className="flex gap-1 overflow-x-auto border-b no-scrollbar">
       {tabs.map((t) => {
         const active = pathname === t.href;
         return (
@@ -26,7 +26,7 @@ export function SettingsTabs() {
             key={t.href}
             href={t.href}
             className={cn(
-              "-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors",
+              "-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors",
               active ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >

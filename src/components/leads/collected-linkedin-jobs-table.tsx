@@ -197,14 +197,14 @@ export function CollectedLinkedInJobsTable({
       </MobileFilterDrawer>
 
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-          <div className="relative w-full min-w-[200px] sm:w-auto sm:flex-1">
+        <div className="flex items-center gap-2 border-b px-4 py-2">
+          <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search role, company or location…" className="h-9 pl-9" />
           </div>
-          <span className="text-sm text-muted-foreground"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> roles</span>
-          <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="ml-auto h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-            <SlidersHorizontal className="size-4" /> Filters{activeFilterCount > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{activeFilterCount}</span>}
+          <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> roles</span>
+          <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9 shrink-0 sm:ml-auto" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
+            <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{activeFilterCount > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{activeFilterCount}</span>}
           </Button>
         </div>
 
@@ -219,7 +219,40 @@ export function CollectedLinkedInJobsTable({
               className="m-6"
             />
           ) : (
-            <div className={cn("scrollbar-thin h-full overflow-auto transition-opacity", isPlaceholderData && "opacity-60")}>
+            <>
+            <div className={cn("scrollbar-thin h-full space-y-2 overflow-auto p-3 transition-opacity md:hidden", isPlaceholderData && "opacity-60")}>
+              {rows.map((j) => {
+                const selected = rowChecked(j.id);
+                return (
+                  <div key={j.id} className={cn("rounded-xl border p-3", selected && "border-primary/40 bg-primary/[0.04]")}>
+                    <div className="flex items-start gap-2.5">
+                      <div className="pt-0.5" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(j.id)} /></div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <a href={j.jobUrl || undefined} target="_blank" rel="noreferrer" className="line-clamp-2 font-medium hover:text-primary hover:underline">{j.title}</a>
+                          {j.qualified && <CheckCircle2 className="size-3.5 shrink-0 text-[hsl(var(--valid))]" aria-label="Qualified" />}
+                        </div>
+                        <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <CompanyLogo text={j.companyLogoText} seed={j.company} />
+                          <span className="min-w-0 truncate">{j.company}</span>
+                        </div>
+                      </div>
+                      <div className="shrink-0"><ScoreBar value={j.fitScore} /></div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-[26px] text-xs text-muted-foreground">
+                      {j.remote && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">Remote</span>}
+                      {j.seniorityLevel && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{j.seniorityLevel}</span>}
+                      {j.primaryLanguage && <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">{j.primaryLanguage}</span>}
+                      {j.companyEmployeeRange && <span className="inline-flex items-center gap-1"><Building2 className="size-3 opacity-60" />{j.companyEmployeeRange}</span>}
+                      {j.location && <span className="inline-flex items-center gap-1"><MapPin className="size-3 opacity-60" />{j.location}</span>}
+                      <span>{postedLabel(j)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className={cn("scrollbar-thin hidden h-full overflow-auto transition-opacity md:block", isPlaceholderData && "opacity-60")}>
               <table className="w-full border-collapse text-[13px]">
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b text-left font-medium text-muted-foreground">
@@ -297,6 +330,7 @@ export function CollectedLinkedInJobsTable({
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
 

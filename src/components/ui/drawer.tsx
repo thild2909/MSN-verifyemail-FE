@@ -36,18 +36,19 @@ export function Drawer({ open, onOpenChange, children, className }: DrawerProps)
         role="dialog"
         aria-modal="true"
         className={cn(
-          "absolute right-0 top-0 flex h-full w-full max-w-md animate-slide-in-right flex-col border-l bg-card shadow-2xl",
+          "absolute right-0 top-0 flex h-full w-full max-w-md animate-slide-in-right flex-col border-l bg-card shadow-2xl pt-safe",
           className,
         )}
       >
         <button
           onClick={() => onOpenChange(false)}
-          className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="absolute right-4 z-10 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          style={{ top: "calc(env(safe-area-inset-top) + 0.75rem)" }}
           aria-label="Close"
         >
           <X className="size-4" />
         </button>
-        <div className="scrollbar-thin flex-1 overflow-y-auto">{children}</div>
+        <div className="scrollbar-thin flex-1 overflow-y-auto pb-safe">{children}</div>
       </div>
     </div>,
     document.body,

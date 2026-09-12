@@ -13,7 +13,7 @@ const TABS: { key: LeadsTab; label: string; icon: React.ElementType }[] = [
 
 export function LeadsTabs({ active, onChange }: { active: LeadsTab; onChange: (t: LeadsTab) => void }) {
   return (
-    <div className="flex items-center gap-1 rounded-xl border bg-card p-1">
+    <div className="flex items-center gap-1 overflow-x-auto rounded-xl border bg-card p-1 no-scrollbar">
       {TABS.map((t) => {
         const on = active === t.key;
         return (
@@ -21,7 +21,7 @@ export function LeadsTabs({ active, onChange }: { active: LeadsTab; onChange: (t
             key={t.key}
             onClick={() => onChange(t.key)}
             className={cn(
-              "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors sm:px-4",
+              "inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors sm:px-4",
               on ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >

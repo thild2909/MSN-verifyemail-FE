@@ -77,6 +77,7 @@ function bestColumn(cols: string[], rows: string[][], re: RegExp, exclude: strin
 export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (jobId: string) => void }) {
   const [parsed, setParsed] = React.useState<Parsed | null>(null);
   const [name, setName] = React.useState("");
+  const [apolloUrl, setApolloUrl] = React.useState("");
   const [map, setMap] = React.useState<Mapping>({ firstName: "", lastName: "", company: "", city: "", state: "", country: "", ...EMPTY_OPT });
   const [showOptional, setShowOptional] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
@@ -85,7 +86,7 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
   const [matching, setMatching] = React.useState(false);
   const { toast } = useToast();
 
-  const reset = () => { setParsed(null); setName(""); setMap({ firstName: "", lastName: "", company: "", city: "", state: "", country: "", ...EMPTY_OPT }); setShowOptional(false); setCreating(false); setMatches({}); };
+  const reset = () => { setParsed(null); setName(""); setApolloUrl(""); setMap({ firstName: "", lastName: "", company: "", city: "", state: "", country: "", ...EMPTY_OPT }); setShowOptional(false); setCreating(false); setMatches({}); };
   const close = () => { onOpenChange(false); setTimeout(reset, 200); };
 
   const onFile = (file: File) => {
@@ -200,6 +201,7 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
     try {
       const { job, truncated } = await createPeopleJob({
         name: name.trim() || parsed.fileName,
+        apolloUrl: apolloUrl.trim() || undefined,
         seeds: built.map((r, i) => ({
           // A saved-list hit fills the row straight from its snapshot — no crawl.
           prefill: (matches[String(i)]?.data as unknown as CollectedPerson | undefined) ?? undefined,
@@ -229,6 +231,9 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
   };
 
   const missingMap = (!map.firstName && !map.lastName) || !map.company;
+  const apolloTrimmed = apolloUrl.trim();
+  const apolloValid = /^https?:\/\/\S+$/i.test(apolloTrimmed);
+  const apolloError = apolloTrimmed.length > 0 && !apolloValid;
 
   return (
     <Dialog open={open} onOpenChange={close} className="max-w-xl">
@@ -238,6 +243,19 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
           Upload a CSV with <span className="font-medium text-foreground">First Name</span>, <span className="font-medium text-foreground">Last Name</span> and <span className="font-medium text-foreground">Company Name</span> (required). Map any extra columns (title, LinkedIn, seniority, phone, company info) to <span className="font-medium text-foreground">fill the table directly</span>. We still find each person's verified work email.
         </DialogDescription>
       </DialogHeader>
+
+      <div className="space-y-1.5">
+        <Label>Apollo list URL <span className="text-[hsl(var(--invalid))]">*</span></Label>
+        <Input
+          type="url"
+          value={apolloUrl}
+          onChange={(e) => setApolloUrl(e.target.value)}
+          placeholder="https://app.apollo.io/#/people?..."
+        />
+        {apolloError
+          ? <p className="text-xs text-[hsl(var(--invalid))]">Enter a valid URL starting with http:// or https://</p>
+          : <p className="text-[11px] text-muted-foreground">Saved with this import and shown on the search afterwards.</p>}
+      </div>
 
       {!parsed ? (
         <div className="space-y-3">
@@ -291,7 +309,7 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
 
       <DialogFooter>
         <Button variant="ghost" onClick={close}>Cancel</Button>
-        <Button disabled={!parsed || built.length === 0 || missingMap || creating} onClick={create}>
+        <Button disabled={!parsed || built.length === 0 || missingMap || !apolloValid || creating} onClick={create}>
           {creating ? <Loader2 className="size-4 animate-spin" /> : null} Import {built.length > 0 ? formatNumber(built.length) : ""} people <ArrowRight className="size-4" />
         </Button>
       </DialogFooter>

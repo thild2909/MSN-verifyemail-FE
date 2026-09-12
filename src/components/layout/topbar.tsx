@@ -1,13 +1,11 @@
 "use client";
 import * as React from "react";
-import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Menu, Search, Moon, Sun, X } from "lucide-react";
-import { SidebarContent } from "./sidebar";
+import { Search, Moon, Sun, MailCheck } from "lucide-react";
 import { NotificationBell } from "./notification-bell";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { getMe, logout } from "@/lib/api/client";
-import { cn, initials } from "@/lib/utils";
+import { initials } from "@/lib/utils";
 
 function useDarkMode() {
   const [dark, setDark] = React.useState(false);
@@ -28,10 +26,7 @@ function useDarkMode() {
 }
 
 export function Topbar() {
-  const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [mounted, setMounted] = React.useState(false);
   const { dark, toggle } = useDarkMode();
-  React.useEffect(() => setMounted(true), []);
 
   const { data: user } = useQuery({ queryKey: ["me"], queryFn: getMe });
   const displayName = user?.name || "Account";
@@ -43,16 +38,16 @@ export function Topbar() {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b bg-card/80 px-4 backdrop-blur lg:px-6">
-      <button
-        onClick={() => setMobileOpen(true)}
-        className="rounded-lg p-2 text-muted-foreground hover:bg-muted lg:hidden"
-        aria-label="Open menu"
-      >
-        <Menu className="size-5" />
-      </button>
+    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-card/80 px-3 pt-safe backdrop-blur sm:px-4 lg:h-16 lg:px-6">
+      {/* Mobile brand (the sidebar — which carries the brand on desktop — is hidden here) */}
+      <div className="flex items-center gap-2 lg:hidden">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar">
+          <MailCheck className="size-[18px] text-white" />
+        </div>
+        <span className="text-base font-bold tracking-tight">Verifly</span>
+      </div>
 
-      {/* Search */}
+      {/* Search (from sm up — dropped on the smallest screens to save space) */}
       <div className="relative hidden max-w-md flex-1 sm:block">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
@@ -61,7 +56,7 @@ export function Topbar() {
         />
       </div>
 
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex items-center gap-0.5 sm:gap-1">
         <button onClick={toggle} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" aria-label="Toggle theme">
           {dark ? <Sun className="size-5" /> : <Moon className="size-5" />}
         </button>
@@ -69,7 +64,7 @@ export function Topbar() {
 
         <DropdownMenu
           trigger={
-            <button className="ml-1 flex items-center gap-2 rounded-lg py-1 pl-1 pr-2 hover:bg-muted">
+            <button className="ml-0.5 flex items-center gap-2 rounded-lg py-1 pl-1 pr-1 hover:bg-muted sm:pr-2" aria-label="Account menu">
               <span className="flex size-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
                 {initials(displayName)}
               </span>
@@ -93,26 +88,6 @@ export function Topbar() {
           </DropdownItem>
         </DropdownMenu>
       </div>
-
-      {/* Mobile sidebar drawer */}
-      {mounted &&
-        mobileOpen &&
-        createPortal(
-          <div className="fixed inset-0 z-50 lg:hidden">
-            <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={() => setMobileOpen(false)} />
-            <div className={cn("absolute inset-y-0 left-0 w-64 animate-slide-in-right")}>
-              <SidebarContent onNavigate={() => setMobileOpen(false)} />
-              <button
-                onClick={() => setMobileOpen(false)}
-                className="absolute -right-10 top-4 rounded-lg bg-card p-2 shadow"
-                aria-label="Close menu"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-          </div>,
-          document.body,
-        )}
     </header>
   );
 }

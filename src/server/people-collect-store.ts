@@ -313,6 +313,7 @@ export function getPeople(jobId: string, query: PeopleQuery = {}): PeoplePage {
 export interface CreatePeopleJobInput {
   name: string;
   seeds: PeopleSeedInput[];
+  apolloUrl?: string;
 }
 
 export function createPeopleJob(input: CreatePeopleJobInput): { job: PeopleCollectJob; truncated: number } {
@@ -340,6 +341,7 @@ export function createPeopleJob(input: CreatePeopleJobInput): { job: PeopleColle
     verifyingPersonIds: [],
     totalCompanies: capped.length, processedCompanies: 0, progress: 0,
     summary: emptySummary(capped.length), createdAt: now,
+    ...(input.apolloUrl?.trim() ? { apolloUrl: input.apolloUrl.trim() } : {}),
   };
   const s = store();
   s.seeds[id] = capped.map((seed) => ({ ...seed, status: "pending", peopleFound: 0 }));

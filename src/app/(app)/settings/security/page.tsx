@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { getSessions, revokeSession, revokeOtherSessions } from "@/lib/api/client";
 
 function timeAgo(iso: string): string {
@@ -24,6 +25,7 @@ function timeAgo(iso: string): string {
 export default function SecuritySettingsPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [twoFa, setTwoFa] = React.useState(true);
 
   const { data: sessions, isLoading } = useQuery({ queryKey: ["sessions"], queryFn: getSessions });
@@ -89,7 +91,7 @@ export default function SecuritySettingsPage() {
             <CardDescription>Devices currently signed in to your account.</CardDescription>
           </div>
           {otherCount > 0 && (
-            <Button variant="outline" size="sm" disabled={revokeOthers.isPending} onClick={() => revokeOthers.mutate()}>
+            <Button variant="outline" size="sm" disabled={revokeOthers.isPending} onClick={async () => { if (await confirm({ title: "Sign out other devices?", description: "All other sessions will be signed out immediately. This device stays signed in.", confirmText: "Sign out" })) revokeOthers.mutate(); }}>
               {revokeOthers.isPending && <Loader2 className="size-4 animate-spin" />}
               Sign out other devices
             </Button>
@@ -124,7 +126,7 @@ export default function SecuritySettingsPage() {
                       size="sm"
                       className="text-destructive hover:text-destructive"
                       disabled={revokeOne.isPending}
-                      onClick={() => revokeOne.mutate(s.id)}
+                      onClick={async () => { if (await confirm({ title: "Revoke this session?", description: `${s.device} will be signed out immediately.`, confirmText: "Revoke" })) revokeOne.mutate(s.id); }}
                     >
                       Revoke
                     </Button>

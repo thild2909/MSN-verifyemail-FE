@@ -1,12 +1,14 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Radar, Trash2, Loader2, Briefcase, Building2, Ban, Layers, RotateCw, CheckCircle2, Sparkles, Shuffle } from "lucide-react";
+import { Radar, Trash2, Loader2, Briefcase, Building2, Ban, Layers, RotateCw, CheckCircle2, Sparkles, Shuffle, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
+import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
 import {
   getLinkedInSearches, getLinkedInSearch, deleteLinkedInSearch, qualifyLinkedInCompanies,
@@ -21,6 +23,7 @@ import { StatsBar } from "./stats-bar";
 export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: string) => void }) {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const [filters, setFilters] = React.useState<LinkedInJobFilters>(DEFAULT_LINKEDIN_FILTERS);
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [crawlOpen, setCrawlOpen] = React.useState(false);
@@ -127,11 +130,29 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 md:py-2.5">
-        <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 w-full sm:w-64">
-          {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
-        </Select>
-        {active && <span className="text-xs text-muted-foreground">{formatNumber(active.summary.qualified)} qualified · {formatNumber(active.summary.jobs)} roles</span>}
-        <div className="ml-auto flex max-w-full items-center gap-2 overflow-x-auto scrollbar-thin [&>*]:shrink-0 sm:overflow-visible">
+        <div className="flex w-full items-center gap-2 sm:contents">
+          <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 min-w-0 flex-1 sm:w-64 sm:flex-none">
+            {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
+          </Select>
+          {/* Mobile-only compact actions */}
+          <div className="flex items-center gap-1.5 sm:hidden">
+            <Button size="icon" className="size-9 shrink-0" onClick={() => setCrawlOpen(true)} aria-label="New scrape"><Radar className="size-4" /></Button>
+            <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="size-9 shrink-0" aria-label="Actions"><MoreHorizontal className="size-4" /></Button>}>
+              {canQualify && <DropdownItem disabled={qualify.isPending} onClick={() => qualify.mutate(active!.id)}><Sparkles /> Qualify companies</DropdownItem>}
+              {active && retryable > 0 && !live && <DropdownItem disabled={retry.isPending} onClick={() => retry.mutate(active.id)}><RotateCw /> Retry blocked ({retryable})</DropdownItem>}
+              <DropdownItem onClick={() => setProxyOpen(true)}><Shuffle /> Proxy</DropdownItem>
+              {active && (
+                <>
+                  <DropdownSeparator />
+                  <DropdownItem destructive onClick={async () => { if (await confirm({ title: "Delete scrape?", description: `“${active.name}” and its ${formatNumber(active.summary.jobs)} roles will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }}><Trash2 /> Delete scrape</DropdownItem>
+                </>
+              )}
+            </DropdownMenu>
+          </div>
+        </div>
+        {active && <span className="hidden text-xs text-muted-foreground sm:inline">{formatNumber(active.summary.qualified)} qualified · {formatNumber(active.summary.jobs)} roles</span>}
+        {/* Desktop inline actions */}
+        <div className="ml-auto hidden items-center gap-2 sm:flex">
           {canQualify && (
             <Button size="sm" variant="outline" onClick={() => qualify.mutate(active!.id)} disabled={qualify.isPending}>
               {qualify.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Qualify companies
@@ -146,7 +167,7 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
           )}
           <Button size="sm" variant="outline" onClick={() => setProxyOpen(true)}><Shuffle className="size-4" /> Proxy</Button>
           <Button size="sm" onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> New scrape</Button>
-          {active && <button onClick={() => remove.mutate(active.id)} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete scrape">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
+          {active && <button onClick={async () => { if (await confirm({ title: "Delete scrape?", description: `“${active.name}” and its ${formatNumber(active.summary.jobs)} roles will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete scrape">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
         </div>
       </div>
 

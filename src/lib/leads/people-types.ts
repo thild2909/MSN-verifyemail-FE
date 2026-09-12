@@ -140,6 +140,8 @@ export interface PeopleCollectJob {
   summary: PeopleSummary;
   createdAt: string;
   completedAt?: string;
+  /** Source Apollo list URL entered at import time (People CSV import). */
+  apolloUrl?: string;
 }
 
 /** Faceted filter state for the People table sidebar. */

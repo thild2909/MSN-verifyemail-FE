@@ -102,6 +102,27 @@ export default function BillingPage() {
       <Card>
         <CardHeader><CardTitle className="text-base">Credit history</CardTitle></CardHeader>
         <CardContent>
+          {/* Mobile: transaction cards */}
+          <div className="space-y-2 md:hidden">
+            {(txns ?? []).map((t) => (
+              <div key={t.id} className="rounded-xl border p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 flex-1 font-medium">{t.label}</p>
+                  <span className={cn("shrink-0 font-semibold tabular-nums", t.credits < 0 ? "text-[hsl(var(--invalid))]" : "text-[hsl(var(--valid))]")}>
+                    {t.credits > 0 ? "+" : ""}{formatNumber(t.credits)}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span className="min-w-0 truncate">{formatDateTime(t.date)} · {t.user}</span>
+                  <span className="shrink-0 tabular-nums">Bal {formatNumber(t.balance)}</span>
+                </div>
+              </div>
+            ))}
+            {(txns ?? []).length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No transactions yet.</p>}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden md:block">
           <Table>
             <TableHeader>
               <TableRow>
@@ -125,6 +146,7 @@ export default function BillingPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
 

@@ -294,7 +294,7 @@ export function FindWithAiTab() {
               className="max-h-[240px] min-h-[72px] w-full resize-none bg-transparent px-1.5 py-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
             />
             {/* Toolbar */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="ghost"

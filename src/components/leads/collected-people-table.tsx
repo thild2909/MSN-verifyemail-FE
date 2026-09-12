@@ -337,16 +337,16 @@ export function CollectedPeopleTable({
         <PeopleFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_PEOPLE_FILTERS)} />
       </MobileFilterDrawer>
       <div className="relative flex min-w-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-        <div className="relative w-full min-w-[200px] sm:w-auto sm:flex-1">
+      <div className="flex items-center gap-2 border-b px-4 py-2">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, title or company…" className="h-9 pl-9" />
         </div>
-        <span className="text-sm text-muted-foreground"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
-        <div className="ml-auto flex items-center gap-2">
+        <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
+        <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-2">
           <div className="relative">
             <Button size="sm" variant={aiOpen || aiTags.length > 0 ? "secondary" : "outline"} className="h-9" onClick={() => setAiOpen((o) => !o)} title="Ask AI to tag rows by a natural-language instruction.">
-              <Sparkles className="size-4" /> AI Support{aiTags.length > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{aiTags.length}</span>}
+              <Sparkles className="size-4" /> <span className="hidden sm:inline">AI Support</span>{aiTags.length > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{aiTags.length}</span>}
             </Button>
             {aiOpen && (
               <>
@@ -380,7 +380,7 @@ export function CollectedPeopleTable({
           </div>
           <ColumnsMenu cols={cols} onToggle={toggleCol} onReset={resetCols} />
           <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-            <SlidersHorizontal className="size-4" /> Filters{filtersActive > 0 && <span className="ml-1 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary">{filtersActive}</span>}
+            <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{filtersActive}</span>}
           </Button>
         </div>
       </div>
@@ -427,7 +427,61 @@ export function CollectedPeopleTable({
             <EmptyState icon={Inbox} title="No people found yet" description="People appear here as each company is crawled." className="m-6" />
           )
         ) : (
-          <div className={cn("scrollbar-thin h-full overflow-auto transition-opacity", isPlaceholderData && "opacity-60")}>
+          <>
+          {/* Mobile: people cards */}
+          <div className={cn("scrollbar-thin h-full space-y-2 overflow-auto p-3 transition-opacity md:hidden", isPlaceholderData && "opacity-60")}>
+            {rows.map((p) => {
+              const selected = rowChecked(p.id);
+              const finding = inflightIds.has(p.id);
+              const rowTags = tagsForRow(p.id);
+              return (
+                <div key={p.id} onClick={() => onOpenPerson(p)} className={cn("rounded-xl border p-3 transition-colors active:bg-muted/40", rowTags[0] && TAG_STYLES[rowTags[0].color].row, selected && "border-primary/40 bg-primary/[0.04]")}>
+                  <div className="flex items-start gap-2.5">
+                    <div className="pt-0.5" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(p.id)} /></div>
+                    <Avatar name={p.name} seed={p.id} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="min-w-0 truncate font-medium">{p.name}</span>
+                        {personHasFunding(p) && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[hsl(var(--valid))]/10 px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]"><DollarSign className="size-3" /> Funded</span>}
+                        {p.llmVerification && <LlmBadge v={p.llmVerification} />}
+                        {rowTags.map((t) => <span key={t.id} className={cn("inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium", TAG_STYLES[t.color].pill)}>{t.label}</span>)}
+                      </div>
+                      {p.title?.value && <p className="truncate text-xs text-muted-foreground">{p.title.value}</p>}
+                    </div>
+                    <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                  </div>
+                  <div className="mt-2 space-y-1.5 pl-[26px] text-xs">
+                    <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                      <CompanyLogo domain={p.companyDomain} text={p.companyLogoText} className="size-5 shrink-0 text-[9px]" />
+                      <span className="min-w-0 truncate">{p.company}</span>
+                      <span className={cn("ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", SENIORITY_STYLE[p.seniority])}>{SENIORITY_LABEL[p.seniority]}</span>
+                    </div>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      {p.emailVerification ? (
+                        isUnconfirmedEmail(p) ? <span className="text-muted-foreground">Not found</span>
+                          : <div className="flex flex-wrap items-center gap-1.5"><span className="break-all">{String(p.email?.value ?? p.emailVerification.email)}</span><VerificationBadge ev={p.emailVerification} /></div>
+                      ) : p.email ? (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="break-all">{String(p.email.value)}</span>
+                          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not verified</span>
+                          <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" disabled={finding || bulkVerifying} onClick={() => verifyOne.mutate(p.id)}>{finding ? <Loader2 className="size-3.5 animate-spin" /> : <MailCheck className="size-3.5" />}{finding ? "Verifying…" : "Verify"}</Button>
+                        </div>
+                      ) : (
+                        <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" disabled={finding || bulkVerifying} onClick={() => verifyOne.mutate(p.id)}>{finding ? <Loader2 className="size-3.5 animate-spin" /> : <MailCheck className="size-3.5" />}{finding ? "Finding…" : "Access email"}</Button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                      {p.linkedin && <a href={linkedinHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="hover:text-primary" aria-label="LinkedIn"><Linkedin className="size-4" /></a>}
+                      {p.location && <span className="min-w-0 truncate">{p.location}</span>}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop: table */}
+          <div className={cn("scrollbar-thin hidden h-full overflow-auto transition-opacity md:block", isPlaceholderData && "opacity-60")}>
             <table className="w-full border-collapse text-[13px]">
               <thead className="sticky top-0 z-10 bg-card">
                 <tr className="border-b text-left text-muted-foreground">
@@ -579,6 +633,7 @@ export function CollectedPeopleTable({
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 
@@ -669,8 +724,8 @@ function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean
   return (
     <div ref={ref} className="relative inline-block text-left">
       <Button size="sm" variant="outline" className="h-9" onClick={() => setOpen((o) => !o)}>
-        <Columns3 className="size-4" /> Columns
-        <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground tabular-nums">{shown}</span>
+        <Columns3 className="size-4" /> <span className="hidden sm:inline">Columns</span>
+        <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground tabular-nums sm:ml-1">{shown}</span>
       </Button>
       {open && (
         <div className="absolute right-0 z-40 mt-1 w-56 animate-fade-in rounded-lg border bg-popover p-1.5 shadow-lg" style={{ fontFamily: "var(--font-sans), system-ui, sans-serif" }}>
