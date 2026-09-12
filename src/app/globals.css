@@ -81,6 +81,10 @@
     height: 100%;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+    /* In an installed PWA, iOS fills the notch / home-indicator safe-area strips
+       with the root element's background, so match it to the app background in
+       both themes (avoids a white bar around the safe area). */
+    background-color: hsl(var(--background));
   }
   body {
     @apply bg-background text-foreground antialiased;

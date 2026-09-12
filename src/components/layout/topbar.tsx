@@ -38,7 +38,7 @@ export function Topbar() {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-card/80 px-3 pt-safe backdrop-blur sm:px-4 lg:h-16 lg:px-6">
+    <header className="sticky top-0 z-30 flex min-h-[3.5rem] items-center gap-3 border-b bg-card/80 px-3 pt-safe backdrop-blur sm:px-4 lg:min-h-[4rem] lg:px-6">
       {/* Mobile brand (the sidebar — which carries the brand on desktop — is hidden here) */}
       <div className="flex items-center gap-2 lg:hidden">
         <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar">

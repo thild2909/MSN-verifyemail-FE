@@ -16,7 +16,12 @@ export const metadata: Metadata = {
   // Standalone (installed) PWA behaviour on iOS.
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    // `default` keeps the status bar opaque so iOS confines the web view to the
+    // safe area — the header lands BELOW the notch automatically and the status
+    // bar text stays legible on the light header. (`black-translucent` would
+    // draw the page under the notch, which needs pixel-perfect safe-area padding
+    // on every edge and renders white status text on our light chrome.)
+    statusBarStyle: "default",
     title: "Verifly",
   },
   formatDetection: { telephone: false },
@@ -25,9 +30,10 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  // Let the app paint into the notch / home-indicator area; padding is handled
-  // with env(safe-area-inset-*) utilities.
-  viewportFit: "cover",
+  // `contain` (the default) lets iOS inset the whole app into the display's safe
+  // area, so the notch / home-indicator never overlap content. We intentionally
+  // do NOT use `cover` — the safe-area utility classes stay as harmless no-ops.
+  viewportFit: "contain",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#4f46e5" },
     { media: "(prefers-color-scheme: dark)", color: "#0b1020" },
