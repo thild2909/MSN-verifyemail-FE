@@ -1,15 +1,18 @@
 "use client";
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, MapPin, Briefcase, Search, SlidersHorizontal, ChevronDown, Users, Download, X, Loader2, CheckCircle2, Building2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ExternalLink, MapPin, Briefcase, Search, SlidersHorizontal, ChevronDown, Users, Download, X, Loader2, CheckCircle2, Building2, ListPlus, Plus } from "lucide-react";
 import { cn, formatNumber } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox as Check } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
-import { getCollectedLinkedInJobs, type CollectedLinkedInJobsQuery, type CollectedLinkedInJobsPage } from "@/lib/api/client";
+import { getCollectedLinkedInJobs, getLeadLists, createLeadList, addLeadItems, type CollectedLinkedInJobsQuery, type CollectedLinkedInJobsPage } from "@/lib/api/client";
+import { jobsToCompanyLeadItems, addToListToast } from "@/lib/leads/lead-snapshot";
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
 import type { CollectedLinkedInJob, LinkedInJobFilters } from "@/lib/leads/linkedin-jobs-types";
 import type { PeopleSeedInput } from "@/lib/leads/people-types";
@@ -24,27 +27,6 @@ export interface FindPeopleFromLinkedInPayload {
   count: number;
 }
 
-function Check({ checked, indeterminate, onChange }: { checked: boolean; indeterminate?: boolean; onChange: () => void }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onChange(); }}
-      role="checkbox"
-      aria-checked={indeterminate ? "mixed" : checked}
-      className={cn(
-        "flex size-4 items-center justify-center rounded border transition-colors",
-        checked || indeterminate ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-primary/50",
-      )}
-    >
-      {indeterminate ? (
-        <span className="h-0.5 w-2 rounded bg-current" />
-      ) : checked ? (
-        <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ) : null}
-    </button>
-  );
-}
 
 function postedLabel(j: CollectedLinkedInJob): string {
   if (j.postedDaysAgo == null) return j.postedText ?? "—";
@@ -96,6 +78,10 @@ export function CollectedLinkedInJobsTable({
   findingPeople?: boolean;
 }) {
   const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: lists = [] } = useQuery({ queryKey: ["lead-lists"], queryFn: getLeadLists });
+  const [newListOpen, setNewListOpen] = React.useState(false);
+  const [newListName, setNewListName] = React.useState("");
   const [showFilters, setShowFilters] = React.useState(true);
   const [mobileFilters, setMobileFilters] = React.useState(false);
   const [search, setSearch] = React.useState("");
@@ -153,7 +139,45 @@ export function CollectedLinkedInJobsTable({
     return allMatching ? all.jobs : all.jobs.filter((j) => selectedIds.has(j.id));
   }, [jobId, queryKeyStr, debounced, allMatching, selectedIds]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [busy, setBusy] = React.useState<null | "export" | "people">(null);
+  const [busy, setBusy] = React.useState<null | "export" | "people" | "list">(null);
+
+  /** One company lead item per distinct employer behind the current selection. */
+  const companyItems = async () => jobsToCompanyLeadItems(
+    (await resolveSelected()).map((j) => ({
+      name: j.company, location: j.location, linkedin: j.companyLinkedinUrl,
+      industry: j.companyIndustry, employees: j.companyEmployeeRange, website: j.companyWebsite,
+      logoText: j.companyLogoText,
+    })),
+    jobId,
+  );
+
+  const addSelectedToList = async (listId: string, listName: string) => {
+    setBusy("list");
+    try {
+      const items = await companyItems();
+      if (items.length === 0) { toast({ variant: "info", title: "No employers to add", description: "The selected roles have no company name." }); return; }
+      const { added, skipped } = await addLeadItems(listId, items);
+      qc.invalidateQueries({ queryKey: ["lead-lists"] });
+      toast(addToListToast(added, skipped, listName));
+    } catch { toast({ variant: "error", title: "Could not add to list" }); }
+    finally { setBusy(null); }
+  };
+
+  const createAndAdd = async () => {
+    const name = newListName.trim();
+    if (!name) return;
+    setBusy("list");
+    try {
+      const items = await companyItems();
+      if (items.length === 0) { toast({ variant: "info", title: "No employers to add" }); setNewListOpen(false); return; }
+      const list = await createLeadList(name);
+      const { added, skipped } = await addLeadItems(list.id, items);
+      qc.invalidateQueries({ queryKey: ["lead-lists"] });
+      setNewListOpen(false); setNewListName("");
+      toast(addToListToast(added, skipped, list.name));
+    } catch { toast({ variant: "error", title: "Could not create list" }); }
+    finally { setBusy(null); }
+  };
 
   const onExport = async () => {
     setBusy("export");
@@ -358,11 +382,31 @@ export function CollectedLinkedInJobsTable({
               {onFindPeople && (
                 <Button size="sm" onClick={findPeople} disabled={findingPeople || busy !== null}>{findingPeople || busy === "people" ? <Loader2 className="size-4 animate-spin" /> : <Users className="size-4" />} Find people</Button>
               )}
+              <DropdownMenu up align="end" trigger={<Button size="sm" variant="outline" disabled={busy !== null}>{busy === "list" ? <Loader2 className="size-4 animate-spin" /> : <ListPlus className="size-4" />} Add to list <ChevronDown className="size-3.5" /></Button>}>
+                {lists.map((l) => (
+                  <DropdownItem key={l.id} onClick={() => addSelectedToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs text-muted-foreground">{l.summary.total}</span></DropdownItem>
+                ))}
+                {lists.length > 0 && <DropdownSeparator />}
+                <DropdownItem onClick={() => { setNewListName(""); setNewListOpen(true); }}><Plus /> New list</DropdownItem>
+              </DropdownMenu>
               <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null}>{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
               <button onClick={clearSelection} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
             </div>
           </div>
         )}
+
+        {/* New list dialog — name it, then add the selected employers as companies. */}
+        <Dialog open={newListOpen} onOpenChange={(o) => { if (!o) { setNewListOpen(false); setNewListName(""); } }}>
+          <DialogHeader>
+            <DialogTitle>New list</DialogTitle>
+            <DialogDescription>Name the list, then add the employers from the {formatNumber(effectiveCount)} selected {effectiveCount === 1 ? "role" : "roles"} as companies.</DialogDescription>
+          </DialogHeader>
+          <Input autoFocus value={newListName} onChange={(e) => setNewListName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newListName.trim()) createAndAdd(); }} placeholder="List name" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewListOpen(false)}>Cancel</Button>
+            <Button disabled={!newListName.trim() || busy === "list"} onClick={createAndAdd}>{busy === "list" ? <Loader2 className="size-4 animate-spin" /> : null} Create &amp; add</Button>
+          </DialogFooter>
+        </Dialog>
       </div>
     </div>
   );

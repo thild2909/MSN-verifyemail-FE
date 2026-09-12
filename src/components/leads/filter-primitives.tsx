@@ -2,6 +2,7 @@
 import * as React from "react";
 import { ChevronDown, X, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CheckboxIndicator as CheckMark } from "@/components/ui/checkbox";
 
 /* ------------------------------ FilterSection ---------------------------- */
 
@@ -110,23 +111,6 @@ export interface Option {
   value: string;
   label: string;
   hint?: string;
-}
-
-function CheckMark({ checked }: { checked: boolean }) {
-  return (
-    <span
-      className={cn(
-        "flex size-4 shrink-0 items-center justify-center rounded border transition-colors",
-        checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card group-hover:border-primary/50",
-      )}
-    >
-      {checked && (
-        <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
-    </span>
-  );
 }
 
 export function CheckboxList({

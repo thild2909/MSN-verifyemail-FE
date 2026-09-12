@@ -5,6 +5,7 @@ import { Search, Inbox, Loader2, ChevronRight, Database, ChevronDown, ListPlus, 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox as Check } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
@@ -38,27 +39,6 @@ interface Props {
 }
 
 /** Small square checkbox matching the People table. */
-function Check({ checked, indeterminate, onChange }: { checked: boolean; indeterminate?: boolean; onChange: () => void }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onChange(); }}
-      role="checkbox"
-      aria-checked={indeterminate ? "mixed" : checked}
-      className={cn(
-        "flex size-4 items-center justify-center rounded border transition-colors",
-        checked || indeterminate ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-primary/50",
-      )}
-    >
-      {indeterminate ? (
-        <span className="h-0.5 w-2 rounded bg-current" />
-      ) : checked ? (
-        <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ) : null}
-    </button>
-  );
-}
 
 export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, onFindPeople, findingPeople }: Props) {
   const { toast } = useToast();

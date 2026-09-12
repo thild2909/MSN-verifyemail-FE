@@ -1,5 +1,6 @@
 "use client";
 import { Select } from "@/components/ui/select";
+import { CheckboxIndicator } from "@/components/ui/checkbox";
 import { FilterSection, CheckboxList, RangeMin, type Option } from "./filter-primitives";
 import type { LinkedInJobFilters } from "@/lib/leads/linkedin-jobs-types";
 import type { CollectedLinkedInJobsPage } from "@/lib/api/client";
@@ -40,12 +41,14 @@ export function LinkedInJobsFilterSidebar({
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <FilterSection title="Qualification" defaultOpen>
           <div className="space-y-3">
-            <label className="flex cursor-pointer items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={filters.qualifiedOnly} onChange={(e) => onChange({ qualifiedOnly: e.target.checked })} className="size-4 accent-[hsl(var(--primary))]" />
+            <label className="group flex cursor-pointer items-center gap-2 text-[13px]">
+              <CheckboxIndicator checked={filters.qualifiedOnly} />
+              <input type="checkbox" className="sr-only" checked={filters.qualifiedOnly} onChange={(e) => onChange({ qualifiedOnly: e.target.checked })} />
               Qualified only
             </label>
-            <label className="flex cursor-pointer items-center gap-2 text-[13px]">
-              <input type="checkbox" checked={filters.remoteOnly} onChange={(e) => onChange({ remoteOnly: e.target.checked })} className="size-4 accent-[hsl(var(--primary))]" />
+            <label className="group flex cursor-pointer items-center gap-2 text-[13px]">
+              <CheckboxIndicator checked={filters.remoteOnly} />
+              <input type="checkbox" className="sr-only" checked={filters.remoteOnly} onChange={(e) => onChange({ remoteOnly: e.target.checked })} />
               Remote only
             </label>
             <RangeMin value={filters.minScore} onChange={(n) => onChange({ minScore: n })} label="Min fit score" />

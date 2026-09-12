@@ -5,6 +5,7 @@ import { Search, Inbox, Loader2, Trash2, Download, X, Linkedin, ChevronRight, Do
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox as Check, CheckboxIndicator } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -40,21 +41,6 @@ function useAllItems(listId: string, kind: LeadKind) {
     queryKey: ["lead-items-all", listId, kind],
     queryFn: () => getLeadItems(listId, { kind, page: 1, pageSize: 100000 }),
   });
-}
-
-function Check({ checked, indeterminate, onChange }: { checked: boolean; indeterminate?: boolean; onChange: () => void }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onChange(); }}
-      role="checkbox"
-      aria-checked={indeterminate ? "mixed" : checked}
-      className={cn("flex size-4 items-center justify-center rounded border transition-colors", checked || indeterminate ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-primary/50")}
-    >
-      {indeterminate ? <span className="h-0.5 w-2 rounded bg-current" /> : checked ? (
-        <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-      ) : null}
-    </button>
-  );
 }
 
 /** Clickable, sortable column header. Cycles asc → desc → off. */
@@ -282,7 +268,7 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
           </div>
           <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
           <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-2">
-            <ColumnsMenu cols={cols} onToggle={toggleCol} onReset={resetCols} />
+            <ColumnsMenu defs={COLUMN_DEFS} cols={cols} onToggle={toggleCol} onReset={resetCols} />
             <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
               <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{filtersActive}</span>}
             </Button>
@@ -430,8 +416,14 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
   );
 }
 
-/** Column show/hide picker (own popover, stays open across toggles). */
-function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean>; onToggle: (k: ColKey) => void; onReset: () => void }) {
+/** Column show/hide picker (own popover, stays open across toggles). Generic
+ *  over the column key so the People and Company views can share it. */
+function ColumnsMenu<K extends string>({ defs, cols, onToggle, onReset }: {
+  defs: readonly { key: K; label: string; default: boolean }[];
+  cols: Record<K, boolean>;
+  onToggle: (k: K) => void;
+  onReset: () => void;
+}) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -442,7 +434,7 @@ function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey); };
   }, [open]);
-  const shown = COLUMN_DEFS.filter((c) => cols[c.key]).length;
+  const shown = defs.filter((c) => cols[c.key]).length;
   return (
     <div ref={ref} className="relative inline-block text-left">
       <Button size="sm" variant="outline" className="h-9" onClick={() => setOpen((o) => !o)}>
@@ -456,11 +448,9 @@ function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean
             <button onClick={onReset} className="text-[11px] font-medium text-primary hover:underline">Reset</button>
           </div>
           <div className="max-h-72 overflow-y-auto">
-            {COLUMN_DEFS.map((c) => (
-              <label key={c.key} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
-                <span className={cn("flex size-4 shrink-0 items-center justify-center rounded border transition-colors", cols[c.key] ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card")}>
-                  {cols[c.key] && <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                </span>
+            {defs.map((c) => (
+              <label key={c.key} className="group flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
+                <CheckboxIndicator checked={cols[c.key]} />
                 <input type="checkbox" className="sr-only" checked={cols[c.key]} onChange={() => onToggle(c.key)} />
                 <span className="flex-1">{c.label}</span>
               </label>
@@ -470,6 +460,32 @@ function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean
       )}
     </div>
   );
+}
+
+/* ------------------------- Company column config ------------------------- */
+
+type CompanyColKey = "company" | "employees" | "industry" | "website" | "email" | "phone" | "linkedin" | "location" | "status";
+const COMPANY_COLUMN_DEFS: { key: CompanyColKey; label: string; default: boolean }[] = [
+  { key: "company", label: "Company", default: true },
+  { key: "employees", label: "Employees", default: true },
+  { key: "industry", label: "Industry", default: false },
+  { key: "website", label: "Website", default: false },
+  { key: "email", label: "Email", default: false },
+  { key: "phone", label: "Phone", default: false },
+  { key: "linkedin", label: "LinkedIn", default: true },
+  { key: "location", label: "Location", default: true },
+  { key: "status", label: "Status", default: true },
+];
+const COMPANY_DEFAULT_COLS = Object.fromEntries(COMPANY_COLUMN_DEFS.map((c) => [c.key, c.default])) as Record<CompanyColKey, boolean>;
+const COMPANY_COL_STORAGE_KEY = "saved-company-table-columns-v1";
+
+function loadCompanyCols(): Record<CompanyColKey, boolean> {
+  const base = { ...COMPANY_DEFAULT_COLS };
+  try {
+    const raw = localStorage.getItem(COMPANY_COL_STORAGE_KEY);
+    if (raw) { const saved = JSON.parse(raw) as Partial<Record<CompanyColKey, boolean>>; for (const c of COMPANY_COLUMN_DEFS) if (typeof saved[c.key] === "boolean") base[c.key] = saved[c.key]!; }
+  } catch { /* ignore */ }
+  return base;
 }
 
 /* ------------------------------ Company view ----------------------------- */
@@ -504,6 +520,12 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
   const total = view.total;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const filtersActive = countCompanyFilters(filters);
+
+  const [cols, setCols] = React.useState<Record<CompanyColKey, boolean>>(COMPANY_DEFAULT_COLS);
+  React.useEffect(() => { setCols(loadCompanyCols()); }, []);
+  const toggleCol = (key: CompanyColKey) => setCols((prev) => { const next = { ...prev, [key]: !prev[key] }; try { localStorage.setItem(COMPANY_COL_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ } return next; });
+  const resetCols = () => { setCols(COMPANY_DEFAULT_COLS); try { localStorage.removeItem(COMPANY_COL_STORAGE_KEY); } catch { /* ignore */ } };
+  const show = (k: CompanyColKey) => cols[k];
 
   const sel = useListSelection({ listId, kind: "company", filteredAll, pageObjs: rows, dbIdOf });
   React.useEffect(() => { sel.resetOnChange(); }, [debounced, filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -544,9 +566,12 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search company or location…" className="h-9 pl-9" />
           </div>
           <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> companies</span>
-          <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9 shrink-0 sm:ml-auto" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-            <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{filtersActive}</span>}
-          </Button>
+          <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-2">
+            <ColumnsMenu defs={COMPANY_COLUMN_DEFS} cols={cols} onToggle={toggleCol} onReset={resetCols} />
+            <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
+              <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{filtersActive}</span>}
+            </Button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1">
@@ -575,14 +600,16 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
                         <p className="flex items-center gap-1.5 truncate font-medium">{c.inputName}{c.llmVerification && <LlmBadge v={c.llmVerification} />}</p>
                         <p className="truncate text-xs text-muted-foreground">{c.inputLocation}{c.domainGuess ? ` · ${c.domainGuess}` : ""}</p>
                       </div>
-                      <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", st.className)}>{st.label}</span>
+                      {show("status") && <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", st.className)}>{st.label}</span>}
                     </div>
                     <div className="mt-2 space-y-1 pl-[26px] text-xs" onClick={(e) => e.stopPropagation()}>
-                      {(c.contactEmail?.value != null || c.emailVerification) && <div className="flex min-w-0 items-center gap-1.5"><Sourced field={c.contactEmail} />{c.emailVerification && <VerificationBadge ev={c.emailVerification} />}</div>}
+                      {show("email") && (c.contactEmail?.value != null || c.emailVerification) && <div className="flex min-w-0 items-center gap-1.5"><Sourced field={c.contactEmail} />{c.emailVerification && <VerificationBadge ev={c.emailVerification} />}</div>}
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
-                        {c.employees?.value != null && <span>Emp <Sourced field={c.employees} /></span>}
-                        {c.industry?.value != null && <span className="min-w-0"><Sourced field={c.industry} /></span>}
-                        {c.website?.value != null && <span className="min-w-0"><Sourced field={c.website} /></span>}
+                        {show("employees") && c.employees?.value != null && <span>Emp <Sourced field={c.employees} /></span>}
+                        {show("industry") && c.industry?.value != null && <span className="min-w-0"><Sourced field={c.industry} /></span>}
+                        {show("website") && c.website?.value != null && <span className="min-w-0"><Sourced field={c.website} /></span>}
+                        {show("linkedin") && c.linkedin?.value != null && <span className="min-w-0"><Sourced field={c.linkedin} /></span>}
+                        {show("location") && (c.address?.value != null || c.inputLocation) && <span className="min-w-0">{c.address?.value ?? c.inputLocation}</span>}
                       </div>
                     </div>
                   </div>
@@ -596,15 +623,15 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
                 <thead className="sticky top-0 z-10 bg-card">
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="w-10 px-3 py-2.5"><Check checked={sel.allMatching || sel.allPageSelected} indeterminate={sel.someSelected && !sel.allMatching && !sel.allPageSelected} onChange={sel.toggleHeader} /></th>
-                    <th className="px-3 py-2.5 font-medium">Company</th>
-                    <th className="px-3 py-2.5 font-medium">Employees</th>
-                    <th className="px-3 py-2.5 font-medium">Industry</th>
-                    <th className="px-3 py-2.5 font-medium">Website</th>
-                    <th className="px-3 py-2.5 font-medium">Email</th>
-                    <th className="px-3 py-2.5 font-medium">Phone</th>
-                    <th className="px-3 py-2.5 font-medium">LinkedIn</th>
-                    <th className="px-3 py-2.5 font-medium">Location</th>
-                    <th className="px-3 py-2.5 font-medium">Status</th>
+                    {show("company") && <th className="px-3 py-2.5 font-medium">Company</th>}
+                    {show("employees") && <th className="px-3 py-2.5 font-medium">Employees</th>}
+                    {show("industry") && <th className="px-3 py-2.5 font-medium">Industry</th>}
+                    {show("website") && <th className="px-3 py-2.5 font-medium">Website</th>}
+                    {show("email") && <th className="px-3 py-2.5 font-medium">Email</th>}
+                    {show("phone") && <th className="px-3 py-2.5 font-medium">Phone</th>}
+                    {show("linkedin") && <th className="px-3 py-2.5 font-medium">LinkedIn</th>}
+                    {show("location") && <th className="px-3 py-2.5 font-medium">Location</th>}
+                    {show("status") && <th className="px-3 py-2.5 font-medium">Status</th>}
                     <th className="w-8" />
                   </tr>
                 </thead>
@@ -616,23 +643,25 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
                     return (
                       <tr key={id} onClick={() => setDrawer(c)} className={cn("cursor-pointer border-b hover:bg-muted/30", selected && "bg-primary/[0.04]")}>
                         <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => sel.toggleRow(id)} /></td>
-                        <td className="px-3 py-2 align-top">
-                          <div className="flex items-center gap-2.5">
-                            <CompanyLogo domain={c.domainGuess} text={c.logoText || (c.inputName || "").slice(0, 2).toUpperCase()} className="size-8 text-[11px]" />
-                            <div className="min-w-0">
-                              <p className="flex items-center gap-1.5 truncate font-medium">{c.inputName}{c.llmVerification && <LlmBadge v={c.llmVerification} />}</p>
-                              <p className="truncate text-xs text-muted-foreground">{c.inputLocation}{c.domainGuess ? ` · ${c.domainGuess}` : ""}{c.resolution && c.resolution.confidence > 0 ? ` · ${c.resolution.confidence}% match` : ""}</p>
+                        {show("company") && (
+                          <td className="px-3 py-2 align-top">
+                            <div className="flex items-center gap-2.5">
+                              <CompanyLogo domain={c.domainGuess} text={c.logoText || (c.inputName || "").slice(0, 2).toUpperCase()} className="size-8 text-[11px]" />
+                              <div className="min-w-0">
+                                <p className="flex items-center gap-1.5 truncate font-medium">{c.inputName}{c.llmVerification && <LlmBadge v={c.llmVerification} />}</p>
+                                <p className="truncate text-xs text-muted-foreground">{c.inputLocation}{c.domainGuess ? ` · ${c.domainGuess}` : ""}{c.resolution && c.resolution.confidence > 0 ? ` · ${c.resolution.confidence}% match` : ""}</p>
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 align-top"><Sourced field={c.employees} showConfidence /></td>
-                        <td className="px-3 py-2 align-top"><Sourced field={c.industry} /></td>
-                        <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.website} /></td>
-                        <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><div className="flex items-center gap-1.5"><Sourced field={c.contactEmail} />{c.emailVerification && <VerificationBadge ev={c.emailVerification} />}</div></td>
-                        <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.phone} /></td>
-                        <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.linkedin} /></td>
-                        <td className="px-3 py-2 align-top">{c.address ? <Sourced field={c.address} /> : <span className="text-xs text-muted-foreground">{c.inputLocation || "—"}</span>}</td>
-                        <td className="px-3 py-2 align-top"><span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", st.className)}>{st.label}</span></td>
+                          </td>
+                        )}
+                        {show("employees") && <td className="px-3 py-2 align-top"><Sourced field={c.employees} showConfidence /></td>}
+                        {show("industry") && <td className="px-3 py-2 align-top"><Sourced field={c.industry} /></td>}
+                        {show("website") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.website} /></td>}
+                        {show("email") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><div className="flex items-center gap-1.5"><Sourced field={c.contactEmail} />{c.emailVerification && <VerificationBadge ev={c.emailVerification} />}</div></td>}
+                        {show("phone") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.phone} /></td>}
+                        {show("linkedin") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.linkedin} /></td>}
+                        {show("location") && <td className="px-3 py-2 align-top">{c.address ? <Sourced field={c.address} /> : <span className="text-xs text-muted-foreground">{c.inputLocation || "—"}</span>}</td>}
+                        {show("status") && <td className="px-3 py-2 align-top"><span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", st.className)}>{st.label}</span></td>}
                         <td className="px-2 py-2 text-right align-top"><ChevronRight className="size-4 text-muted-foreground" /></td>
                       </tr>
                     );

@@ -2,6 +2,7 @@
 import * as React from "react";
 import { Settings2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CheckboxIndicator } from "@/components/ui/checkbox";
 
 export interface ColumnOption {
   key: string;
@@ -46,14 +47,8 @@ export function SearchSettings({
             {columns.map((c) => {
               const checked = visible.has(c.key);
               return (
-                <label key={c.key} className="flex cursor-pointer items-center gap-2 text-[13px]">
-                  <span className={cn("flex size-4 items-center justify-center rounded border", checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card")}>
-                    {checked && (
-                      <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </span>
+                <label key={c.key} className="group flex cursor-pointer items-center gap-2 text-[13px]">
+                  <CheckboxIndicator checked={checked} />
                   <input type="checkbox" className="sr-only" checked={checked} onChange={() => onToggleColumn(c.key)} />
                   {c.label}
                 </label>

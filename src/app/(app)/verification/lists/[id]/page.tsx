@@ -61,14 +61,14 @@ export default function ListDetailPage() {
           <ChevronLeft className="size-4" /> Lists
         </Link>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight">{list.name}</h1>
-              <Badge variant={list.status === "completed" ? "success" : "warning"}>
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-3">
+              <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight">{list.name}</h1>
+              <Badge className="shrink-0" variant={list.status === "completed" ? "success" : "warning"}>
                 {list.status === "completed" ? "Completed" : "Processing"}
               </Badge>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 truncate text-sm text-muted-foreground">
               {list.fileName} · {formatNumber(list.uniqueEmails)} unique emails · uploaded {formatDate(list.createdAt)}
             </p>
           </div>

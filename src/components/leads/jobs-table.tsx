@@ -4,6 +4,7 @@ import {
   ChevronsUpDown, ArrowUp, ArrowDown, MoreHorizontal, Bookmark, Users, Building2, Workflow, ExternalLink,
 } from "lucide-react";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
+import { Checkbox as Check } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { postedLabel } from "@/lib/leads/data";
 import { CompanyLogo, HiringSignalChip, JOB_SENIORITY_LABEL, WORK_MODE_LABEL, EMPLOYMENT_LABEL } from "./leads-ui";
@@ -36,15 +37,6 @@ const COLS: { key: string; label: string; sortable?: boolean }[] = [
 
 function salary(j: Job): string {
   return `$${Math.round(j.salaryMin / 1000)}k–$${Math.round(j.salaryMax / 1000)}k`;
-}
-
-function Check({ checked, onChange }: { checked: boolean; onChange: () => void }) {
-  return (
-    <button onClick={(e) => { e.stopPropagation(); onChange(); }} role="checkbox" aria-checked={checked}
-      className={cn("flex size-4 items-center justify-center rounded border transition-colors", checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-primary/50")}>
-      {checked && <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-    </button>
-  );
 }
 
 export function JobsTable(props: Props) {

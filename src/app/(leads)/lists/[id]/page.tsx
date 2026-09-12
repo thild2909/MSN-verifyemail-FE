@@ -72,7 +72,7 @@ export default function SavedListDetailPage() {
         </Link>
         <div className="flex min-w-0 items-center gap-2">
           {list.isSaved ? <Bookmark className="size-5 shrink-0 text-primary" /> : <ListChecks className="size-5 shrink-0 text-primary" />}
-          <h1 className="truncate text-lg font-bold tracking-tight">{list.name}</h1>
+          <h1 className="min-w-0 truncate text-lg font-bold tracking-tight">{list.name}</h1>
           {list.isSaved && <Badge variant="secondary">Default</Badge>}
         </div>
         <span className="hidden text-sm text-muted-foreground sm:inline">

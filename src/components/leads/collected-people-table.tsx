@@ -5,6 +5,7 @@ import { Search, Inbox, Loader2, ChevronRight, Linkedin, ChevronDown, ListPlus, 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Checkbox as Check, CheckboxIndicator } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
@@ -92,21 +93,6 @@ const TAG_STYLES: Record<AiTagColor, { pill: string; row: string }> = {
 };
 
 type AiTag = { id: string; label: string; color: AiTagColor; ids: Set<string> };
-
-function Check({ checked, indeterminate, onChange }: { checked: boolean; indeterminate?: boolean; onChange: () => void }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onChange(); }}
-      role="checkbox"
-      aria-checked={indeterminate ? "mixed" : checked}
-      className={cn("flex size-4 items-center justify-center rounded border transition-colors", checked || indeterminate ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-primary/50")}
-    >
-      {indeterminate ? <span className="h-0.5 w-2 rounded bg-current" /> : checked ? (
-        <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-      ) : null}
-    </button>
-  );
-}
 
 const linkedinHref = (v: string) => (/^https?:\/\//i.test(v) ? v : `https://${v}`);
 
@@ -735,10 +721,8 @@ function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean
           </div>
           <div className="max-h-72 overflow-y-auto">
             {COLUMN_DEFS.map((c) => (
-              <label key={c.key} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
-                <span className={cn("flex size-4 shrink-0 items-center justify-center rounded border transition-colors", cols[c.key] ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card")}>
-                  {cols[c.key] && <svg viewBox="0 0 12 12" className="size-3" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2.5 6.5l2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                </span>
+              <label key={c.key} className="group flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
+                <CheckboxIndicator checked={cols[c.key]} />
                 <input type="checkbox" className="sr-only" checked={cols[c.key]} onChange={() => onToggle(c.key)} />
                 <span className="flex-1">{c.label}</span>
               </label>

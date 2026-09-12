@@ -51,7 +51,7 @@ export default function SavedListsPage() {
   );
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
       <div className="mx-auto max-w-7xl space-y-6 p-4 lg:p-8">
       <PageHeader
         title="Saved Lists"
@@ -147,14 +147,15 @@ export default function SavedListsPage() {
 
 function ListCard({ list, onRename, onDelete }: { list: LeadList; onRename: () => void; onDelete: () => void }) {
   return (
-    <Card className="group relative transition-colors hover:border-primary/40">
+    <Card className="group relative min-w-0 transition-colors hover:border-primary/40">
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-2">
-          <Link href={`/lists/${list.id}`} className="flex min-w-0 items-center gap-2">
+          <Link href={`/lists/${list.id}`} className="flex min-w-0 items-start gap-2">
             {list.isSaved
-              ? <Bookmark className="size-4 shrink-0 text-primary" />
+              ? <Bookmark className="mt-0.5 size-4 shrink-0 text-primary" />
               : <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-xs font-semibold text-primary">{list.name.slice(0, 2).toUpperCase()}</span>}
-            <span className="truncate font-semibold">{list.name}</span>
+            {/* Wrap long names onto multiple lines (no ellipsis); smaller on mobile. */}
+            <span className="min-w-0 break-words text-sm font-semibold leading-snug sm:text-base">{list.name}</span>
           </Link>
           <DropdownMenu align="end" trigger={<button className="rounded p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label="List options"><MoreHorizontal className="size-4" /></button>}>
             <DropdownItem onClick={onRename}><Pencil className="size-4" /> Rename</DropdownItem>

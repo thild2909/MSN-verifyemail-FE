@@ -1,12 +1,18 @@
 "use client";
 import * as React from "react";
 import Papa from "papaparse";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Sparkles, Paperclip, ArrowUp, Loader2, X, Download, FileText, AlertTriangle, ChevronDown,
+  Sparkles, Paperclip, ArrowUp, Loader2, X, Download, FileText, AlertTriangle, ChevronDown, ListPlus, Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
+import { getLeadLists, createLeadList, addLeadItems } from "@/lib/api/client";
+import { jobsToCompanyLeadItems, addToListToast } from "@/lib/leads/lead-snapshot";
 import { columnWidth, type AiReportColumn } from "@/lib/leads/ai-report-columns";
 
 type Row = Record<string, string>;
@@ -478,6 +484,55 @@ function AssistantReport({ report }: { report: ReportPayload }) {
   const { rows, summary } = report;
   const columns = report.columns?.length ? report.columns : [];
 
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: lists = [] } = useQuery({ queryKey: ["lead-lists"], queryFn: getLeadLists });
+  const [busy, setBusy] = React.useState(false);
+  const [newListOpen, setNewListOpen] = React.useState(false);
+  const [newListName, setNewListName] = React.useState("");
+
+  /** Turn the AI report rows into deduped company lead items. */
+  const companyItems = () =>
+    jobsToCompanyLeadItems(
+      rows.map((r) => ({
+        name: r.company ?? r.name ?? "",
+        location: r.location ?? r.country ?? null,
+        website: r.website ?? null,
+        industry: r.type ?? r.industry ?? null,
+        employees: r.employees ?? null,
+        linkedin: r.linkedin ?? null,
+      })),
+      "ai-report",
+    );
+
+  const addToList = async (listId: string, listName: string) => {
+    setBusy(true);
+    try {
+      const items = companyItems();
+      if (items.length === 0) { toast({ variant: "info", title: "No companies to add" }); return; }
+      const { added, skipped } = await addLeadItems(listId, items);
+      qc.invalidateQueries({ queryKey: ["lead-lists"] });
+      toast(addToListToast(added, skipped, listName));
+    } catch { toast({ variant: "error", title: "Could not add to list" }); }
+    finally { setBusy(false); }
+  };
+
+  const createAndAdd = async () => {
+    const name = newListName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      const items = companyItems();
+      if (items.length === 0) { toast({ variant: "info", title: "No companies to add" }); setNewListOpen(false); return; }
+      const list = await createLeadList(name);
+      const { added, skipped } = await addLeadItems(list.id, items);
+      qc.invalidateQueries({ queryKey: ["lead-lists"] });
+      setNewListOpen(false); setNewListName("");
+      toast(addToListToast(added, skipped, list.name));
+    } catch { toast({ variant: "error", title: "Could not create list" }); }
+    finally { setBusy(false); }
+  };
+
   function exportCsv() {
     const header = columns.map((c) => c.label);
     const data = rows.map((r) => columns.map((c) => r[c.key] ?? ""));
@@ -512,9 +567,22 @@ function AssistantReport({ report }: { report: ReportPayload }) {
         <div className="rounded-xl border">
           <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Company report</span>
-            <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={exportCsv}>
-              <Download className="size-3.5" /> Export CSV
-            </Button>
+            <div className="flex items-center gap-2">
+              <DropdownMenu align="end" trigger={
+                <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" disabled={busy}>
+                  {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />} Add to list <ChevronDown className="size-3" />
+                </Button>
+              }>
+                {lists.map((l) => (
+                  <DropdownItem key={l.id} onClick={() => addToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs text-muted-foreground">{l.summary.total}</span></DropdownItem>
+                ))}
+                {lists.length > 0 && <DropdownSeparator />}
+                <DropdownItem onClick={() => { setNewListName(""); setNewListOpen(true); }}><Plus /> New list</DropdownItem>
+              </DropdownMenu>
+              <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={exportCsv}>
+                <Download className="size-3.5" /> Export CSV
+              </Button>
+            </div>
           </div>
           <div className="max-w-full overflow-x-auto">
             <table className="w-full border-collapse text-xs">
@@ -560,6 +628,19 @@ function AssistantReport({ report }: { report: ReportPayload }) {
           </ul>
         </details>
       )}
+
+      {/* New list dialog — name it, then add the report's companies. */}
+      <Dialog open={newListOpen} onOpenChange={(o) => { if (!o) { setNewListOpen(false); setNewListName(""); } }}>
+        <DialogHeader>
+          <DialogTitle>New list</DialogTitle>
+          <DialogDescription>Name the list, then add the {formatNumber(rows.length)} {rows.length === 1 ? "company" : "companies"} from this report.</DialogDescription>
+        </DialogHeader>
+        <Input autoFocus value={newListName} onChange={(e) => setNewListName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newListName.trim()) createAndAdd(); }} placeholder="List name" />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setNewListOpen(false)}>Cancel</Button>
+          <Button disabled={!newListName.trim() || busy} onClick={createAndAdd}>{busy ? <Loader2 className="size-4 animate-spin" /> : null} Create &amp; add</Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }
