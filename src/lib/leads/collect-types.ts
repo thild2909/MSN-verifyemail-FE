@@ -103,7 +103,27 @@ export interface CollectedCompany {
   matchScore?: number; // raw signal sum (e.g. 120)
   verification?: CompanyVerification;
   llmVerification?: LlmVerdict | null; // DeepSeek cross-check (opt-in)
+  // Dynamic qualification fields captured when saved from the "Find with AI" tab
+  // (company type, hiring role, job location, posting date, source, fit, notes…).
+  // Persisted server-side in its own queryable `ai_report` jsonb column, and
+  // surfaced back onto the company snapshot for the detail drawer.
+  aiReport?: AiReport | null;
   collection: CollectionAttempt[];
+}
+
+/**
+ * Structured, queryable AI qualification snapshot captured when a company is saved
+ * from "Find with AI". `values` is a key→value map (the queryable payload, stored
+ * server-side as `ai_report->'values'`); `labels` maps those keys to their
+ * human-readable column headings for display. Keys stay generic (type, role,
+ * location, posted, jobSource, signal, msnFit, verificationNotes, + prompt extras)
+ * so the report's dynamic columns are preserved without a fixed schema.
+ */
+export interface AiReport {
+  model?: string; // model that produced the report (e.g. "deepseek-chat")
+  generatedAt?: string; // ISO — when the report was generated/saved
+  values: Record<string, string>;
+  labels?: Record<string, string>;
 }
 
 /**

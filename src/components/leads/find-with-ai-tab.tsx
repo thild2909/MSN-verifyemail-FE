@@ -12,7 +12,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } fr
 import { useToast } from "@/components/ui/toast";
 import { cn, formatNumber } from "@/lib/utils";
 import { getLeadLists, createLeadList, addLeadItems } from "@/lib/api/client";
-import { jobsToCompanyLeadItems, addToListToast } from "@/lib/leads/lead-snapshot";
+import { aiReportToCompanyLeadItems, addToListToast } from "@/lib/leads/lead-snapshot";
 import { columnWidth, type AiReportColumn } from "@/lib/leads/ai-report-columns";
 
 type Row = Record<string, string>;
@@ -491,19 +491,15 @@ function AssistantReport({ report }: { report: ReportPayload }) {
   const [newListOpen, setNewListOpen] = React.useState(false);
   const [newListName, setNewListName] = React.useState("");
 
-  /** Turn the AI report rows into deduped company lead items. */
+  /**
+   * Turn the AI report rows into deduped company lead items. The known columns
+   * feed the company snapshot; every other dynamic column (type, role, job
+   * location, posting date, source, signal, MSN fit, notes…) is captured in the
+   * structured `aiReport` field, persisted server-side in its own queryable
+   * `ai_report` column and shown in the saved company's detail.
+   */
   const companyItems = () =>
-    jobsToCompanyLeadItems(
-      rows.map((r) => ({
-        name: r.company ?? r.name ?? "",
-        location: r.location ?? r.country ?? null,
-        website: r.website ?? null,
-        industry: r.type ?? r.industry ?? null,
-        employees: r.employees ?? null,
-        linkedin: r.linkedin ?? null,
-      })),
-      "ai-report",
-    );
+    aiReportToCompanyLeadItems(columns, rows, { model: report.model });
 
   const addToList = async (listId: string, listName: string) => {
     setBusy(true);

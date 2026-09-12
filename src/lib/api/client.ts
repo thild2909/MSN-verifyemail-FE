@@ -39,6 +39,7 @@ import { statusBucket } from "../types";
 import { seededRandom } from "../utils";
 import { cleanDomain } from "../finder/patterns";
 import type {
+  AiReport,
   CompanyCollectJob,
   CollectedCompany,
   CompaniesFacets,
@@ -663,6 +664,8 @@ export interface LeadItem {
   title: string | null;
   email: string | null;
   data: Record<string, unknown>;
+  /** Structured, queryable AI qualification snapshot (companies saved from Find with AI). */
+  aiReport?: AiReport | null;
   createdAt: string;
 }
 /** One row to persist — `data` is the full crawler object. */
@@ -675,6 +678,8 @@ export interface NewLeadItem {
   title?: string | null;
   email?: string | null;
   data: Record<string, unknown>;
+  /** Structured AI qualification snapshot — persisted server-side in its own column. */
+  aiReport?: AiReport | null;
 }
 
 export async function getLeadLists(): Promise<LeadList[]> {

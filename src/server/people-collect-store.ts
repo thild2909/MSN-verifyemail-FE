@@ -39,7 +39,7 @@ function domainOf(website?: string | null): string | null {
 
 export const MAX_PEOPLE_SEEDS = Number(process.env.APP_MAX_PEOPLE_SEEDS ?? 100000);
 // Find Leads tabs cache only the N most-recent runs so `.data/*.json` can't grow unbounded.
-export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 3);
+export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 9);
 
 /** A company seed the job iterates over (also drives progress). */
 interface PeopleSeed extends PeopleSeedInput {

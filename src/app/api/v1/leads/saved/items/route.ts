@@ -5,6 +5,12 @@ import { be } from "@/server/verify-client";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const aiReportSchema = z.object({
+  model: z.string().optional(),
+  generatedAt: z.string().optional(),
+  values: z.record(z.string()).default({}),
+  labels: z.record(z.string()).optional(),
+});
 const leadItemSchema = z.object({
   kind: z.enum(["person", "company"]),
   refId: z.string().trim().min(1),
@@ -14,6 +20,7 @@ const leadItemSchema = z.object({
   title: z.string().nullish(),
   email: z.string().nullish(),
   data: z.record(z.unknown()).default({}),
+  aiReport: aiReportSchema.nullish(),
 });
 const addSchema = z.object({ items: z.array(leadItemSchema).min(1).max(1000) });
 

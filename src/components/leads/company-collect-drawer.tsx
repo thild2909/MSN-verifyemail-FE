@@ -1,6 +1,6 @@
 "use client";
 import * as React from "react";
-import { Copy, Star, Server, Check, X, RotateCw, Ban, MinusCircle, Search, Globe, Linkedin, Database, Users } from "lucide-react";
+import { Copy, Star, Server, Check, X, RotateCw, Ban, MinusCircle, Search, Globe, Linkedin, Database, Users, Sparkles } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -111,6 +111,24 @@ export function CompanyCollectDrawer({ company, open, onOpenChange }: { company:
           {c.description && <p className="mt-3 text-sm text-muted-foreground">{c.description.value}</p>}
         </section>
 
+        {/* AI report — structured qualification fields captured on save from Find with AI */}
+        {c.aiReport && Object.keys(c.aiReport.values ?? {}).length > 0 ? (
+          <section className="p-6">
+            <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <Sparkles className="size-3.5" /> AI report
+              {c.aiReport.model && <span className="font-normal normal-case text-muted-foreground/70">· {c.aiReport.model}</span>}
+            </h3>
+            <dl className="space-y-3 rounded-lg border bg-primary/[0.03] p-3">
+              {Object.entries(c.aiReport.values).map(([key, value]) => (
+                <div key={key}>
+                  <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{c.aiReport?.labels?.[key] ?? key}</dt>
+                  <dd className="mt-0.5 text-[13px] leading-relaxed"><AiValue value={value} /></dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ) : null}
+
         {/* Collection log */}
         <section className="p-6">
           <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"><Server className="size-3.5" /> Collection log</h3>
@@ -154,6 +172,31 @@ function FieldRow({ label, field, copyable, onCopy }: { label: string; field: So
       </div>
     </div>
   );
+}
+
+// Domain like "grab.com" (no scheme/path) — linkified alongside full URLs.
+const DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+
+/**
+ * Render a dynamic AI-report value. Multi-line values (e.g. "Direct job source"
+ * with several URLs) split into one clickable link per line; bare domains/URLs
+ * are linkified; everything else stays wrapped plain text.
+ */
+function AiValue({ value }: { value: string }) {
+  const v = (value || "").trim();
+  if (!v || v === "—") return <span className="text-muted-foreground">—</span>;
+  const tokens = v.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  const link = (t: string) => {
+    const isUrl = /^https?:\/\//i.test(t);
+    if (!isUrl && !DOMAIN_RE.test(t)) return <span className="whitespace-pre-wrap break-words">{t}</span>;
+    const href = isUrl ? t : `https://${t}`;
+    const label = t.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+    return <a href={href} target="_blank" rel="noopener noreferrer" className="break-all text-primary hover:underline">{label}</a>;
+  };
+  if (tokens.length > 1) {
+    return <div className="flex flex-col gap-0.5">{tokens.map((t, i) => <span key={i}>{link(t)}</span>)}</div>;
+  }
+  return link(tokens[0]);
 }
 
 function VCheck({ ok, label, strong }: { ok: boolean; label: string; strong?: boolean }) {

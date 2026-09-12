@@ -8,6 +8,7 @@
 import type { NewLeadItem } from "@/lib/api/client";
 import type { CollectedCompany } from "@/lib/leads/collect-types";
 import type { CollectedPerson } from "@/lib/leads/people-types";
+import type { AiReportColumn } from "@/lib/leads/ai-report-columns";
 import { formatNumber } from "@/lib/utils";
 
 /**
@@ -113,6 +114,69 @@ export function jobCompanyToLeadItem(c: JobCompanyInput, jobId: string): NewLead
     email: null,
     data: company,
   };
+}
+
+/**
+ * Columns that are identity/ordinal or already promoted to first-class company
+ * fields — excluded from the dynamic AI-report snapshot to avoid clutter.
+ */
+const AI_REPORT_SKIP_KEYS = new Set(["rank", "company", "name"]);
+
+/**
+ * Turn an AI-report table (dynamic columns + rows from the "Find with AI" tab)
+ * into deduped **company** lead items.
+ *
+ * The known columns (name, location, website, type, employees, LinkedIn) are
+ * lifted into the CollectedCompany snapshot so the saved Company view/filters
+ * keep working. Every other column the model returned — company type, hiring
+ * role, job location, posting date, direct job source, growth signal, MSN fit,
+ * verification notes, plus any custom extras — is captured in the STRUCTURED
+ * `aiReport` field (a queryable key→value map + display labels), persisted
+ * server-side in its own `ai_report` jsonb column and shown in the detail drawer.
+ */
+export function aiReportToCompanyLeadItems(
+  columns: AiReportColumn[],
+  rows: Record<string, string>[],
+  meta?: { model?: string; generatedAt?: string },
+): NewLeadItem[] {
+  const byName = new Map<string, NewLeadItem>();
+  const generatedAt = meta?.generatedAt ?? new Date().toISOString();
+  for (const r of rows) {
+    const name = (r.company ?? r.name ?? "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (byName.has(key)) continue;
+
+    const item = jobCompanyToLeadItem(
+      {
+        name,
+        // A company's own location is its country; the "location" column is the
+        // job's location, which we keep in the AI-report values below.
+        location: r.country ?? r.location ?? null,
+        website: r.website ?? null,
+        industry: r.type ?? r.industry ?? null,
+        employees: r.employees ?? null,
+        linkedin: r.linkedin ?? null,
+      },
+      "ai-report",
+    );
+
+    const values: Record<string, string> = {};
+    const labels: Record<string, string> = {};
+    for (const c of columns) {
+      if (AI_REPORT_SKIP_KEYS.has(c.key)) continue;
+      const value = (r[c.key] ?? "").trim();
+      if (!value || value === "—") continue;
+      values[c.key] = value;
+      labels[c.key] = c.label;
+    }
+
+    if (Object.keys(values).length) {
+      item.aiReport = { model: meta?.model, generatedAt, values, labels };
+    }
+    byName.set(key, item);
+  }
+  return [...byName.values()];
 }
 
 /** Dedupe a set of employers (by name) into company lead items. */

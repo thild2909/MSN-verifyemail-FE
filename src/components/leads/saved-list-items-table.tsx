@@ -468,7 +468,7 @@ type CompanyColKey = "company" | "employees" | "industry" | "website" | "email" 
 const COMPANY_COLUMN_DEFS: { key: CompanyColKey; label: string; default: boolean }[] = [
   { key: "company", label: "Company", default: true },
   { key: "employees", label: "Employees", default: true },
-  { key: "industry", label: "Industry", default: false },
+  { key: "industry", label: "Industry", default: true },
   { key: "website", label: "Website", default: false },
   { key: "email", label: "Email", default: false },
   { key: "phone", label: "Phone", default: false },
@@ -493,7 +493,16 @@ function loadCompanyCols(): Record<CompanyColKey, boolean> {
 function CompanyListView({ listId, listName }: { listId: string; listName?: string }) {
   const { data, isLoading } = useAllItems(listId, "company");
   const items = React.useMemo(() => data?.items ?? [], [data]);
-  const allCompanies = React.useMemo(() => items.map((i) => i.data as unknown as CollectedCompany), [items]);
+  // Merge the server-side structured AI report (its own column) back onto the
+  // snapshot so the detail drawer can render it. Falls back to any legacy copy
+  // that older rows may have nested inside `data`.
+  const allCompanies = React.useMemo(
+    () => items.map((i) => {
+      const c = i.data as unknown as CollectedCompany;
+      return { ...c, aiReport: i.aiReport ?? c.aiReport ?? null };
+    }),
+    [items],
+  );
   const dbIdByRef = React.useMemo(() => new Map(items.map((i) => [i.refId, i.id])), [items]);
   const dbIdOf = React.useCallback((c: CollectedCompany) => dbIdByRef.get(c.id) ?? c.id, [dbIdByRef]);
 
