@@ -433,6 +433,9 @@ export function CollectedPeopleTable({
                         {rowTags.map((t) => <span key={t.id} className={cn("inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium", TAG_STYLES[t.color].pill)}>{t.label}</span>)}
                       </div>
                       {p.title?.value && <p className="truncate text-xs text-muted-foreground">{p.title.value}</p>}
+                      {p.altName && p.altName !== p.name && (
+                        <p className="truncate text-[11px] text-muted-foreground">Also: <span className="font-medium text-foreground/80">{p.altName}</span></p>
+                      )}
                     </div>
                     <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" />
                   </div>
@@ -519,6 +522,14 @@ export function CollectedPeopleTable({
                           {rowTags.map((t) => (
                             <span key={t.id} className={cn("inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium", TAG_STYLES[t.color].pill)} title={`AI tag: ${t.label}`}>{t.label}</span>
                           ))}
+                          {p.altName && p.altName !== p.name && (
+                            <span
+                              className="inline-flex shrink-0 items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                              title={`Name corrected via LinkedIn (title + company); the email was found using "${p.altName}"`}
+                            >
+                              alt: {p.altName}
+                            </span>
+                          )}
                         </div>
                       </td>
                       {show("title") && (

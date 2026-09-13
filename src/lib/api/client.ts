@@ -311,6 +311,9 @@ export async function findPersonEmail(input: {
   firstName: string;
   lastName: string;
   domain: string;
+  /** Full name as typed — carries middle tokens the first/last split drops, so
+   *  the culture-aware layer can build names like Vietnamese `thild`. */
+  name?: string;
 }): Promise<FinderOutcome> {
   const { data } = await apiPost<FinderOutcome>("/api/v1/finder", input);
   return data;
@@ -365,6 +368,7 @@ export type AppConfigKey =
   | "DEEPSEEK_MODEL"
   | "OPENAI_API_KEY"
   | "OPENAI_MODEL"
+  | "LLM_NAME_STRUCTURE_MODEL"
   | "DECODO_AUTH"
   | "GOOGLE_API_KEY"
   | "GOOGLE_CX"

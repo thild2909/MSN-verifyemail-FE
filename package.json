@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:finder": "npx --yes tsx scripts/finder-regression.mjs",
+    "test:l5-live": "node scripts/l5-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

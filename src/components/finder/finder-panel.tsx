@@ -20,6 +20,19 @@ type Mode = "person" | "domain";
 
 const STATE_UI = FINDER_STATE_META;
 
+/**
+ * Split a single "Full name" field into the first/last parts the finder's
+ * pattern engine needs. The UI only ever shows one input — the first word is
+ * the first name and the last word the last name (middle names are ignored for
+ * email-format purposes).
+ */
+function splitFullName(full: string): { firstName: string; lastName: string } {
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: "", lastName: "" };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
+  return { firstName: parts[0], lastName: parts[parts.length - 1] };
+}
+
 function ScoreBar({ value }: { value: number }) {
   const tone = value >= 85 ? "bg-[hsl(var(--valid))]" : value >= 60 ? "bg-[hsl(var(--risky))]" : "bg-muted-foreground";
   return (
@@ -34,7 +47,7 @@ function ScoreBar({ value }: { value: number }) {
 
 export function FinderPanel() {
   const [mode, setMode] = React.useState<Mode>("person");
-  const [person, setPerson] = React.useState({ firstName: "", lastName: "", domain: "" });
+  const [person, setPerson] = React.useState({ fullName: "", domain: "" });
   const [domain, setDomain] = React.useState("");
   const [results, setResults] = React.useState<FinderResult[]>([]);
   const { toast } = useToast();
@@ -70,7 +83,11 @@ export function FinderPanel() {
   const search = useMutation({
     mutationFn: async () => {
       if (mode === "person") {
-        const outcome = await findPersonEmail(person);
+        const { firstName, lastName } = splitFullName(person.fullName);
+        // Send the full name too — the split keeps only first/last, but the
+        // culture-aware layer needs middle tokens (e.g. Vietnamese "Le Dinh Thi"
+        // → thild = thi + l + d) to build the right local-part.
+        const outcome = await findPersonEmail({ firstName, lastName, domain: person.domain, name: person.fullName.trim() });
         return { kind: "person" as const, outcome };
       }
       const contacts = await findEmailsByDomain(domain);
@@ -99,7 +116,7 @@ export function FinderPanel() {
 
   const canSearch =
     mode === "person"
-      ? person.firstName && person.lastName && person.domain
+      ? person.fullName.trim().length > 0 && person.domain.trim().length > 0
       : domain.trim().length > 0;
 
   /** Manual live re-verify of one row; mirrors the server's verdict rule. */
@@ -171,12 +188,8 @@ export function FinderPanel() {
             {mode === "person" ? (
               <>
                 <div className="space-y-1.5">
-                  <Label>First name</Label>
-                  <Input value={person.firstName} onChange={(e) => setPerson({ ...person, firstName: e.target.value })} placeholder="John" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Last name</Label>
-                  <Input value={person.lastName} onChange={(e) => setPerson({ ...person, lastName: e.target.value })} placeholder="Smith" />
+                  <Label>Full name</Label>
+                  <Input value={person.fullName} onChange={(e) => setPerson({ ...person, fullName: e.target.value })} placeholder="John Smith" />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Company / domain</Label>
@@ -240,7 +253,7 @@ export function FinderPanel() {
                   <p className="max-w-sm text-xs text-muted-foreground">
                     {finderState === "no_mx"
                       ? `${person.domain} has no mail server, so it can't receive email.`
-                      : `The backend couldn't confirm any mailbox for ${person.firstName} ${person.lastName} on this domain.`}
+                      : `The backend couldn't confirm any mailbox for ${person.fullName.trim()} on this domain.`}
                   </p>
                   {finderState === "not_found" && results[0]?.email && (
                     <p className="text-xs text-muted-foreground">

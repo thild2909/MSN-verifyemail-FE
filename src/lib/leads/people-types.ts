@@ -42,6 +42,10 @@ export interface CollectedPerson {
   name: string;
   firstName: string;
   lastName: string;
+  // A corrected/fuller name discovered by the Find & verify third layer (reverse
+  // role→profile LinkedIn lookup) when the stored name was incomplete or wrong.
+  // The email that resolved was found using THIS name's patterns.
+  altName?: string | null;
   title: SourcedField | null;
   seniority: PersonSeniority;
   linkedin: SourcedField | null;

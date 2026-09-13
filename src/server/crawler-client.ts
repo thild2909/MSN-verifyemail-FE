@@ -241,6 +241,63 @@ export async function resolvePersonEmailsViaCrawler(input: {
   }
 }
 
+/**
+ * Reverse person lookup — find who holds a given TITLE at a COMPANY on LinkedIn.
+ * The People "Find & verify" third layer uses it to check whether a stored name
+ * is complete/correct: it searches by role (not name), returns the matching
+ * profile's real name, and flags `changed` when that differs from `known_name`.
+ * Throws on transport error.
+ */
+export interface PersonByRoleResult {
+  matched: boolean;
+  changed: boolean;
+  name: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  linkedin: string | null;
+  title: string | null;
+  confidence: number;
+}
+export async function resolvePersonByRoleViaCrawler(input: {
+  title: string; company: string; domain?: string | null; website?: string | null; location?: string | null; linkedin?: string | null; knownName?: string | null;
+}): Promise<PersonByRoleResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/person-by-role`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: input.title,
+        company: input.company,
+        domain: input.domain ?? undefined,
+        website: input.website ?? undefined,
+        location: input.location ?? "",
+        linkedin: input.linkedin ?? undefined,
+        known_name: input.knownName ?? undefined,
+      }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /person-by-role responded ${res.status}`);
+    const d = (await res.json()) as {
+      matched?: boolean; changed?: boolean; name?: string | null; first_name?: string | null; last_name?: string | null; linkedin?: string | null; title?: string | null; confidence?: number;
+    };
+    return {
+      matched: !!d.matched,
+      changed: !!d.changed,
+      name: d.name ?? null,
+      firstName: d.first_name ?? null,
+      lastName: d.last_name ?? null,
+      linkedin: d.linkedin ?? null,
+      title: d.title ?? null,
+      confidence: d.confidence ?? 0,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* ------------------------------- people ---------------------------------- */
 
 import type { CollectedPerson, PersonSeniority, PeopleSeedInput } from "@/lib/leads/people-types";
@@ -410,6 +467,44 @@ export async function llmFindEmailsViaCrawler(records: EmailFindRecord[]): Promi
     });
     if (!res.ok) throw new Error(`crawler-service /llm/find-emails responded ${res.status}`);
     return (await res.json()) as LlmEmailFindResponse;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* --------------------- Layer 5: name-ethnicity structure ----------------- */
+
+export interface NameStructureRecord {
+  id: string; name: string; country?: string | null;
+  title?: string | null; company?: string | null; linkedin?: string | null;
+  location?: string | null; domain?: string | null; companyEmail?: string | null;
+}
+export interface NameStructureOut {
+  id: string; ethnicity: string; locals: string[];
+  correctName?: string | null; nameVerified?: boolean; roleMatches?: boolean;
+  domain?: string | null; domains?: string[];
+}
+export interface NameStructureResponse { configured: boolean; results: NameStructureOut[]; tokens: number; model: string; provider: "openai" | "deepseek" }
+
+/**
+ * Layer 5 fallback: ask the LLM which ethnic naming system a name belongs to and
+ * what email LOCAL-PARTS it typically produces for this person. The caller
+ * combines the returned locals with the known domain(s) and SMTP-verifies each.
+ * Throws on transport error.
+ */
+export async function analyzeNameEmailStructureViaCrawler(records: NameStructureRecord[], webSearch?: boolean): Promise<NameStructureResponse> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/llm/name-email-structure`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ records, webSearch }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /llm/name-email-structure responded ${res.status}`);
+    return (await res.json()) as NameStructureResponse;
   } finally {
     clearTimeout(timer);
   }
@@ -663,6 +758,32 @@ export function setSettingsRemote(patch: unknown): Promise<unknown> {
 /** Test the proxy pool: confirms the list still downloads + probes sample IPs. */
 export function testProxyRemote(): Promise<unknown> {
   return svcFetch("/proxy/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+}
+
+/**
+ * Whether the crawler can actually perform Layer-5 web-search escalation (OpenAI
+ * configured AND web search not globally disabled on the backend). Memoized for a
+ * short TTL so the People pass doesn't fire a wasted web-search call when the
+ * backend has it turned off. Defaults to `false` on any error (safer: no waste).
+ */
+let l5WebCache: { at: number; on: boolean } | undefined;
+const L5_WEB_TTL_MS = 60_000;
+export async function l5WebSearchAvailable(): Promise<boolean> {
+  if (l5WebCache && Date.now() - l5WebCache.at < L5_WEB_TTL_MS) return l5WebCache.on;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
+    const j = res.ok ? ((await res.json()) as { l5WebSearch?: boolean }) : null;
+    const on = j?.l5WebSearch === true;
+    l5WebCache = { at: Date.now(), on };
+    return on;
+  } catch {
+    l5WebCache = { at: Date.now(), on: false };
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Reachability probe for the crawler service. */

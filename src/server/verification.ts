@@ -43,6 +43,36 @@ function cache(): Map<string, CachedEntry> {
   return globalThis.__verifyCache;
 }
 
+/**
+ * GLOBAL cap on concurrent backend SMTP checks. Row/candidate parallelism in the
+ * People pass and the finder can otherwise fan out to dozens of simultaneous
+ * `check_email` calls, which floods the Rust engine (reacher) — it then returns
+ * 429/503 or drops connections, surfacing as `VerifierUnavailableError` that
+ * aborts the whole pass. This semaphore bounds TOTAL in-flight SMTP regardless of
+ * how many callers run, so the engine stays healthy. Tune with VERIFY_SMTP_CONCURRENCY.
+ */
+const SMTP_MAX = Math.max(1, Math.min(Number(process.env.VERIFY_SMTP_CONCURRENCY ?? 6), 32));
+declare global {
+  // eslint-disable-next-line no-var
+  var __verifySmtpGate: { active: number; queue: Array<() => void> } | undefined;
+}
+function gate() {
+  if (!globalThis.__verifySmtpGate) globalThis.__verifySmtpGate = { active: 0, queue: [] };
+  return globalThis.__verifySmtpGate;
+}
+async function withSmtpSlot<T>(fn: () => Promise<T>): Promise<T> {
+  const g = gate();
+  if (g.active >= SMTP_MAX) await new Promise<void>((r) => g.queue.push(r));
+  g.active++;
+  try {
+    return await fn();
+  } finally {
+    g.active--;
+    const next = g.queue.shift();
+    if (next) next();
+  }
+}
+
 export interface CachedVerifyOutcome extends VerifyOutcome {
   /** True when served from cache (no backend call was made). */
   cached: boolean;
@@ -68,7 +98,7 @@ export async function cachedVerify(
     if (hit) cache().delete(key);
   }
 
-  const outcome = await m365Confirmed(await verifyWithBackend(email), email);
+  const outcome = await m365Confirmed(await withSmtpSlot(() => verifyWithBackend(email)), email);
   // Persist only real, DEFINITIVE engine results — never mock fallbacks or
   // transient (unknown/risky) verdicts.
   if (outcome.provider === "reacher" && CACHEABLE_STATUS.has(outcome.result.status)) {

@@ -84,7 +84,13 @@ function authHeaders(): Record<string, string> {
  * throws `VerifierUnavailableError` if the engine could not be reached. Never
  * returns a fabricated result.
  */
-export async function verifyWithBackend(email: string): Promise<VerifyOutcome> {
+// Transient HTTP statuses worth retrying — the engine is overloaded/rate-limited,
+// not down. A brief backoff usually clears them (esp. under bulk fan-out).
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = Math.max(1, Math.min(Number(process.env.VERIFY_MAX_ATTEMPTS ?? 3), 6));
+
+/** One backend attempt. Returns the outcome, OR throws `{ retryable, status }`. */
+async function verifyAttempt(email: string): Promise<VerifyOutcome> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -97,24 +103,42 @@ export async function verifyWithBackend(email: string): Promise<VerifyOutcome> {
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new VerifierUnavailableError(
-        `Verification engine responded ${res.status}: ${body.slice(0, 200)}`,
-        res.status,
-      );
+      const e = new VerifierUnavailableError(`Verification engine responded ${res.status}: ${body.slice(0, 200)}`, res.status);
+      (e as { retryable?: boolean }).retryable = RETRYABLE_STATUS.has(res.status);
+      throw e;
     }
     const output = (await res.json()) as CheckEmailOutput;
     return { result: mapReacherOutput(output), provider: "reacher" };
   } catch (err) {
     if (err instanceof VerifierUnavailableError) throw err;
-    // Our own deadline fired (controller aborted) → the engine is up but this
-    // one mailbox was too slow. Treat as a transient per-email "unknown" so a
-    // bulk pass keeps going instead of aborting on a single slow SMTP probe.
+    // Our own deadline fired → engine is up but this mailbox was slow. Transient
+    // per-email "unknown" so the pass keeps going (no retry, no abort).
     if (controller.signal.aborted) return timedOutOutcome(email);
+    // A network/connection error (ECONNREFUSED / reset / socket hang up) — common
+    // when the engine is briefly overloaded; retryable.
     const message = err instanceof Error ? err.message : "Unknown error";
-    throw new VerifierUnavailableError(`Verification engine unreachable: ${message}`);
+    const e = new VerifierUnavailableError(`Verification engine unreachable: ${message}`);
+    (e as { retryable?: boolean }).retryable = true;
+    throw e;
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function verifyWithBackend(email: string): Promise<VerifyOutcome> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await verifyAttempt(email);
+    } catch (err) {
+      lastErr = err;
+      const retryable = err instanceof VerifierUnavailableError && (err as { retryable?: boolean }).retryable === true;
+      if (!retryable || attempt === MAX_ATTEMPTS) throw err;
+      // Backoff with jitter so many concurrent workers don't retry in lockstep.
+      await new Promise((r) => setTimeout(r, 250 * attempt + Math.floor(Math.random() * 200)));
+    }
+  }
+  throw lastErr; // unreachable
 }
 
 /**

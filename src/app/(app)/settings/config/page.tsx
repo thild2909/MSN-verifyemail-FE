@@ -33,7 +33,8 @@ const GROUPS: GroupDef[] = [
       { key: "DEEPSEEK_API_KEY", label: "DeepSeek API key", placeholder: "sk-…", help: "platform.deepseek.com key.", mono: true },
       { key: "DEEPSEEK_MODEL", label: "DeepSeek model", placeholder: "deepseek-chat", mono: true },
       { key: "OPENAI_API_KEY", label: "OpenAI API key", placeholder: "sk-…", help: "platform.openai.com key — enables the ChatGPT option in Find with AI.", mono: true },
-      { key: "OPENAI_MODEL", label: "OpenAI model", placeholder: "gpt-4o-mini", mono: true },
+      { key: "OPENAI_MODEL", label: "OpenAI model", placeholder: "gpt-4o", help: "Model for “Find with AI” reports.", mono: true },
+      { key: "LLM_NAME_STRUCTURE_MODEL", label: "Email name-analysis model (Layer 5)", placeholder: "gpt-4o-mini", help: "Model for the email finder’s Layer-5 name-ethnicity / email-structure step. Cheap tier is enough — the address is SMTP-verified anyway. Default gpt-4o-mini.", mono: true },
     ],
   },
   {

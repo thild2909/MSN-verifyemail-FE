@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { findManyEmails } from "@/server/finder";
+import { findManyEmailsLayered } from "@/server/people-verify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +12,12 @@ const personSchema = z.object({
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
   domain: z.string().trim().min(1).max(255),
+  // Optional context per row (from the CSV) — unlocks the richer layers.
+  name: z.string().trim().max(200).optional(),
+  company: z.string().trim().max(200).nullish(),
+  title: z.string().trim().max(200).nullish(),
+  linkedin: z.string().trim().max(400).nullish(),
+  country: z.string().trim().max(120).nullish(),
 });
 
 const schema = z.object({
@@ -35,6 +41,6 @@ export async function POST(req: Request) {
     return errorResponse("INVALID_REQUEST", `A \`people\` array (1–${MAX_PEOPLE}) of {firstName, lastName, domain} is required.`, 400);
   }
 
-  const response = await findManyEmails(parsed.data.people);
+  const response = await findManyEmailsLayered(parsed.data.people);
   return NextResponse.json({ success: true, data: response });
 }

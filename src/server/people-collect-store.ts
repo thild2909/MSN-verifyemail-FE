@@ -606,9 +606,11 @@ export interface PersonVerifyTarget {
   lastName: string;
   domain: string | null;
   location: string | null; // for the support-email domain lookup (namesake-proofing)
+  country: string | null; // for the Layer-4 culture-aware pattern engine
   email: string | null;
   emailKind: CollectedPerson["emailKind"];
   title: string | null;
+  linkedin: string | null; // for the Layer-5 person↔role↔company verification
   companyEmail: string | null; // existing employer email (don't clobber an imported value)
 }
 function toVerifyTarget(p: CollectedPerson): PersonVerifyTarget {
@@ -622,9 +624,11 @@ function toVerifyTarget(p: CollectedPerson): PersonVerifyTarget {
     lastName: p.lastName,
     domain,
     location: p.location ?? null,
+    country: p.country ?? p.location ?? null,
     email: p.email ? String(p.email.value) : null,
     emailKind: p.emailKind,
     title: p.title?.value ? String(p.title.value) : null,
+    linkedin: p.linkedin?.value ? String(p.linkedin.value) : null,
     companyEmail: p.companyEmail ?? null,
   };
 }
@@ -736,7 +740,7 @@ export function setPersonLlm(jobId: string, personId: string, v: CollectedPerson
 export function updatePersonResolved(
   jobId: string,
   personId: string,
-  patch: Partial<Pick<CollectedPerson, "linkedin" | "title" | "seniority" | "confidence" | "email" | "emailKind" | "location" | "emailVerification" | "companyEmail" | "collection">>,
+  patch: Partial<Pick<CollectedPerson, "linkedin" | "title" | "seniority" | "confidence" | "email" | "emailKind" | "location" | "emailVerification" | "companyEmail" | "collection" | "altName">>,
 ) {
   const p = store().people[jobId]?.find((x) => x.id === personId);
   if (!p) return;
