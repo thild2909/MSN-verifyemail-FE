@@ -15,18 +15,26 @@ import { cn } from "@/lib/utils";
 export function StatsBar({
   summary,
   live,
+  verifying,
   children,
 }: {
-  summary?: string;
+  summary?: React.ReactNode;
   live?: boolean;
+  /** Email verification in progress — keep the mobile bar collapsed and let the
+   *  compact `summary` (a “Verifying emails…” indicator) stand in for the rail,
+   *  instead of forcing the whole rail open the way a crawl does. */
+  verifying?: boolean;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
-  const openOnMobile = open || !!live;
+  // A crawl forces the rail open so its progress bar shows; a verify leaves the
+  // bar collapsed and shows its indicator in the toggle instead.
+  const forceOpen = !!live && !verifying;
+  const openOnMobile = open || forceOpen;
 
   return (
     <div className="border-b">
-      {!live && (
+      {!forceOpen && (
         <button
           onClick={() => setOpen((o) => !o)}
           className="flex w-full items-center justify-between gap-2 px-4 py-2 text-xs text-muted-foreground md:hidden"

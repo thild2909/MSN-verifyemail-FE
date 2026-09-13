@@ -337,7 +337,7 @@ export function CollectedPeopleTable({
             {aiOpen && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setAiOpen(false)} />
-                <div className="absolute right-0 z-30 mt-1 w-[22rem] max-w-[calc(100vw-2rem)] rounded-lg border bg-card p-3 shadow-lg">
+                <div className="fixed inset-x-4 z-30 mt-1 rounded-lg border bg-card p-3 shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:w-[22rem] sm:max-w-[calc(100vw-2rem)]">
                   <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="size-4 text-primary" /> AI Support</div>
                   <p className="mb-2 text-xs text-muted-foreground">Describe what to tag. The AI highlights matching people in the table.</p>
                   <div className="flex items-center gap-2">

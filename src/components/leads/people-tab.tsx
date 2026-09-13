@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Users, Trash2, Loader2, Crown, Building2, Mail, Linkedin, MailCheck, MailX, UserSearch, Star, Upload, Sparkles, RotateCw, ExternalLink, MoreHorizontal } from "lucide-react";
+import { Users, Trash2, Loader2, Crown, Building2, Mail, Linkedin, MailCheck, MailX, MailQuestion, UserSearch, Star, Upload, Sparkles, RotateCw, ExternalLink, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
@@ -152,6 +152,10 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
   // and came back empty (verdict not_found = summary.emailsNotFound). The separate
   // "Not searched" rows (never looked up) are handled by the normal Find & verify.
   const notFound = s?.emailsNotFound ?? 0;
+  // "Not searched": people never looked up for an email (no verification record at
+  // all) — the complement of emailsVerified (looked up, has a result) + emailsNotFound
+  // (looked up, came back empty).
+  const notSearched = s ? Math.max(0, s.people - s.emailsVerified - s.emailsNotFound) : 0;
   const seedLabel = active?.mode === "enrich" ? "Rows" : "Companies";
   // Coverage-gap companies (discover mode, crawl done, nobody found) that the AI
   // exec-fill can still try — so "AI verify" stays useful even at 0 people.
@@ -260,22 +264,37 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
 
       {/* Stats */}
       {s && (
-        <StatsBar live={!!live} summary={`${formatNumber(s.people)} people · ${formatNumber(s.withEmail)} emails · ${formatNumber(s.withLinkedin)} LinkedIn`}>
+        <StatsBar
+          live={!!live}
+          verifying={verifying}
+          summary={
+            verifying
+              ? <span className="inline-flex items-center gap-1.5 font-medium text-[hsl(var(--risky))]"><Loader2 className="size-3.5 animate-spin" /> Verifying emails…</span>
+              : `${formatNumber(s.people)} people · ${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)} Valid emails · ${formatNumber(notFound)} Not found`
+          }
+        >
+          {live && (
+            active.verifyStatus === "verifying"
+              // Verifying: just the indicator — no flex-1/min-width so it hugs its
+              // text instead of stretching and leaving a big empty gap on mobile.
+              ? <div className="flex items-center gap-2 md:basis-full">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--risky))]"><Loader2 className="size-3.5 animate-spin" /> Verifying emails…</span>
+                </div>
+              // Crawling: the progress bar needs to fill the row.
+              : <div className="flex min-w-[160px] flex-1 items-center gap-2 md:basis-full">
+                  <Progress value={active.progress} className="flex-1" /><span className="tabular-nums text-muted-foreground">{active.progress}%</span>
+                </div>
+          )}
           <Stat icon={Users} label="People" value={formatNumber(s.people)} />
+          <Stat icon={MailCheck} label="Valid emails" value={`${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)}`} />
+          <Stat icon={MailX} label="Not found" value={formatNumber(notFound)} />
+          <Stat icon={MailQuestion} label="Not searched" value={formatNumber(notSearched)} />
+          <Stat icon={Building2} label={seedLabel} value={active.mode === "enrich" ? `${formatNumber(s.rowsWithPeople ?? s.people)}/${formatNumber(s.companies)}` : `${formatNumber(s.companiesWithPeople)}/${formatNumber(s.companies)}`} />
+          <Stat icon={Mail} label="Emails" value={formatNumber(s.withEmail)} />
           <Stat icon={Star} label="Founders" value={formatNumber(s.founders)} />
           <Stat icon={Crown} label="C-Level" value={formatNumber(s.cLevel)} />
           <Stat icon={Users} label="VP / Pres" value={formatNumber(s.vps)} />
-          <Stat icon={Building2} label={seedLabel} value={active.mode === "enrich" ? `${formatNumber(s.rowsWithPeople ?? s.people)}/${formatNumber(s.companies)}` : `${formatNumber(s.companiesWithPeople)}/${formatNumber(s.companies)}`} />
-          <Stat icon={Mail} label="Emails" value={formatNumber(s.withEmail)} />
           <Stat icon={Linkedin} label="LinkedIn" value={formatNumber(s.withLinkedin)} />
-          <Stat icon={MailCheck} label="Valid emails" value={`${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)}`} />
-          {live && (
-            <div className="flex min-w-[160px] flex-1 items-center gap-2">
-              {active.verifyStatus === "verifying"
-                ? <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--risky))]"><Loader2 className="size-3.5 animate-spin" /> Verifying emails…</span>
-                : <><Progress value={active.progress} className="flex-1" /><span className="tabular-nums text-muted-foreground">{active.progress}%</span></>}
-            </div>
-          )}
         </StatsBar>
       )}
 

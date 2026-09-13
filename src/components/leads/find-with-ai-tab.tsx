@@ -297,7 +297,8 @@ export function FindWithAiTab() {
               onKeyDown={onKeyDown}
               rows={2}
               placeholder="Describe the companies and roles you want to find…"
-              className="max-h-[240px] min-h-[72px] w-full resize-none bg-transparent px-1.5 py-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground"
+              /* text-base (16px) on mobile stops iOS Safari auto-zooming on focus; back to text-sm from sm+. */
+              className="max-h-[240px] min-h-[72px] w-full resize-none bg-transparent px-1.5 py-1 text-base leading-relaxed outline-none placeholder:text-muted-foreground sm:text-sm"
             />
             {/* Toolbar */}
             <div className="flex flex-wrap items-center gap-2">
