@@ -26,7 +26,16 @@ import type { VerificationResult } from "@/lib/types";
 
 export const BACKEND_URL = process.env.EMAIL_VERIFIER_URL ?? "http://localhost:8080";
 const SECRET = process.env.EMAIL_VERIFIER_SECRET;
-const TIMEOUT_MS = Number(process.env.EMAIL_VERIFIER_TIMEOUT_MS ?? 60_000);
+// Per-request deadline. Lowered from 60s → 25s: a responsive mail server answers
+// a verification (DNS + SMTP RCPT) in a few seconds; a server that has not replied
+// in 25s is tarpitting / unreachable and will not yield a trustworthy verdict no
+// matter how long we wait — waiting the old 60s just froze the People pass (each
+// "hard" row runs ~20-30 SMTP checks; at 60s a single tarpitting domain cost
+// minutes). A deadline hit returns a transient `unknown` (never cached, mx left
+// "unknown" so the finder does NOT treat it as a dead domain), so recall on
+// genuinely-slow-but-real mailboxes is only ever deferred, never wrongly failed.
+// Tune with EMAIL_VERIFIER_TIMEOUT_MS.
+const TIMEOUT_MS = Number(process.env.EMAIL_VERIFIER_TIMEOUT_MS ?? 25_000);
 
 /** Raised when the verification engine cannot be reached or refuses the request. */
 export class VerifierUnavailableError extends Error {
@@ -41,6 +50,11 @@ export class VerifierUnavailableError extends Error {
 export interface VerifyOutcome {
   result: VerificationResult;
   provider: "reacher";
+  /** True when OUR per-request deadline fired (the server did not answer in time),
+   *  as opposed to the engine returning a verdict. Lets the finder treat a domain
+   *  whose probe timed out as unverifiable (tarpit/unreachable) and skip a futile
+   *  full sweep — without confusing it with a fast engine `unknown` (greylist). */
+  timedOut?: boolean;
 }
 
 /**
@@ -53,6 +67,7 @@ function timedOutOutcome(email: string): VerifyOutcome {
   const domain = email.split("@")[1] ?? "";
   return {
     provider: "reacher",
+    timedOut: true,
     result: {
       email,
       status: "unknown",
@@ -84,15 +99,19 @@ function authHeaders(): Record<string, string> {
  * throws `VerifierUnavailableError` if the engine could not be reached. Never
  * returns a fabricated result.
  */
-// Transient HTTP statuses worth retrying — the engine is overloaded/rate-limited,
-// not down. A brief backoff usually clears them (esp. under bulk fan-out).
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
-const MAX_ATTEMPTS = Math.max(1, Math.min(Number(process.env.VERIFY_MAX_ATTEMPTS ?? 3), 6));
+// The engine demonstrably serves /v1/check_email (verified: 30 concurrent → 30×200),
+// so ANY non-2xx it returns under load — a stray 404, a 429/5xx, a dropped
+// connection — is transient, not a permanent "route missing". Retry them all EXCEPT
+// auth failures (401/403), where a config secret is wrong and a retry can't help.
+// This is what stops a single stray 404 mid-pass from aborting the whole run
+// ("Verification interrupted"). A brief jittered backoff clears the blip.
+const NON_RETRYABLE_STATUS = new Set([401, 403]);
+const MAX_ATTEMPTS = Math.max(1, Math.min(Number(process.env.VERIFY_MAX_ATTEMPTS ?? 4), 8));
 
 /** One backend attempt. Returns the outcome, OR throws `{ retryable, status }`. */
-async function verifyAttempt(email: string): Promise<VerifyOutcome> {
+async function verifyAttempt(email: string, timeoutMs: number): Promise<VerifyOutcome> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${BACKEND_URL}/v1/check_email`, {
       method: "POST",
@@ -104,7 +123,7 @@ async function verifyAttempt(email: string): Promise<VerifyOutcome> {
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       const e = new VerifierUnavailableError(`Verification engine responded ${res.status}: ${body.slice(0, 200)}`, res.status);
-      (e as { retryable?: boolean }).retryable = RETRYABLE_STATUS.has(res.status);
+      (e as { retryable?: boolean }).retryable = !NON_RETRYABLE_STATUS.has(res.status);
       throw e;
     }
     const output = (await res.json()) as CheckEmailOutput;
@@ -125,11 +144,12 @@ async function verifyAttempt(email: string): Promise<VerifyOutcome> {
   }
 }
 
-export async function verifyWithBackend(email: string): Promise<VerifyOutcome> {
+export async function verifyWithBackend(email: string, opts: { timeoutMs?: number } = {}): Promise<VerifyOutcome> {
+  const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : TIMEOUT_MS;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      return await verifyAttempt(email);
+      return await verifyAttempt(email, timeoutMs);
     } catch (err) {
       lastErr = err;
       const retryable = err instanceof VerifierUnavailableError && (err as { retryable?: boolean }).retryable === true;

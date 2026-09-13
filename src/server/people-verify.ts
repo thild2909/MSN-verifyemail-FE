@@ -168,6 +168,14 @@ const CANDIDATE_CONCURRENCY = Math.max(1, Math.min(Number(process.env.PEOPLE_VER
 // pathologically slow rows (which rarely find anything anyway) skip the SERP tail.
 const ROW_BUDGET_MS = Math.max(5_000, Number(process.env.PEOPLE_VERIFY_ROW_BUDGET_MS ?? 25_000));
 
+// HARD per-row deadline (backstop, no-hang guarantee): no single row may occupy a
+// worker longer than this regardless of how slow any downstream call is. On expiry
+// the row is settled Not-found and the worker moves on. verifyOne keeps its own
+// per-layer timeouts; this only catches a pathological combination. Must exceed the
+// slowest single layer (reacher 25s, crawler SERP 20s) so it never cuts a healthy row.
+const ROW_HARD_MS = Math.max(20_000, Number(process.env.PEOPLE_VERIFY_ROW_HARD_MS ?? 60_000));
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 /**
  * Public-sources layer: fetch the person's published email candidates from the
  * web and SMTP-verify each in score order. The first backend-confirmed mailbox
@@ -855,22 +863,51 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
     if (++sinceCommit >= COMMIT_EVERY) { sinceCommit = 0; store.commitVerification(jobId); }
   };
 
+  // Settle an engine-flaky row as a TRANSIENT unknown (never a false Not-found):
+  // status "unknown" is not a real verdict, so it is NOT sealed and the row stays
+  // in the "Not searched" bucket, ready for the next pass. This is what lets a
+  // stray engine error skip ONE row WITHOUT aborting the whole run — the fix for
+  // the "Verification interrupted" abort.
+  const transientUnknown = (): PersonPatch => ({
+    emailVerification: { email: "", status: "unknown", score: 0, provider: "reacher", verifiedAt: now() },
+  });
+  let engineFailures = 0;
+
   const handleRow = async (t: store.PersonVerifyTarget) => {
     store.markPersonVerifying(jobId, t.personId, true);
     try {
       let res: VerifyOneResult | null = null;
+      let engineFailed = false;
+      let timedOut = false;
       try {
-        res = await verifyOne(t, { skipLlm: true });
+        // Hard per-row deadline: a single row can never wedge a worker (no-hang
+        // guarantee). verifyOne keeps its own layer timeouts; this is the backstop.
+        const raced = await Promise.race([
+          verifyOne(t, { skipLlm: true }),
+          sleep(ROW_HARD_MS).then(() => "DEADLINE" as const),
+        ]);
+        if (raced === "DEADLINE") timedOut = true;
+        else res = raced;
       } catch (e) {
-        // Engine unreachable → abort the whole pass with a real error rather
-        // than silently marking everyone "not found".
-        if (e instanceof VerifierUnavailableError) throw e;
-        res = null;
+        // A per-row engine failure is TRANSIENT — the backend already retries
+        // internally and reacher is verified healthy under load — so NEVER abort
+        // the whole pass. Mark this row transient-unknown and carry on.
+        if (e instanceof VerifierUnavailableError) engineFailed = true;
+        else res = null; // any other error → treat this one row as Not found
       }
-      if (!res) apply(t, notFoundPatch("reacher"));
-      else if (res.needsLlm) {
+      if (engineFailed) {
+        store.updatePersonResolved(jobId, t.personId, transientUnknown());
+        engineFailures++;
+      } else if (timedOut || !res) {
+        apply(t, notFoundPatch("reacher"));
+      } else if (res.needsLlm) {
         if (res.companyEmail) deferredCompanyEmail.set(t.personId, res.companyEmail);
         if (res.altName) deferredAltName.set(t.personId, res.altName);
+        // Provisional Not-found NOW so the row leaves "Not searched" immediately
+        // (live progress instead of a frozen count until the terminal L5 batch).
+        // The L5 pass UPGRADES it in place if it resolves a mailbox. In-memory
+        // patch only; the final apply() in the L5 loop counts each row once.
+        store.updatePersonResolved(jobId, t.personId, res.patch);
         pendingLlm.push(t);
       } else apply(t, res);
     } finally {
@@ -902,11 +939,15 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
     (t) => (t.firstName && t.lastName ? 2 : 0) + (t.emailKind !== "found" ? 1 : 0),
   );
 
-  try {
-    await runPool(probes, CONCURRENCY); // learn one pattern per domain
-    await runPool(rest, CONCURRENCY); // fast fill — reuses learned patterns
+  await runPool(probes, CONCURRENCY); // learn one pattern per domain
+  await runPool(rest, CONCURRENCY); // fast fill — reuses learned patterns
 
-    if (pendingLlm.length > 0) {
+  if (pendingLlm.length > 0) {
+    // L5 never aborts the pass: fillWithLlmStructure already swallows engine/LLM
+    // errors per row (returns Not-found), and this guard catches anything else so
+    // the pass always reaches its clean "done" state (no verifying→idle, which is
+    // what surfaced the "Verification interrupted" toast).
+    try {
       store.setVerifyingPersonIds(jobId, pendingLlm.map((t) => t.personId));
       // P2 — knowledge-only for everyone; escalate ONLY the unresolved rows (capped
       // + prioritized) to a web-search pass that discovers moved/parent domains
@@ -930,22 +971,19 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
           altName: r.altName ?? an,
         });
       }
+    } catch (e) {
+      console.error(`[verify-emails] L5 phase error for ${jobId} (continuing):`, e);
     }
-  } catch (e) {
-    if (e instanceof VerifierUnavailableError) {
-      // Don't mark the pass "done" — persist whatever was verified and reset to
-      // idle so it can be retried, then surface the error to the route.
-      store.setVerifyingPersonIds(jobId, []);
-      store.commitVerification(jobId);
-      store.setJobVerifyStatus(jobId, "idle");
-    }
-    throw e;
   }
 
+  if (engineFailures > 0) {
+    console.warn(`[verify-emails] ${jobId}: ${engineFailures} row(s) hit transient engine errors and stay Not searched (re-run to retry).`);
+  }
   store.setVerifyingPersonIds(jobId, []);
   store.commitVerification(jobId);
   store.setJobVerifyStatus(jobId, "done");
   store.sealMissedEmailLookups(jobId);
+  store.flushNow(); // durably persist the final state (throttled saves may be pending)
   const provider: "reacher" | "none" = providers.has("reacher") ? "reacher" : "none";
   return { verified, valid, found, provider };
 }

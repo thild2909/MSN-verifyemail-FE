@@ -51,7 +51,7 @@ function cache(): Map<string, CachedEntry> {
  * aborts the whole pass. This semaphore bounds TOTAL in-flight SMTP regardless of
  * how many callers run, so the engine stays healthy. Tune with VERIFY_SMTP_CONCURRENCY.
  */
-const SMTP_MAX = Math.max(1, Math.min(Number(process.env.VERIFY_SMTP_CONCURRENCY ?? 6), 32));
+const SMTP_MAX = Math.max(1, Math.min(Number(process.env.VERIFY_SMTP_CONCURRENCY ?? 10), 32));
 declare global {
   // eslint-disable-next-line no-var
   var __verifySmtpGate: { active: number; queue: Array<() => void> } | undefined;
@@ -60,16 +60,30 @@ function gate() {
   if (!globalThis.__verifySmtpGate) globalThis.__verifySmtpGate = { active: 0, queue: [] };
   return globalThis.__verifySmtpGate;
 }
+/**
+ * Acquire one SMTP slot, run `fn`, release. Correct hand-off semaphore: a waiter
+ * is woken by INHERITING the finisher's slot (the releaser does NOT decrement and
+ * the woken waiter does NOT re-increment), so `active` can never exceed SMTP_MAX.
+ * The previous version incremented on both the release and the wakeup, which let a
+ * fresh caller grab the just-freed slot while the woken waiter also bumped the
+ * count — briefly ADMITTING MORE than the cap and re-enabling the very reacher
+ * flooding the cap exists to prevent. This version enforces the cap exactly.
+ */
 async function withSmtpSlot<T>(fn: () => Promise<T>): Promise<T> {
   const g = gate();
-  if (g.active >= SMTP_MAX) await new Promise<void>((r) => g.queue.push(r));
-  g.active++;
+  if (g.active >= SMTP_MAX) {
+    // Full: wait to be handed a slot. We do NOT increment on wake — we inherit
+    // the releasing task's slot (it also skips the decrement), keeping the count.
+    await new Promise<void>((r) => g.queue.push(r));
+  } else {
+    g.active++;
+  }
   try {
     return await fn();
   } finally {
-    g.active--;
     const next = g.queue.shift();
-    if (next) next();
+    if (next) next(); // hand our slot directly to a waiter (count unchanged)
+    else g.active--; // nobody waiting → free the slot
   }
 }
 
@@ -84,7 +98,7 @@ export interface CachedVerifyOutcome extends VerifyOutcome {
  */
 export async function cachedVerify(
   email: string,
-  opts: { fresh?: boolean } = {},
+  opts: { fresh?: boolean; timeoutMs?: number } = {},
 ): Promise<CachedVerifyOutcome> {
   const key = email.trim().toLowerCase();
 
@@ -98,7 +112,7 @@ export async function cachedVerify(
     if (hit) cache().delete(key);
   }
 
-  const outcome = await m365Confirmed(await withSmtpSlot(() => verifyWithBackend(email)), email);
+  const outcome = await m365Confirmed(await withSmtpSlot(() => verifyWithBackend(email, { timeoutMs: opts.timeoutMs })), email);
   // Persist only real, DEFINITIVE engine results — never mock fallbacks or
   // transient (unknown/risky) verdicts.
   if (outcome.provider === "reacher" && CACHEABLE_STATUS.has(outcome.result.status)) {

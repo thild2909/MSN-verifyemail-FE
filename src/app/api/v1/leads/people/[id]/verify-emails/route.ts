@@ -3,6 +3,7 @@ import * as store from "@/server/people-collect-store";
 import { verifyCollectedPeople } from "@/server/people-verify";
 import { clearVerifyCache } from "@/server/verification";
 import { clearDomainCache } from "@/server/finder";
+import { pingBackend } from "@/lib/verifier/backend";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +34,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // A pass is already running — don't start a second, racing one.
   if (job.verifyStatus === "verifying") {
     return NextResponse.json({ success: true, data: { started: false, alreadyRunning: true, pending: store.peopleVerifyTargets(id, true).length } });
+  }
+
+  // Pre-flight: only start if the verification engine is actually reachable. This
+  // turns "engine down" into a CLEAR up-front error (before the job is ever marked
+  // "verifying"), instead of a mid-pass verifying→idle flip that surfaced as the
+  // confusing "Verification interrupted" toast. Once started, the pass itself is
+  // resilient to transient per-row engine blips and never aborts.
+  const health = await pingBackend();
+  if (!health.online) {
+    return NextResponse.json(
+      { success: false, error: { code: "VERIFIER_UNAVAILABLE", message: "Verification engine is offline — please try again shortly." } },
+      { status: 503 },
+    );
   }
 
   if (fresh) {

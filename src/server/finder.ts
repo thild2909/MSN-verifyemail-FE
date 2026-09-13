@@ -51,6 +51,18 @@ const DOMAIN_TTL_MS = Number(process.env.FINDER_DOMAIN_TTL_MS ?? 7 * 24 * 3600 *
 // being cached as "dead". Lets colleagues at a dead domain skip the mx-check.
 const DEAD_MX_TTL_MS = Number(process.env.FINDER_DEAD_MX_TTL_MS ?? 3_600_000);
 
+// The domain-classification probe (one bogus address per new domain) runs on a
+// SHORT deadline: a reachable, well-behaved mail server answers a single RCPT in
+// a few seconds. A domain whose probe does NOT answer in time is tarpitting or
+// unreachable — reacher would spend ~60s per address there (verified live:
+// tarpitting customer domains take ~61s PER check), and a "hard" row runs ~20-30
+// checks, so ONE such domain froze the People pass for minutes. We conclude such a
+// domain is verification-opaque from the timed-out probe and skip the futile sweep
+// (recall-safe: a real mailbox is unobtainable from a server that won't answer;
+// these domains return not_found either way, just ~4× faster). Tune / disable
+// (set very high) with FINDER_CLASSIFY_TIMEOUT_MS.
+const CLASSIFY_TIMEOUT_MS = Number(process.env.FINDER_CLASSIFY_TIMEOUT_MS ?? 15_000);
+
 /**
  * Confidence bar for reporting an email as found when the backend could NOT
  * confirm it as `valid`. Catch-all addresses score ~40-54, so with the default
@@ -138,12 +150,17 @@ export async function classifyDomain(domain: string): Promise<{ klass: DomainCla
   const rand = `zzq-no-user-${Math.random().toString(36).slice(2, 11)}`;
   let v: Awaited<ReturnType<typeof cachedVerify>>;
   try {
-    v = await cachedVerify(`${rand}@${domain}`, { fresh: true });
+    v = await cachedVerify(`${rand}@${domain}`, { fresh: true, timeoutMs: CLASSIFY_TIMEOUT_MS });
   } catch {
     return { klass: "opaque", calls: 1 }; // treat an error as inconclusive (don't cache)
   }
   const calls = v.cached ? 0 : 1;
   if (v.provider !== "reacher") return { klass: "ok", calls }; // mock → behave normally, don't classify
+  // Probe did not answer within the short classify deadline → tarpit / unreachable
+  // server. Cache it opaque so this row skips the (per-address ~60s) sweep and every
+  // colleague at the domain skips too. Recall-safe: a mailbox that a server won't
+  // confirm in time is not obtainable; the row settles not_found either way.
+  if (v.timedOut) { markOpaqueDomain(domain, v.provider); return { klass: "opaque", calls }; }
   const r = v.result;
   if (r.checks.mx === "fail") { markDeadDomain(domain, v.provider); return { klass: "dead", calls }; }
   // ONLY a bogus address coming back `valid` (is_reachable "safe") proves a TRUE
@@ -282,6 +299,12 @@ export async function findPersonEmail(input: {
       return outcome(toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "invalid", 0), "no_mx", calls, total, provider, calls === 0);
     }
     if (cls.klass === "catchall") {
+      return outcome(toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "unverified", 0), "not_found", calls, total, provider, calls === 0);
+    }
+    // Tarpit / unreachable server (the probe timed out): skip the futile per-address
+    // sweep — each check would cost the full deadline. Colleagues already short-
+    // circuit via `preClass` above; this makes the FIRST row on the domain fast too.
+    if (cls.klass === "opaque") {
       return outcome(toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "unverified", 0), "not_found", calls, total, provider, calls === 0);
     }
   }

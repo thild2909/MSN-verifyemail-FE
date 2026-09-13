@@ -97,12 +97,35 @@ function store(): PeopleStoreData {
 }
 
 let saveTimer: NodeJS.Timeout | null = null;
+/**
+ * Synchronous, atomic full-store write. Used at startup and for the rare
+ * user-triggered one-off saves. Atomic (tmp + rename) so a concurrent async
+ * write can never leave a torn file. NOT to be used on the per-person verify
+ * hot path — a 4 MB store stringify+write blocks the single Node thread ~34 ms,
+ * and ~4 calls/person under 12-way concurrency starve the SMTP/SERP network I/O,
+ * which is what made a big "Find & verify" pass appear to hang. Hot paths call
+ * `scheduleSave()` (async, coalesced) instead.
+ */
 function persist(d: PeopleStoreData) {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify(d));
+    const tmp = `${DATA_FILE}.sync.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(d));
+    fs.renameSync(tmp, DATA_FILE);
   } catch { /* best-effort */ }
 }
+
+// Throttle for the hot path. A verify pass calls save ~1×/person; instead of a
+// synchronous whole-store write on each (which blocks the single Node thread ~34ms
+// on a multi-MB store and, under concurrency, starves the reacher/crawler network
+// I/O — the original "hang"), we COALESCE saves to at most one write per
+// SAVE_DEBOUNCE_MS. The polling UI reads the in-memory store (not this file), so
+// throttling the file write does NOT delay live progress; it only bounds
+// durability lag. Leading-edge-free debounce: the first save schedules a timer,
+// later saves within the window are folded into it, and the timer writes the
+// LATEST state. (Replaces an async writer that could wedge its in-flight flag and
+// silently stop persisting — this sync form cannot get stuck.)
+const SAVE_DEBOUNCE_MS = Number(process.env.PEOPLE_STORE_SAVE_MS ?? 800);
 /** Keep only the N most-recent jobs (by createdAt); drop older jobs + their seeds/people. */
 function pruneHistory(s: PeopleStoreData) {
   if (s.jobs.length <= FIND_LEADS_HISTORY_LIMIT) return;
@@ -116,7 +139,7 @@ function pruneHistory(s: PeopleStoreData) {
 
 function scheduleSave() {
   if (saveTimer) return;
-  saveTimer = setTimeout(() => { saveTimer = null; persist(store()); }, 1200);
+  saveTimer = setTimeout(() => { saveTimer = null; persist(store()); }, SAVE_DEBOUNCE_MS);
 }
 
 function emptySummary(companies: number): PeopleSummary {
@@ -475,14 +498,17 @@ export function markPersonVerifying(jobId: string, personId: string, on: boolean
   if (on) cur.add(personId);
   else cur.delete(personId);
   job.verifyingPersonIds = [...cur];
-  persist(store());
+  // In-memory update is enough for the polling UI (it reads the store, not the
+  // file); persist async+coalesced so the per-row spinner state never blocks the
+  // event loop on a synchronous 4 MB write.
+  scheduleSave();
 }
 
 export function setVerifyingPersonIds(jobId: string, ids: string[]) {
   const job = getPeopleJob(jobId);
   if (!job) return;
   job.verifyingPersonIds = ids;
-  persist(store());
+  scheduleSave();
 }
 
 /**
@@ -750,11 +776,21 @@ export function updatePersonResolved(
 }
 export function commitLlm(jobId: string) {
   void jobId;
-  persist(store());
+  scheduleSave();
 }
 
 export function commitVerification(jobId: string) {
+  // recompute() updates the in-memory summary the polling UI reads, so live
+  // progress stays instant; the file write is throttled+coalesced (no event-loop
+  // block on the per-person hot path — the root cause of the "Find & verify" hang).
   recompute(jobId);
+  scheduleSave();
+}
+
+/** Force an immediate synchronous persist (used at the end of a verify pass so the
+ *  final state is durable regardless of the throttle timer). */
+export function flushNow() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   persist(store());
 }
 
