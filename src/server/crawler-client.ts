@@ -17,6 +17,11 @@ import type {
 
 const BASE = process.env.CRAWLER_SERVICE_URL ?? "http://localhost:8090";
 const TIMEOUT_MS = Number(process.env.CRAWLER_TIMEOUT_MS ?? 240_000);
+// Per-PERSON SERP calls (alt-domain / public-sources / reverse-role in the email
+// finder) must NOT inherit the 240s company-crawl timeout — one slow/hung SERP
+// would block a row (and a serpLimit slot) for minutes. Bound them tightly so a
+// stuck lookup fails fast → the pipeline moves on / returns Not found.
+const PERSON_SERP_TIMEOUT_MS = Number(process.env.CRAWLER_PERSON_SERP_TIMEOUT_MS ?? 20_000);
 
 interface CanonField {
   value: string | number;
@@ -192,7 +197,7 @@ export interface CompanyEmailDomainResult {
  */
 export async function resolveCompanyEmailDomainViaCrawler(company: string, location: string): Promise<CompanyEmailDomainResult> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
   try {
     const res = await fetch(`${BASE}/company-email-domain`, {
       method: "POST",
@@ -217,7 +222,7 @@ export async function resolvePersonEmailsViaCrawler(input: {
   name: string; first: string; last: string; company: string; domain: string | null; location: string | null;
 }): Promise<string[]> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
   try {
     const res = await fetch(`${BASE}/person-emails`, {
       method: "POST",
@@ -262,7 +267,7 @@ export async function resolvePersonByRoleViaCrawler(input: {
   title: string; company: string; domain?: string | null; website?: string | null; location?: string | null; linkedin?: string | null; knownName?: string | null;
 }): Promise<PersonByRoleResult> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
   try {
     const res = await fetch(`${BASE}/person-by-role`, {
       method: "POST",
@@ -492,9 +497,12 @@ export interface NameStructureResponse { configured: boolean; results: NameStruc
  * combines the returned locals with the known domain(s) and SMTP-verifies each.
  * Throws on transport error.
  */
+const NAME_STRUCTURE_TIMEOUT_MS = Number(process.env.CRAWLER_NAME_STRUCTURE_TIMEOUT_MS ?? 60_000);
 export async function analyzeNameEmailStructureViaCrawler(records: NameStructureRecord[], webSearch?: boolean): Promise<NameStructureResponse> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
+  // Bounded well below the generic 300s LLM timeout — a hung web-search L5 call
+  // must not stall the whole deferred batch (and the pass) for minutes.
+  const timer = setTimeout(() => controller.abort(), NAME_STRUCTURE_TIMEOUT_MS);
   try {
     const res = await fetch(`${BASE}/llm/name-email-structure`, {
       method: "POST",

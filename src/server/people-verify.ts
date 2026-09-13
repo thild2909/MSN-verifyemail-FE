@@ -161,6 +161,13 @@ const GLOBAL_PATTERN_MAX = Math.max(4, Math.min(Number(process.env.PEOPLE_VERIFY
 // parallelism distorts the timing and causes false positives. 5 is empirically safe.
 const CANDIDATE_CONCURRENCY = Math.max(1, Math.min(Number(process.env.PEOPLE_VERIFY_CANDIDATE_CONCURRENCY ?? 5), 12));
 
+// Per-row wall-clock budget for the INLINE layers. Cheap layers (L1/L4 SMTP, each
+// bounded) always run; once a row has spent this long, the expensive SERP layers
+// (public-sources, reverse-role) are SKIPPED → the row returns Not found fast
+// instead of hanging. Coverage-safe: normal finds resolve well within budget; only
+// pathologically slow rows (which rarely find anything anyway) skip the SERP tail.
+const ROW_BUDGET_MS = Math.max(5_000, Number(process.env.PEOPLE_VERIFY_ROW_BUDGET_MS ?? 25_000));
+
 /**
  * Public-sources layer: fetch the person's published email candidates from the
  * web and SMTP-verify each in score order. The first backend-confirmed mailbox
@@ -432,6 +439,8 @@ async function verifyOne(
   let companyEmail: string | undefined;
   let altName: string | undefined = recoveredDiffers ? recovered : undefined;
   let fallback: VerifyOneResult | null = null; // best not-found patch to persist if every layer misses
+  const startedAt = Date.now();
+  const overBudget = () => Date.now() - startedAt > ROW_BUDGET_MS; // anti-hang: skip slow SERP layers once past budget
 
   if (canPattern) {
     const nonWestern = detectProfile(t.country, recovered || t.name) !== "western";
@@ -485,8 +494,9 @@ async function verifyOne(
     }
 
     // Public-sources: a DIFFERENT published address (personal/parent domain).
-    // Company-scoped scrape, so skip it for a bare name+domain input.
-    if (PUBLIC_SOURCES_LAYER && t.company && layerContinues(outcome.state)) {
+    // Company-scoped scrape, so skip it for a bare name+domain input. Skipped once
+    // past the row budget (anti-hang).
+    if (PUBLIC_SOURCES_LAYER && t.company && !overBudget() && layerContinues(outcome.state)) {
       const pub = await findViaPublicSources(t);
       if (pub) return { ...pub, altName, companyEmail };
     }
@@ -496,7 +506,7 @@ async function verifyOne(
     // generic for a reliable reverse lookup (#4: "Product Owner" etc. → let Layer 5
     // correct the name instead of burning a SERP on namesakes).
     if (
-      NAME_CORRECTION_LAYER && t.company && t.title && !recoveredDiffers &&
+      NAME_CORRECTION_LAYER && t.company && t.title && !recoveredDiffers && !overBudget() &&
       titleResolvableForReverseLookup(t.title) && layerContinues(outcome.state)
     ) {
       const corr = await findViaNameCorrection(t).catch(() => null);
