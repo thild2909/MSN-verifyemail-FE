@@ -69,6 +69,11 @@ export const verificationResultSchema = z.object({
   // Infrastructure details surfaced by the backend.
   provider: z.string().nullable().optional(), // ESP, e.g. "Google Workspace"
   mxRecords: z.array(z.string()).optional(), // MX server hostnames
+  // On a catch-all domain, whether the engine actually DISTINGUISHED this specific
+  // address (per-address SMTP observation) rather than the domain accepting every
+  // address alike. A `valid` with catchAll=true is only trustworthy when this is true;
+  // otherwise it's a "dumb catch-all" that marks every mailbox deliverable.
+  perAddressObservation: z.boolean().optional(),
 });
 export type VerificationResult = z.infer<typeof verificationResultSchema>;
 

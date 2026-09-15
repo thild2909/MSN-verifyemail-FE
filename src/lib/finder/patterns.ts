@@ -157,3 +157,47 @@ export function buildCandidates(
 export function comparePriorDesc(labelA: string, labelB: string): number {
   return priorNormForLabel(labelB) - priorNormForLabel(labelA);
 }
+
+/* --------------------- pattern inference (reverse) ---------------------- */
+
+/**
+ * Reverse-map a KNOWN local-part to the EmailPattern that produced it, given the
+ * person's name. Used to LEARN a domain's convention from a colleague's confirmed
+ * email (e.g. `john@acme.com` for John Smith → pattern id "first"), so the rest of
+ * the company's people can be resolved on the same pattern even when their own
+ * address can't be SMTP-verified (catch-all / opaque domain). Returns the pattern
+ * id, or null when no curated pattern reproduces the local exactly.
+ */
+export function derivePatternId(local: string, first: string, last: string): string | null {
+  const n = nameParts(first, last);
+  // Separator-PRESERVING fold: `john.s` and `johns` are DIFFERENT patterns (first.l vs
+  // firstl), so we must not strip the dot/underscore/hyphen when matching — otherwise
+  // colleagues inherit the wrong format. Keep [a-z0-9._-]; only fold case + accents.
+  const foldLocal = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9._-]/g, "");
+  const L = foldLocal(local);
+  if (!L) return null;
+  for (const p of EMAIL_PATTERNS) {
+    const built = tidyLocal(p.local(n));
+    if (built && foldLocal(built) === L) return p.id;
+  }
+  return null;
+}
+
+/** Look up a pattern by id. */
+export function patternById(id: string): EmailPattern | undefined {
+  return EMAIL_PATTERNS.find((p) => p.id === id);
+}
+
+/**
+ * Build the email for a specific pattern id from a name + domain (no verification).
+ * Used to surface a domain's LEARNED convention as a best guess on a domain SMTP
+ * can't verify. Returns null when the pattern yields an empty local.
+ */
+export function buildEmailForPattern(patternId: string, first: string, last: string, domain: string): { local: string; email: string; label: string } | null {
+  const p = patternById(patternId);
+  const d = cleanDomain(domain);
+  if (!p || !d) return null;
+  const local = tidyLocal(p.local(nameParts(first, last)));
+  if (!local || local.length < 1) return null;
+  return { local, email: `${local}@${d}`, label: p.label };
+}

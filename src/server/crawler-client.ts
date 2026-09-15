@@ -488,6 +488,13 @@ export interface NameStructureOut {
   id: string; ethnicity: string; locals: string[];
   correctName?: string | null; nameVerified?: boolean; roleMatches?: boolean;
   domain?: string | null; domains?: string[];
+  // Web-search only: the person's ACTUAL published email (with the page URL it was
+  // read from), and their current employer if it changed. See analyzeName… in the
+  // crawler-service. Used by the People pass to surface a source-backed address even
+  // when it sits on an unconfirmable catch-all domain.
+  publishedEmail?: string | null;
+  publishedEmailSource?: string | null;
+  currentCompany?: string | null;
 }
 export interface NameStructureResponse { configured: boolean; results: NameStructureOut[]; tokens: number; model: string; provider: "openai" | "deepseek" }
 

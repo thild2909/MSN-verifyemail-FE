@@ -23,9 +23,9 @@
  */
 import "server-only";
 import { cachedVerify } from "./verification";
-import { buildCandidates, cleanDomain, priorNormForLabel } from "@/lib/finder/patterns";
+import { buildCandidates, buildEmailForPattern, cleanDomain, priorNormForLabel } from "@/lib/finder/patterns";
 import { verifyRanked } from "@/lib/finder/verify-orchestration";
-import type { BulkFinderResponse, BulkFinderResult, FinderOutcome, FinderResult, FinderState } from "@/lib/types";
+import type { BulkFinderResponse, BulkFinderResult, FinderOutcome, FinderResult, FinderState, VerificationResult } from "@/lib/types";
 
 /* ----------------------------- domain cache ----------------------------- */
 
@@ -41,6 +41,13 @@ interface DomainFacts {
   deadMx?: boolean; // the domain has NO mail server → nothing on it is deliverable
   catchAll?: boolean; // server accepts EVERY address → a "valid" verdict is meaningless
   opaque?: boolean; // server won't verify (returns "unknown" for everyone) → can't confirm
+  // The domain's KNOWN email convention, LEARNED from a colleague's confirmed/published
+  // email on this exact domain (not from SMTP-probing this person). Lets us resolve
+  // colleagues on a catch-all / opaque domain — where their own address can't be
+  // SMTP-verified — using the company's proven pattern. `knownPatternWeight` counts the
+  // corroborating colleagues (more = higher confidence).
+  knownPatternId?: string; // EmailPattern id, e.g. "first" / "first.last"
+  knownPatternWeight?: number;
   at: number; // epoch ms
 }
 export type DomainClass = "ok" | "catchall" | "opaque" | "dead";
@@ -99,6 +106,61 @@ export function clearDomainCache(): number {
   cache().clear();
   return n;
 }
+
+/**
+ * Seed a domain's KNOWN email convention, learned from a colleague's confirmed or
+ * published email on this exact domain (see people-verify's pass-start seeding).
+ * The most-corroborated pattern wins. This does NOT expire with the negative-fact
+ * TTL — a company's convention is stable — so it is stored with a fresh timestamp
+ * and only the long TTL applies. Used to resolve colleagues on domains SMTP cannot
+ * verify (catch-all / opaque).
+ */
+export function seedDomainPattern(domain: string, patternId: string, weight = 1): void {
+  const d = cleanDomain(domain);
+  if (!d || !patternId) return;
+  const cur = cache().get(d);
+  // Keep the pattern with the highest cumulative weight across colleagues.
+  if (cur?.knownPatternId && cur.knownPatternId !== patternId) {
+    const curW = cur.knownPatternWeight ?? 1;
+    if (weight <= curW) { // existing pattern still dominant → just accumulate nothing
+      cache().set(d, { ...cur, at: Date.now() });
+      return;
+    }
+  }
+  const sameW = cur?.knownPatternId === patternId ? (cur?.knownPatternWeight ?? 0) : 0;
+  cache().set(d, { ...(cur ?? {}), knownPatternId: patternId, knownPatternWeight: sameW + weight, at: Date.now() });
+}
+
+/** The learned convention for a domain, if any. */
+export function knownDomainPattern(domain: string): { patternId: string; weight: number } | null {
+  const f = cache().get(cleanDomain(domain));
+  if (f?.knownPatternId) return { patternId: f.knownPatternId, weight: f.knownPatternWeight ?? 1 };
+  return null;
+}
+
+// Data-driven GLOBAL fallback pattern — the single most common convention across ALL
+// confirmed emails in the store (for this population "first" ≈ 58%). Used as a LAST-
+// resort weak guess on an unverifiable domain with no colleague signal, so a reachable
+// row still gets a likely address instead of a bare not_found. Surfaced at LOW
+// confidence (clearly a guess, never "valid"). Off unless a pass seeds it.
+declare global {
+  // eslint-disable-next-line no-var
+  var __finderGlobalPattern: string | null | undefined;
+}
+export function setGlobalFallbackPattern(patternId: string | null): void {
+  globalThis.__finderGlobalPattern = patternId;
+}
+export function globalFallbackPattern(): string | null {
+  return globalThis.__finderGlobalPattern ?? null;
+}
+// Master switch for surfacing UNVERIFIED best guesses (both colleague-inherited and the
+// global-prior fallback) on domains SMTP cannot verify. Recall-maximising; set
+// PEOPLE_VERIFY_BEST_GUESS=0 to return to strict "confirmed-only" behaviour.
+const BEST_GUESS = (process.env.PEOPLE_VERIFY_BEST_GUESS ?? "1") !== "0";
+// Whether to also use the low-confidence GLOBAL prior (no colleague signal). On by
+// default with BEST_GUESS; PEOPLE_VERIFY_BEST_GUESS_GLOBAL=0 keeps only the
+// high-confidence colleague-inherited guesses.
+const BEST_GUESS_GLOBAL = (process.env.PEOPLE_VERIFY_BEST_GUESS_GLOBAL ?? "1") !== "0";
 
 function getFacts(domain: string): DomainFacts | undefined {
   const f = cache().get(domain);
@@ -172,8 +234,14 @@ export async function classifyDomain(domain: string): Promise<{ klass: DomainCla
   // server DISCRIMINATES (this backend's catch-all latency test): a REAL mailbox that
   // comes back `valid` is trustworthy, a guess never is. So DON'T skip — sweep it, and
   // early-exit picks the one real address (e.g. Vietnamese `thild` on a Google
-  // Workspace catch-all). `invalid` (discriminating) and `unknown` (inconclusive
-  // greylist) likewise proceed; opacity is concluded only after an all-unknown sweep.
+  // Workspace catch-all). `invalid` (discriminating) proceeds to the sweep too.
+  if (r.status === "invalid") return { klass: "ok", calls };
+  // `unknown` for a BOGUS address = the server won't answer for any mailbox
+  // (greylist / block / tarpit). It cannot verify anyone here, so a per-address sweep
+  // is futile — mark it opaque now (skips the sweep → much faster) so the People pass
+  // best-guesses these rows from the domain convention instead of a wall of Not-found.
+  if (r.status === "unknown") { markOpaqueDomain(domain, v.provider); return { klass: "opaque", calls }; }
+  // catch_all / risky / role on bogus → discriminating catch-all; sweep to find a real one.
   return { klass: "ok", calls };
 }
 
@@ -193,6 +261,18 @@ export function cachedDomainClass(domain: string): DomainClass {
 }
 
 /* ------------------------------- helpers -------------------------------- */
+
+/**
+ * A backend `valid` we can TRUST as a real, per-mailbox confirmation. On a catch-all
+ * domain a `valid` (reacher "safe") is only trustworthy when the engine actually made
+ * a PER-ADDRESS observation for it; a "dumb" catch-all marks EVERY address deliverable
+ * (blockchain-ads.com), so a `valid` there with no per-address observation is a false
+ * positive — reject it. Non-catch-all domains are unaffected; a discriminating catch-all
+ * (per-address observed, e.g. resourceledger.com) still passes.
+ */
+function trustedValid(r: VerificationResult): boolean {
+  return r.status === "valid" && (!r.checks.catchAll || r.perAddressObservation === true);
+}
 
 function toResult(
   email: string,
@@ -225,6 +305,34 @@ function outcome(
   fromCache: boolean,
 ): FinderOutcome {
   return { result, state, smtpCalls, skipped, provider, fromCache };
+}
+
+/**
+ * LAST-RESORT best-guess email for a person on a domain SMTP could not verify, used by
+ * the People pipeline ONLY AFTER every discovery layer (patterns, alt-domain, culture,
+ * public-sources, LLM) has missed — never inside the finder itself, so it can never
+ * short-circuit a real find. Two tiers:
+ *   • the domain's convention LEARNED from a confirmed colleague → HIGH confidence
+ *     (74..86 by corroboration); a company uses one format, so this is usually right.
+ *   • else the data-driven GLOBAL-dominant pattern → LOW confidence (50): a weak guess.
+ * Returns null when best-guessing is off or nothing applies. Never claims SMTP "valid".
+ */
+export function bestGuessEmail(domain: string, first: string, last: string): { email: string; label: string; confidence: number } | null {
+  if (!BEST_GUESS || !domain || !first || !last) return null;
+  const known = knownDomainPattern(domain);
+  let patternId: string | null = null;
+  let confidence = 0;
+  if (known) {
+    patternId = known.patternId;
+    confidence = Math.min(86, 74 + Math.min(known.weight, 3) * 4);
+  } else if (BEST_GUESS_GLOBAL) {
+    patternId = globalFallbackPattern();
+    confidence = 50;
+  }
+  if (!patternId) return null;
+  const built = buildEmailForPattern(patternId, first, last, domain);
+  if (!built) return null;
+  return { email: built.email, label: built.label, confidence };
 }
 
 /* ------------------------------- pipeline ------------------------------- */
@@ -317,7 +425,7 @@ export async function findPersonEmail(input: {
   const { winner, mxFail, results } = await verifyRanked(
     ordered,
     (email) => cachedVerify(email),
-    (v) => v.result.status === "valid",
+    (v) => trustedValid(v.result),
     (v) => v.result.checks.mx === "fail",
     { concurrency: FINDER_CANDIDATE_CONCURRENCY },
   );
@@ -346,7 +454,7 @@ export async function findPersonEmail(input: {
     if (!confirmed) {
       const c = await cachedVerify(winner.cand.email, { fresh: true }).catch(() => null);
       if (c && !c.cached) calls++;
-      confirmed = !!c && c.result.status === "valid";
+      confirmed = !!c && trustedValid(c.result);
       if (c) confirmedScore = c.result.score;
     }
     if (confirmed) {
@@ -366,7 +474,14 @@ export async function findPersonEmail(input: {
   // recall-safe sweep — we can reliably conclude the domain is verification-opaque
   // and cache it, so colleagues skip the futile sweep. (One `invalid`/`valid`
   // anywhere means the server DOES discriminate, so we do NOT mark it opaque.)
-  if (results.length > 0 && results.every((p) => p.result.result.status === "unknown")) {
+  // Unverifiable domain: the sweep produced NO definitive verdict — no `valid` winner
+  // and not a single `invalid` (all unknown / catch_all / risky / role). The server
+  // won't confirm OR reject any address here, so its convention can't be pattern-tested.
+  // Mark it opaque so the People pass surfaces a best guess (domain convention / global
+  // prior) instead of Not-found. A single `invalid` anywhere means it DOES discriminate,
+  // so we leave it "ok" (patterns were genuinely tested → a guess would be wrong).
+  const anyDefinitive = results.some((p) => p.result.result.status === "valid" || p.result.result.status === "invalid");
+  if (results.length > 0 && !anyDefinitive) {
     markOpaqueDomain(domain, provider);
   }
 
