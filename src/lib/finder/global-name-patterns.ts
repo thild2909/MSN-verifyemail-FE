@@ -465,6 +465,13 @@ const BUILDERS: Record<string, (p: Parts) => string> = {
   "given.middle": (p) => j(p.g, ".", p.m),
   "givenmiddle": (p) => j(p.g, "", p.m),
   "givenhyphen.family": (p) => (p.givenHyphen ? j(p.givenHyphen, ".", p.family) : ""),
+  // Space-separated COMPOUND given name written hyphenated in the mailbox — very
+  // common for French/Belgian/Italian double first names stored as separate tokens
+  // ("Jean Charles Salvin" → jean-charles.salvin / jean-charles; "Marie Claire Dupont"
+  // → marie-claire.dupont). Distinct from givenHyphen (which needs the raw token to
+  // ALREADY contain a hyphen); this reconstructs the hyphen from given + middle.
+  "givenhyphenmiddle.family": (p) => (p.m ? j(`${p.g}-${p.mAll}`, ".", p.family) : ""), // jean-charles.salvin
+  "givenhyphenmiddle": (p) => (p.m ? `${p.g}-${p.mAll}` : ""), // jean-charles
   "giniteach.family": (p) => (p.gInit.length >= 2 ? j(p.gInit, ".", p.family) : ""), // jp.martin
   "giniteachfamily": (p) => (p.gInit.length >= 2 ? p.gInit + p.family : ""), // jpmartin
   // Hispanic double-surname
@@ -525,8 +532,10 @@ const WESTERN: Ranked[] = [
   { id: "given_family", score: 66 },
   // Compound given / middle-name formats (Kim Lecelyn Bueno → kimlecelyn.bueno).
   { id: "givenmiddle.family", score: 64 },
+  { id: "givenhyphenmiddle.family", score: 63 }, // jean-charles.salvin
   { id: "givenmiddlefamily", score: 60 },
   { id: "given.middle.family", score: 59 },
+  { id: "givenhyphenmiddle", score: 41 }, // jean-charles
   { id: "ginitialminitialfamily", score: 58 },
   { id: "family.given", score: 55 },
   { id: "familygiven", score: 50 },
@@ -542,14 +551,14 @@ const PROFILE_RANKINGS: Partial<Record<NamingProfile, Ranked[]>> = {
     { id: "given", score: 80 }, { id: "ginitial.family", score: 76 }, { id: "family.given", score: 55 },
   ],
   french: [
-    { id: "givenhyphen.family", score: 100 }, { id: "given.family", score: 98 }, { id: "givenfamily", score: 92 },
+    { id: "givenhyphen.family", score: 100 }, { id: "givenhyphenmiddle.family", score: 99 }, { id: "given.family", score: 98 }, { id: "givenfamily", score: 92 },
     { id: "gfull", score: 84 }, { id: "giniteachfamily", score: 80 }, { id: "given", score: 78 },
-    { id: "ginitial.family", score: 74 }, { id: "given.finitial", score: 68 },
+    { id: "ginitial.family", score: 74 }, { id: "given.finitial", score: 68 }, { id: "givenhyphenmiddle", score: 60 },
   ],
   italian: [
     { id: "given.family", score: 100 }, { id: "givenfamily", score: 94 }, { id: "ginitialfamily", score: 88 },
     { id: "gfull", score: 82 }, { id: "gfull.family", score: 80 }, { id: "given", score: 76 },
-    { id: "ginitial.family", score: 72 }, { id: "family.given", score: 55 },
+    { id: "givenhyphenmiddle.family", score: 75 }, { id: "ginitial.family", score: 72 }, { id: "family.given", score: 55 },
   ],
   hispanic: [
     { id: "given.fcore", score: 100 }, { id: "given.fcore.fsecond", score: 92 }, { id: "gfull.fcore", score: 88 },

@@ -669,6 +669,37 @@ export function peopleVerifyTargets(jobId: string, onlyUnverified = true): Perso
   return out;
 }
 
+/**
+ * Confirmed/known emails to LEARN each domain's convention from. Returns, for every
+ * person in the store (ALL jobs — a company's pattern is the same everywhere) whose
+ * email is a real deliverable/found address, the {domain, firstName, lastName, local}
+ * so the finder can derive the domain's pattern and resolve colleagues on catch-all /
+ * opaque domains. Only "valid"/"found" (emailKind found) addresses are used — never a
+ * catch-all guess, which would teach a fabricated pattern.
+ */
+export function knownEmailSignals(): { domain: string; firstName: string; lastName: string; local: string }[] {
+  const out: { domain: string; firstName: string; lastName: string; local: string }[] = [];
+  const s = store();
+  for (const jobId of Object.keys(s.people)) {
+    for (const p of s.people[jobId] ?? []) {
+      const ev = p.emailVerification;
+      const addr = p.email?.value ? String(p.email.value) : "";
+      // Trust only a genuinely-confirmed address: SMTP-valid, or a web-found ("found")
+      // email. Skip catch-all/risky/pattern guesses so we never learn a made-up pattern.
+      const trustworthy = !!addr && ((ev?.status === "valid") || p.emailKind === "found");
+      if (!trustworthy) continue;
+      const at = addr.indexOf("@");
+      if (at <= 0) continue;
+      const local = addr.slice(0, at).toLowerCase();
+      const domain = addr.slice(at + 1).toLowerCase();
+      const first = p.firstName || (p.name ?? "").trim().split(/\s+/)[0] || "";
+      const last = p.lastName || (p.name ?? "").trim().split(/\s+/).slice(-1)[0] || "";
+      if (domain && first && last) out.push({ domain, firstName: first, lastName: last, local });
+    }
+  }
+  return out;
+}
+
 /** Build a verify target for ONE person (per-row "Access email" action). */
 export function personVerifyTarget(jobId: string, personId: string): PersonVerifyTarget | null {
   const p = store().people[jobId]?.find((x) => x.id === personId);

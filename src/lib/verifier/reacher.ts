@@ -34,6 +34,9 @@ interface SmtpDetails {
   is_catch_all: boolean;
   is_deliverable: boolean;
   is_disabled: boolean;
+  // True when the engine made a per-address observation for THIS mailbox on a
+  // catch-all domain (distinguishing it from the domain's blanket accept-all).
+  has_per_address_observation?: boolean;
 }
 interface MiscDetails {
   is_disposable: boolean;
@@ -178,6 +181,7 @@ export function mapReacherOutput(o: CheckEmailOutput): VerificationResult {
     verifiedAt: o.debug?.end_time || new Date().toISOString(),
     provider,
     mxRecords,
+    perAddressObservation: smtp?.has_per_address_observation ?? false,
   };
 }
 
