@@ -388,16 +388,14 @@ async function findViaNameCorrection(
  * Name-recovery (3a) layer. Read the person's DISPLAY name straight off their OWN
  * LinkedIn profile URL (slug-targeted SERP) when the stored name is incomplete and
  * the vanity slug is ABBREVIATED (slug `gohew`, stored "Goh Wei", real "Goh Eng
- * Wei") — the one case `bestFullName` can't recover from the slug alone. When the
- * profile resolves to a DIFFERENT name that still shares a token with the stored
- * one (a fuller version, never a wholesale-different person), re-run the email
- * patterns under it. Returns the corrected name plus any confirmed result (null
- * result = corrected name found but no mailbox; caller re-runs the culture-aware
- * generator with the fuller name, e.g. "Goh Eng Wei" → gohengwei@).
+ * Wei") — the one case `bestFullName` can't recover from the slug alone. Returns
+ * the fuller name (gated to a ≥1-token overlap with the stored name, so it only
+ * ever extends/fixes a name, never swaps in a wholesale-different person), or null.
+ * The caller feeds it into Layer 4 so the culture-aware generator builds the right
+ * local-part ("Goh Eng Wei" → gohengwei@). Kept lean (name only, no email attempts)
+ * so it fits inside the row budget even when SERP is slow.
  */
-async function findViaLinkedinName(
-  t: store.PersonVerifyTarget,
-): Promise<{ altName: string; result: VerifyOneResult | null } | null> {
+async function findViaLinkedinName(t: store.PersonVerifyTarget): Promise<string | null> {
   if (!t.linkedin) return null;
   const linkedin = t.linkedin; // capture narrowed value
   let corr: Awaited<ReturnType<typeof resolveNameByLinkedinUrlViaCrawler>>;
@@ -408,21 +406,9 @@ async function findViaLinkedinName(
   }
   if (!corr.matched || !corr.changed || !corr.firstName || !corr.lastName) return null;
   const altName = (corr.name ?? `${corr.firstName} ${corr.lastName}`).trim();
-  // Precision gate (same as findViaNameCorrection): the correction must overlap the
-  // stored name by ≥1 token, so we only ever extend/fix a name, never swap one in.
   const stored = nameTokens(t.name);
   if (![...nameTokens(altName)].some((tok) => stored.has(tok))) return null;
-
-  let result: VerifyOneResult | null = null;
-  if (t.domain) {
-    const outcome = await findPersonEmail({ firstName: corr.firstName, lastName: corr.lastName, domain: t.domain });
-    if (outcome.state === "verified" || outcome.state === "accept_all") result = patchFromFinder(outcome);
-  }
-  if (!result && PUBLIC_SOURCES_LAYER) {
-    const pub = await findViaPublicSources({ ...t, name: altName, firstName: corr.firstName, lastName: corr.lastName }).catch(() => null);
-    if (pub) result = pub;
-  }
-  return { altName, result };
+  return altName;
 }
 
 /**
@@ -729,9 +715,25 @@ async function verifyOne(
     const domains = uniqueDomains([t.domain, altDomain, ...variantDomains]);
     const liveDomains = outcome.state === "no_mx" ? uniqueDomains([altDomain, ...variantDomains]) : domains;
 
-    // Layer 4 — culture-aware, FRONT-LOADED. Runs on the website + alt-domain.
+    // Layer 3a — DIRECT name recovery from the person's OWN LinkedIn URL. Runs BEFORE
+    // Layer 4 (and before the slow public-sources scrape) so the culture-aware
+    // generator builds the local-part from the FULLER name. Only when we HAVE a
+    // profile URL and the slug did NOT already yield a fuller name — the abbreviated-
+    // slug case (gohew → "Goh Eng Wei") that bestFullName can't recover. Cheap +
+    // targeted (one slug-pinned SERP), so it fits the budget even when SERP is slow.
+    if (
+      LINKEDIN_NAME_LAYER && t.linkedin && !recoveredDiffers && !altName && !overBudget() &&
+      layerContinues(outcome.state)
+    ) {
+      const alt = await findViaLinkedinName(t).catch(() => null);
+      if (alt) altName = alt;
+    }
+
+    // Layer 4 — culture-aware, FRONT-LOADED. Runs on the website + alt-domain, under
+    // the Layer-3a-corrected name when one was recovered (so "Goh Eng Wei" is what
+    // generates gohengwei@, not the incomplete stored "Goh Wei").
     if (GLOBAL_PATTERN_LAYER && layerContinues(outcome.state) && liveDomains.length) {
-      const g = await findViaGlobalPatterns(t, liveDomains).catch(() => null);
+      const g = await findViaGlobalPatterns(t, liveDomains, altName).catch(() => null);
       if (g) return { ...g, altName: g.altName ?? altName, companyEmail };
     }
 
@@ -741,26 +743,6 @@ async function verifyOne(
     if (PUBLIC_SOURCES_LAYER && t.company && !overBudget() && layerContinues(outcome.state)) {
       const pub = await findViaPublicSources(t);
       if (pub) return { ...pub, altName, companyEmail };
-    }
-
-    // Layer 3a — DIRECT name recovery from the person's OWN LinkedIn URL. Runs when
-    // we HAVE a profile URL and the slug did NOT already yield a fuller name — the
-    // abbreviated-slug case (gohew → "Goh Eng Wei") that bestFullName can't recover.
-    // Higher precision than the role-based lookup (it reads the exact profile), so
-    // it runs first and, on a hit, short-circuits the role lookup below.
-    if (
-      LINKEDIN_NAME_LAYER && t.linkedin && !recoveredDiffers && !altName && !overBudget() &&
-      layerContinues(outcome.state)
-    ) {
-      const corr = await findViaLinkedinName(t).catch(() => null);
-      if (corr) {
-        altName = corr.altName;
-        if (corr.result) return { ...corr.result, altName, companyEmail: corr.result.companyEmail ?? companyEmail };
-        if (GLOBAL_PATTERN_LAYER && liveDomains.length) {
-          const g2 = await findViaGlobalPatterns(t, liveDomains, altName).catch(() => null);
-          if (g2) return { ...g2, altName, companyEmail };
-        }
-      }
     }
 
     // Layer 3 — reverse role→profile name-correction (crawler SERP). Skipped when
@@ -825,7 +807,9 @@ async function verifyOne(
   // fabricate an unconfirmed guess (see bestGuessResult), so settle as honest not_found;
   // only reacher-CONFIRMED valids are ever presented.
   if (fallback && fallback.valid) return { ...fallback, altName, companyEmail };
-  return notFoundPatch("reacher");
+  // Preserve a Layer-3a/3 recovered name even when no mailbox confirmed, so the UI
+  // still shows the corrected full name (and a re-verify can reuse it).
+  return { ...notFoundPatch("reacher"), altName, companyEmail };
 }
 
 /* ------------------------- Finder-facing entry points -------------------- */
