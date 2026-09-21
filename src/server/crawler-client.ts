@@ -303,6 +303,51 @@ export async function resolvePersonByRoleViaCrawler(input: {
   }
 }
 
+/**
+ * Direct name recovery — read a person's DISPLAY name off their OWN LinkedIn
+ * profile URL (slug-targeted SERP). Used by "Find & verify" when the stored name
+ * is incomplete and the vanity slug is abbreviated (`gohew` → "Goh Eng Wei"), so
+ * the culture-aware finder can build the right local-part. Flags `changed` when
+ * the recovered name differs from `knownName`. Throws on transport error.
+ */
+export interface NameByLinkedinResult {
+  matched: boolean;
+  changed: boolean;
+  name: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  linkedin: string | null;
+}
+export async function resolveNameByLinkedinUrlViaCrawler(input: {
+  linkedin: string; knownName?: string | null;
+}): Promise<NameByLinkedinResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${BASE}/name-by-linkedin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ linkedin: input.linkedin, known_name: input.knownName ?? undefined }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`crawler-service /name-by-linkedin responded ${res.status}`);
+    const d = (await res.json()) as {
+      matched?: boolean; changed?: boolean; name?: string | null; first_name?: string | null; last_name?: string | null; linkedin?: string | null;
+    };
+    return {
+      matched: !!d.matched,
+      changed: !!d.changed,
+      name: d.name ?? null,
+      firstName: d.first_name ?? null,
+      lastName: d.last_name ?? null,
+      linkedin: d.linkedin ?? null,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /* ------------------------------- people ---------------------------------- */
 
 import type { CollectedPerson, PersonSeniority, PeopleSeedInput } from "@/lib/leads/people-types";

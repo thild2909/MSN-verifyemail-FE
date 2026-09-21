@@ -19,7 +19,7 @@ import { companyDomainVariants } from "@/lib/finder/domain-variants";
 import { resolveMx } from "node:dns/promises";
 import { bestFullName, detectProfile, generateGlobalCandidates, learnGlobalPattern, learnedGlobalPattern, mergeLocals, splitFirstLast } from "@/lib/finder/global-name-patterns";
 import { escalateL5, isDistinctiveLocal, layerContinues, partitionByDomain, sameCompanyDomain, scrapedEmailTrusted, titleResolvableForReverseLookup, verifyRanked } from "@/lib/finder/verify-orchestration";
-import { analyzeNameEmailStructureViaCrawler, l5WebSearchAvailable, resolveCompanyEmailDomainViaCrawler, resolvePersonEmailsViaCrawler, resolvePersonByRoleViaCrawler } from "./crawler-client";
+import { analyzeNameEmailStructureViaCrawler, l5WebSearchAvailable, resolveCompanyEmailDomainViaCrawler, resolvePersonEmailsViaCrawler, resolvePersonByRoleViaCrawler, resolveNameByLinkedinUrlViaCrawler } from "./crawler-client";
 import type { FinderOutcome, FinderResult, FinderState, BulkFinderResponse, BulkFinderResult } from "@/lib/types";
 import type { EmailVerification } from "@/lib/leads/collect-types";
 import type { CollectedPerson } from "@/lib/leads/people-types";
@@ -215,6 +215,13 @@ const PUBLIC_SOURCES_LAYER = (process.env.PEOPLE_VERIFY_PUBLIC_SOURCES ?? "1") !
 // email patterns with that corrected name. On by default; set to "0" to disable.
 const NAME_CORRECTION_LAYER = (process.env.PEOPLE_VERIFY_NAME_CORRECTION ?? "1") !== "0";
 
+// Layer 3a — DIRECT name recovery from the person's OWN LinkedIn URL. When the
+// stored name is incomplete and the vanity slug is ABBREVIATED (slug `gohew`,
+// stored "Goh Wei", real "Goh Eng Wei"), bestFullName can't expand it, but the
+// profile's DISPLAY title can — so the culture-aware finder builds the right
+// local-part (gohengwei@…). On by default; set to "0" to disable.
+const LINKEDIN_NAME_LAYER = (process.env.PEOPLE_VERIFY_LINKEDIN_NAME ?? "1") !== "0";
+
 // Layer 4 — culture-aware global name→pattern engine. When every earlier layer
 // fails, generate candidates from the person's naming convention (Vietnamese
 // given-last, CJK family-first, Hispanic double surname, German umlaut fold, …)
@@ -362,6 +369,47 @@ async function findViaNameCorrection(
   const altName = (corr.name ?? `${corr.firstName} ${corr.lastName}`).trim();
   // Precision gate: the correction must overlap the stored name by ≥1 token, so
   // we only ever *extend/fix* a name, never swap in a namesake the role matched.
+  const stored = nameTokens(t.name);
+  if (![...nameTokens(altName)].some((tok) => stored.has(tok))) return null;
+
+  let result: VerifyOneResult | null = null;
+  if (t.domain) {
+    const outcome = await findPersonEmail({ firstName: corr.firstName, lastName: corr.lastName, domain: t.domain });
+    if (outcome.state === "verified" || outcome.state === "accept_all") result = patchFromFinder(outcome);
+  }
+  if (!result && PUBLIC_SOURCES_LAYER) {
+    const pub = await findViaPublicSources({ ...t, name: altName, firstName: corr.firstName, lastName: corr.lastName }).catch(() => null);
+    if (pub) result = pub;
+  }
+  return { altName, result };
+}
+
+/**
+ * Name-recovery (3a) layer. Read the person's DISPLAY name straight off their OWN
+ * LinkedIn profile URL (slug-targeted SERP) when the stored name is incomplete and
+ * the vanity slug is ABBREVIATED (slug `gohew`, stored "Goh Wei", real "Goh Eng
+ * Wei") — the one case `bestFullName` can't recover from the slug alone. When the
+ * profile resolves to a DIFFERENT name that still shares a token with the stored
+ * one (a fuller version, never a wholesale-different person), re-run the email
+ * patterns under it. Returns the corrected name plus any confirmed result (null
+ * result = corrected name found but no mailbox; caller re-runs the culture-aware
+ * generator with the fuller name, e.g. "Goh Eng Wei" → gohengwei@).
+ */
+async function findViaLinkedinName(
+  t: store.PersonVerifyTarget,
+): Promise<{ altName: string; result: VerifyOneResult | null } | null> {
+  if (!t.linkedin) return null;
+  const linkedin = t.linkedin; // capture narrowed value
+  let corr: Awaited<ReturnType<typeof resolveNameByLinkedinUrlViaCrawler>>;
+  try {
+    corr = await serpLimit(() => resolveNameByLinkedinUrlViaCrawler({ linkedin, knownName: t.name }));
+  } catch {
+    return null;
+  }
+  if (!corr.matched || !corr.changed || !corr.firstName || !corr.lastName) return null;
+  const altName = (corr.name ?? `${corr.firstName} ${corr.lastName}`).trim();
+  // Precision gate (same as findViaNameCorrection): the correction must overlap the
+  // stored name by ≥1 token, so we only ever extend/fix a name, never swap one in.
   const stored = nameTokens(t.name);
   if (![...nameTokens(altName)].some((tok) => stored.has(tok))) return null;
 
@@ -695,12 +743,33 @@ async function verifyOne(
       if (pub) return { ...pub, altName, companyEmail };
     }
 
-    // Layer 3 — reverse role→profile name-correction (crawler SERP). Skipped when
-    // the slug already recovered a fuller name (P2), OR when the title is too
-    // generic for a reliable reverse lookup (#4: "Product Owner" etc. → let Layer 5
-    // correct the name instead of burning a SERP on namesakes).
+    // Layer 3a — DIRECT name recovery from the person's OWN LinkedIn URL. Runs when
+    // we HAVE a profile URL and the slug did NOT already yield a fuller name — the
+    // abbreviated-slug case (gohew → "Goh Eng Wei") that bestFullName can't recover.
+    // Higher precision than the role-based lookup (it reads the exact profile), so
+    // it runs first and, on a hit, short-circuits the role lookup below.
     if (
-      NAME_CORRECTION_LAYER && t.company && t.title && !recoveredDiffers && !overBudget() &&
+      LINKEDIN_NAME_LAYER && t.linkedin && !recoveredDiffers && !altName && !overBudget() &&
+      layerContinues(outcome.state)
+    ) {
+      const corr = await findViaLinkedinName(t).catch(() => null);
+      if (corr) {
+        altName = corr.altName;
+        if (corr.result) return { ...corr.result, altName, companyEmail: corr.result.companyEmail ?? companyEmail };
+        if (GLOBAL_PATTERN_LAYER && liveDomains.length) {
+          const g2 = await findViaGlobalPatterns(t, liveDomains, altName).catch(() => null);
+          if (g2) return { ...g2, altName, companyEmail };
+        }
+      }
+    }
+
+    // Layer 3 — reverse role→profile name-correction (crawler SERP). Skipped when
+    // the slug already recovered a fuller name (P2), when Layer 3a already corrected
+    // the name from the URL (!altName), OR when the title is too generic for a
+    // reliable reverse lookup (#4: "Product Owner" etc. → let Layer 5 correct the
+    // name instead of burning a SERP on namesakes).
+    if (
+      NAME_CORRECTION_LAYER && t.company && t.title && !recoveredDiffers && !altName && !overBudget() &&
       titleResolvableForReverseLookup(t.title) && layerContinues(outcome.state)
     ) {
       const corr = await findViaNameCorrection(t).catch(() => null);

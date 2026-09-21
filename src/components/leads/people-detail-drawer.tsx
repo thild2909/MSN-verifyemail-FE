@@ -20,6 +20,11 @@ export function PersonDetailDrawer({ person, open, onOpenChange }: { person: Col
               <Avatar name={person.name} seed={person.id} className="size-12 text-base" />
               <div className="min-w-0">
                 <h2 className="text-lg font-bold leading-tight">{person.name}</h2>
+                {person.altName && person.altName !== person.name && (
+                  <p className="text-xs text-muted-foreground/80" title={`Full name recovered from LinkedIn; the email was found using "${person.altName}"`}>
+                    Also: <span className="font-medium text-foreground/80">{person.altName}</span>
+                  </p>
+                )}
                 <p className="text-sm text-muted-foreground">{person.title?.value ?? person.headline ?? SENIORITY_LABEL[person.seniority]}</p>
                 {person.department && <p className="text-xs text-muted-foreground/80">{person.department}</p>}
                 <div className="mt-1.5 flex items-center gap-2 text-sm">
