@@ -319,7 +319,7 @@ export interface NameByLinkedinResult {
   linkedin: string | null;
 }
 export async function resolveNameByLinkedinUrlViaCrawler(input: {
-  linkedin: string; knownName?: string | null;
+  linkedin: string; knownName?: string | null; company?: string | null; location?: string | null;
 }): Promise<NameByLinkedinResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
@@ -327,7 +327,12 @@ export async function resolveNameByLinkedinUrlViaCrawler(input: {
     const res = await fetch(`${BASE}/name-by-linkedin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ linkedin: input.linkedin, known_name: input.knownName ?? undefined }),
+      body: JSON.stringify({
+        linkedin: input.linkedin,
+        known_name: input.knownName ?? undefined,
+        company: input.company ?? undefined,
+        location: input.location ?? undefined,
+      }),
       signal: controller.signal,
       cache: "no-store",
     });

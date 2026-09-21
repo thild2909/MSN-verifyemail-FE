@@ -402,7 +402,7 @@ async function findViaLinkedinName(
   const linkedin = t.linkedin; // capture narrowed value
   let corr: Awaited<ReturnType<typeof resolveNameByLinkedinUrlViaCrawler>>;
   try {
-    corr = await serpLimit(() => resolveNameByLinkedinUrlViaCrawler({ linkedin, knownName: t.name }));
+    corr = await serpLimit(() => resolveNameByLinkedinUrlViaCrawler({ linkedin, knownName: t.name, company: t.company, location: t.location }));
   } catch {
     return null;
   }
