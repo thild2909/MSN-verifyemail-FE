@@ -23,7 +23,7 @@
  */
 import "server-only";
 import { cachedVerify } from "./verification";
-import { buildCandidates, buildEmailForPattern, cleanDomain, priorNormForLabel } from "@/lib/finder/patterns";
+import { buildCandidates, buildEmailForPattern, cleanDomain, priorNormForLabel, EMAIL_PATTERNS } from "@/lib/finder/patterns";
 import { verifyRanked } from "@/lib/finder/verify-orchestration";
 import type { BulkFinderResponse, BulkFinderResult, FinderOutcome, FinderResult, FinderState, VerificationResult } from "@/lib/types";
 
@@ -40,6 +40,7 @@ interface DomainFacts {
   winningPattern?: string; // pattern label that produced a confirmed mailbox
   deadMx?: boolean; // the domain has NO mail server → nothing on it is deliverable
   catchAll?: boolean; // server accepts EVERY address → a "valid" verdict is meaningless
+  catchAllScore?: number; // the accept-all probe's score (reused by score-based acceptance; no re-probe)
   opaque?: boolean; // server won't verify (returns "unknown" for everyone) → can't confirm
   // The domain's KNOWN email convention, LEARNED from a colleague's confirmed/published
   // email on this exact domain (not from SMTP-probing this person). Lets us resolve
@@ -77,6 +78,18 @@ const CLASSIFY_TIMEOUT_MS = Number(process.env.FINDER_CLASSIFY_TIMEOUT_MS ?? 15_
  * misleading low-confidence guess. Tune with FINDER_MIN_SCORE.
  */
 const MIN_CONFIDENCE = Number(process.env.FINDER_MIN_SCORE ?? 60);
+
+/**
+ * SCORE-BASED ACCEPTANCE (product policy). On a domain the engine cannot per-address
+ * CONFIRM — a catch-all / accept-all (Google Workspace, M365) or greylisting server —
+ * reacher never returns a clean `valid`, so the strict path reports Not-found even for
+ * a real, deliverable mailbox. Policy: when reacher scores an address ABOVE the bar
+ * (> MIN_CONFIDENCE, i.e. > 60) it IS the person's real email. We surface the company's
+ * CONVENTION address (the pattern LEARNED from a confirmed colleague → else the most-
+ * common `first.last`) rather than a blind sweep, so we don't over-claim a random local.
+ * Set FINDER_SCORE_ACCEPT=0 to return to strict confirmed-only behaviour.
+ */
+const SCORE_ACCEPT = (process.env.FINDER_SCORE_ACCEPT ?? "1") !== "0";
 
 /**
  * How many candidates to SMTP-verify in parallel (after the priority-0 candidate
@@ -228,7 +241,7 @@ export async function classifyDomain(domain: string): Promise<{ klass: DomainCla
   // ONLY a bogus address coming back `valid` (is_reachable "safe") proves a TRUE
   // "dumb" catch-all — the server marks EVERY address deliverable, so a per-mailbox
   // `valid` is meaningless and a sweep would false-positive. Skip those.
-  if (r.status === "valid") { mergeFacts(domain, { catchAll: true }); return { klass: "catchall", calls }; }
+  if (r.status === "valid") { mergeFacts(domain, { catchAll: true, catchAllScore: r.score }); return { klass: "catchall", calls }; }
   // A `catch_all` / `risky` / `role` verdict on a BOGUS address means the server
   // accepted-but-FLAGGED it — it WITHHELD `valid` from a nonexistent mailbox. Such a
   // server DISCRIMINATES (this backend's catch-all latency test): a REAL mailbox that
@@ -335,6 +348,50 @@ export function bestGuessEmail(domain: string, first: string, last: string): { e
   return { email: built.email, label: built.label, confidence };
 }
 
+/**
+ * The company's CONVENTION address for this person on a domain SMTP can't confirm:
+ * the pattern LEARNED from a confirmed colleague if we have one, else the single
+ * most-common format (`first.last`). Used by the score-based acceptance path.
+ */
+function conventionEmail(domain: string, first: string, last: string): { email: string; label: string } | null {
+  const known = knownDomainPattern(domain);
+  const patternId = known?.patternId ?? EMAIL_PATTERNS[0].id; // EMAIL_PATTERNS[0] === first.last
+  const built = buildEmailForPattern(patternId, first, last, domain);
+  return built ? { email: built.email, label: built.label } : null;
+}
+
+/**
+ * Score-based acceptance for a catch-all / accept-all domain the engine can't
+ * per-address confirm. Crucially this makes NO new backend call: the domain was
+ * already probed once by `classifyDomain`, and on a dumb accept-all EVERY address —
+ * including the convention — is treated identically, so the probe's stored
+ * `catchAllScore` IS the convention address's score. If that score is above the bar
+ * (> MIN_CONFIDENCE) the domain accepts mail there and, per policy, it is the
+ * person's real email → surface the CONVENTION address (learned → else first.last)
+ * as `verified`. Otherwise honest `not_found`. Synchronous + zero SMTP, so a
+ * catch-all row costs nothing beyond the one shared per-domain classify probe
+ * (this is the fix for the per-row-SMTP hang the earlier version introduced).
+ */
+function acceptConventionByScore(
+  domain: string,
+  first: string,
+  last: string,
+  name: string,
+  calls: number,
+  provider: "reacher",
+): FinderOutcome {
+  const conv = conventionEmail(domain, first, last);
+  const score = getFacts(domain)?.catchAllScore ?? 0;
+  if (SCORE_ACCEPT && conv && score > MIN_CONFIDENCE) {
+    const fr = toResult(conv.email, conv.label, name, domain, "valid", score);
+    return outcome({ ...fr, bestGuess: true }, "verified", calls, 0, provider, calls === 0);
+  }
+  return outcome(
+    toResult(conv?.email ?? `@${domain}`, conv?.label ?? "{first}.{last}", name, domain, "unverified", 0),
+    "not_found", calls, 0, provider, calls === 0,
+  );
+}
+
 /* ------------------------------- pipeline ------------------------------- */
 
 export async function findPersonEmail(input: {
@@ -394,7 +451,16 @@ export async function findPersonEmail(input: {
   // catch-all, skip the futile sweep — colleagues resolve instantly. Only these
   // RELIABLE classes short-circuit; a first-seen domain always gets the full sweep.
   const preClass = cachedDomainClass(domain);
-  if (preClass === "opaque" || preClass === "catchall") {
+  // Catch-all / accept-all (known from a prior probe): the engine can't per-address
+  // confirm, so instead of a bare Not-found, apply the score-based acceptance on the
+  // company's convention address (learned → else first.last).
+  if (preClass === "catchall") {
+    return acceptConventionByScore(domain, input.firstName, input.lastName, name, 0, provider);
+  }
+  // Verification-opaque (a prior full sweep proved EVERY address `unknown`): the server
+  // won't score any mailbox above the bar, so score-based acceptance can't help — fast
+  // Not-found (unchanged).
+  if (preClass === "opaque") {
     return outcome(toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "unverified", 0), "not_found", 0, total, provider, true);
   }
   // Otherwise probe ONCE for catch-all/dead (reliable from one bogus-address probe)
@@ -407,7 +473,8 @@ export async function findPersonEmail(input: {
       return outcome(toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "invalid", 0), "no_mx", calls, total, provider, calls === 0);
     }
     if (cls.klass === "catchall") {
-      return outcome(toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "unverified", 0), "not_found", calls, total, provider, calls === 0);
+      // Accept-all domain: surface the convention address when reacher scores it > 60.
+      return acceptConventionByScore(domain, input.firstName, input.lastName, name, calls, provider);
     }
     // Tarpit / unreachable server (the probe timed out): skip the futile per-address
     // sweep — each check would cost the full deadline. Colleagues already short-
@@ -492,9 +559,24 @@ export async function findPersonEmail(input: {
     [...checked].sort((a, b) => b.score - a.score || priorNormForLabel(b.pattern) - priorNormForLabel(a.pattern))[0] ??
     toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "unverified", 0);
 
-  if (best.status !== "invalid" && best.score >= MIN_CONFIDENCE) {
-    // Plausible but unconfirmed (e.g. a `risky` result above the bar).
-    return outcome({ ...best, bestGuess: true }, "accept_all", calls, 0, provider, calls === 0);
+  if (best.status !== "invalid" && best.score > MIN_CONFIDENCE) {
+    // A swept candidate scored ABOVE the bar but the engine withheld a clean `valid`
+    // (greylisting / catch_all / risky server). Per the score-based policy this IS a
+    // real, deliverable mailbox. Prefer the LEARNED convention address when it also
+    // cleared the bar in this sweep (so a company that uses first_last isn't shown
+    // first.last just because it sorted first on a tie); else take the top-scoring one.
+    let pick = best;
+    const known = knownDomainPattern(domain);
+    if (known) {
+      const kb = buildEmailForPattern(known.patternId, input.firstName, input.lastName, domain);
+      const kr = kb && checked.find((c) => c.email === kb.email);
+      if (kr && kr.status !== "invalid" && kr.score > MIN_CONFIDENCE) pick = kr;
+    }
+    if (SCORE_ACCEPT) {
+      return outcome({ ...pick, status: "valid", bestGuess: true }, "verified", calls, 0, provider, calls === 0);
+    }
+    // Strict mode (SCORE_ACCEPT off): plausible but unconfirmed → accept_all (old behaviour).
+    return outcome({ ...pick, bestGuess: true }, "accept_all", calls, 0, provider, calls === 0);
   }
   // Below the bar -> we cannot claim this email exists. Report not found; the
   // closest format is retained only as a hint (no positive score is shown).
