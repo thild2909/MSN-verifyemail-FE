@@ -238,6 +238,19 @@ export async function classifyDomain(domain: string): Promise<{ klass: DomainCla
   if (v.timedOut) { markOpaqueDomain(domain, v.provider); return { klass: "opaque", calls }; }
   const r = v.result;
   if (r.checks.mx === "fail") { markDeadDomain(domain, v.provider); return { klass: "dead", calls }; }
+  // A third-party (clean-IP) fallback answered this bogus probe. Its verdict is
+  // authoritative and uses ACCEPT-ALL semantics — the OPPOSITE of the engine,
+  // whose `catch_all` on a bogus means "discriminating". So read it directly:
+  //   invalid  → the domain discriminates → sweep the real candidates (recover them)
+  //   unknown  → the provider can't tell either → opaque (skip the futile sweep)
+  //   accepted (valid/catch_all/role/risky on a BOGUS addr) → accept-all → catch-all
+  //             (skip the sweep; per-mailbox confirmation is impossible there)
+  if (v.thirdParty) {
+    if (r.status === "invalid") return { klass: "ok", calls };
+    if (r.status === "unknown") { markOpaqueDomain(domain, v.provider); return { klass: "opaque", calls }; }
+    mergeFacts(domain, { catchAll: true, catchAllScore: r.score });
+    return { klass: "catchall", calls };
+  }
   // ONLY a bogus address coming back `valid` (is_reachable "safe") proves a TRUE
   // "dumb" catch-all — the server marks EVERY address deliverable, so a per-mailbox
   // `valid` is meaningless and a sweep would false-positive. Skip those.

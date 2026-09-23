@@ -372,7 +372,9 @@ export type AppConfigKey =
   | "DECODO_AUTH"
   | "GOOGLE_API_KEY"
   | "GOOGLE_CX"
-  | "WEBSHARE_PROXY_LIST_URL";
+  | "WEBSHARE_PROXY_LIST_URL"
+  | "TP_VERIFIER_PROVIDER"
+  | "TP_VERIFIER_API_KEY";
 
 export interface AppConfigField {
   key: AppConfigKey;

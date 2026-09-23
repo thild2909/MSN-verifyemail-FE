@@ -1,11 +1,12 @@
 "use client";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Bot, Search, KeyRound, Info, Shuffle } from "lucide-react";
+import { Loader2, Bot, Search, KeyRound, Info, Shuffle, MailCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
+import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
 import { getAppConfig, setAppConfig, type AppConfig, type AppConfigField, type AppConfigKey } from "@/lib/api/client";
@@ -16,6 +17,8 @@ interface FieldDef {
   placeholder: string;
   help?: string;
   mono?: boolean;
+  /** When present, render a dropdown of these choices instead of a text input. */
+  options?: { value: string; label: string }[];
 }
 interface GroupDef {
   title: string;
@@ -57,6 +60,35 @@ const GROUPS: GroupDef[] = [
         label: "Proxy-list URL (Webshare)",
         placeholder: "https://proxy.webshare.io/api/v2/proxy/list/download/…",
         help: "Webshare “Download proxy list” URL (ip:port:user:pass lines). The crawler fetches this list and rotates through the IPs.",
+        mono: true,
+      },
+    ],
+  },
+  {
+    title: "Email verification fallback",
+    description:
+      "When a mailbox provider (e.g. Proofpoint) blocks SMTP verification from our servers, the engine can only return “unknown”. Route just those blocked checks to a third-party verifier that has clean IP pools. Leave the provider Off to disable — blocked checks then stay “unknown”.",
+    icon: MailCheck,
+    fields: [
+      {
+        key: "TP_VERIFIER_PROVIDER",
+        label: "Fallback provider",
+        placeholder: "Off",
+        help: "Which external verifier to call for gateway-blocked addresses. Off = no fallback.",
+        options: [
+          { value: "", label: "Off (no fallback)" },
+          { value: "emaillistverify", label: "EmailListVerify" },
+          { value: "millionverifier", label: "MillionVerifier" },
+          { value: "zerobounce", label: "ZeroBounce" },
+          { value: "neverbounce", label: "NeverBounce" },
+          { value: "reacher", label: "Reacher (SaaS)" },
+        ],
+      },
+      {
+        key: "TP_VERIFIER_API_KEY",
+        label: "Provider API key",
+        placeholder: "provider secret / API key",
+        help: "API key/secret for the selected provider. Each fallback lookup spends one provider credit; only gateway-blocked “unknown” checks trigger it.",
         mono: true,
       },
     ],
@@ -108,7 +140,20 @@ export default function ConfigSettingsPage() {
     onError: (e) => toast({ variant: "error", title: "Could not save", description: e instanceof Error ? e.message : undefined }),
   });
 
-  const dirty = Object.keys(draft).some((k) => draft[k as AppConfigKey] !== undefined && (draft[k as AppConfigKey] ?? "") !== "") || cleared.size > 0;
+  // Dirty when something was cleared, or a draft differs from the saved value.
+  // Non-secret fields (incl. the provider select) count "" as a real change so
+  // choosing "Off" enables Save; secrets only count a non-blank draft.
+  const dirty =
+    cleared.size > 0 ||
+    GROUPS.some((g) =>
+      g.fields.some((f) => {
+        const d = draft[f.key];
+        if (d === undefined) return false;
+        const meta = byKey.get(f.key);
+        const secret = meta?.secret ?? true;
+        return secret ? d.trim() !== "" : d !== (meta?.value ?? "");
+      }),
+    );
 
   return (
     <div className="space-y-6">
@@ -161,7 +206,17 @@ export default function ConfigSettingsPage() {
                             </button>
                           )}
                         </div>
-                        {secret ? (
+                        {f.options ? (
+                          <Select
+                            id={f.key}
+                            value={value}
+                            onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                          >
+                            {f.options.map((o) => (
+                              <option key={o.value} value={o.value}>{o.label}</option>
+                            ))}
+                          </Select>
+                        ) : secret ? (
                           <PasswordInput
                             id={f.key}
                             className={f.mono ? "font-mono text-xs" : undefined}

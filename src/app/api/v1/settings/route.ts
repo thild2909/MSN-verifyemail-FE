@@ -17,6 +17,8 @@ const SETTING_KEYS = [
   "GOOGLE_API_KEY",
   "GOOGLE_CX",
   "WEBSHARE_PROXY_LIST_URL",
+  "TP_VERIFIER_PROVIDER",
+  "TP_VERIFIER_API_KEY",
 ] as const;
 
 const patchSchema = z
