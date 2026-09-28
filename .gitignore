@@ -10,3 +10,11 @@ next-env.d.ts
 
 # server-side store
 /.data
+.settings.json
+.settings.json.*
+.env
+.env.*
+*.bak
+*.bak.*
+*.bak-*
+run-backend.sh

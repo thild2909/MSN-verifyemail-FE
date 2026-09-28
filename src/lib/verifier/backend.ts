@@ -49,7 +49,13 @@ export class VerifierUnavailableError extends Error {
 
 export interface VerifyOutcome {
   result: VerificationResult;
-  provider: "reacher";
+  provider: "reacher"; // kept narrow for downstream; a third-party fallback's real
+  // source is carried in `result.provider` + suggestedAction, not here.
+  /** True when this verdict came from the crawler's third-party fallback (clean-IP
+   *  provider) rather than the engine. Lets the finder's domain classifier apply
+   *  ACCEPT-ALL semantics (a provider `catch_all` = accept-all → skip the sweep)
+   *  instead of the engine's "catch_all-on-bogus = discriminating" reading. */
+  thirdParty?: boolean;
   /** True when OUR per-request deadline fired (the server did not answer in time),
    *  as opposed to the engine returning a verdict. Lets the finder treat a domain
    *  whose probe timed out as unverifiable (tarpit/unreachable) and skip a futile
@@ -94,6 +100,51 @@ function authHeaders(): Record<string, string> {
   return h;
 }
 
+// The crawler-service wraps the third-party verifier fallback (clean IP pools)
+// and owns its config (Config tab → settings store), so escalation stays a
+// single source of truth. We call it ONLY for an engine "unknown" on a live-MX
+// domain — the exact case our own datacenter IPs can't confirm (Proofpoint /
+// Mimecast / greylist / tarpit) — turning "Not found" into a real verdict.
+const CRAWLER_URL = process.env.CRAWLER_SERVICE_URL ?? "http://localhost:8090";
+const TP_TIMEOUT_MS = Number(process.env.TP_VERIFIER_TIMEOUT_MS ?? 25_000);
+
+function mxLive(output: CheckEmailOutput): boolean {
+  const mx = output.mx as { accepts_mail?: boolean; records?: unknown[] } | undefined;
+  return !!mx && (mx.accepts_mail === true || (Array.isArray(mx.records) && mx.records.length > 0));
+}
+
+/**
+ * Escalate one engine-"unknown" (live-MX) address to the crawler's third-party
+ * verifier. Returns the provider's verdict as a VerifyOutcome, or null when
+ * unconfigured / inconclusive / on any error (caller keeps the engine's unknown).
+ * Never throws.
+ */
+async function thirdPartyFallback(email: string, output: CheckEmailOutput, result: VerificationResult): Promise<VerifyOutcome | null> {
+  if (result.status !== "unknown" || !mxLive(output)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TP_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${CRAWLER_URL}/verify/thirdparty`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { configured?: boolean; result?: VerificationResult | null; provider?: string | null };
+    if (!j?.configured || !j.result) return null;
+    // Real source lives in result.provider / suggestedAction; the outcome tag stays
+    // "reacher" so the finder's existing per-verdict logic applies unchanged. The
+    // `thirdParty` flag tells the domain classifier to use accept-all semantics.
+    return { result: j.result, provider: "reacher", thirdParty: true };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Verify one email through the Rust engine. Returns the engine's verdict, or
  * throws `VerifierUnavailableError` if the engine could not be reached. Never
@@ -127,7 +178,9 @@ async function verifyAttempt(email: string, timeoutMs: number): Promise<VerifyOu
       throw e;
     }
     const output = (await res.json()) as CheckEmailOutput;
-    return { result: mapReacherOutput(output), provider: "reacher" };
+    const result = mapReacherOutput(output);
+    const tp = await thirdPartyFallback(email, output, result);
+    return tp ?? { result, provider: "reacher" };
   } catch (err) {
     if (err instanceof VerifierUnavailableError) throw err;
     // Our own deadline fired → engine is up but this mailbox was slow. Transient
@@ -196,7 +249,11 @@ export async function verifyEmailsBatch(
     return Promise.all(
       emails.map(async (email, i) => {
         const out = results[i];
-        if (out) return { result: mapReacherOutput(out), provider: "reacher" as const };
+        if (out) {
+          const result = mapReacherOutput(out);
+          const tp = await thirdPartyFallback(email, out, result);
+          return tp ?? { result, provider: "reacher" as const };
+        }
         // Missing entry: re-verify individually (throws if the engine is down).
         return verifyWithBackend(email);
       }),

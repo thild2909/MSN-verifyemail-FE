@@ -17,9 +17,11 @@ import { VerifierUnavailableError } from "@/lib/verifier/backend";
 import { m365MailboxExists } from "@/lib/verifier/m365";
 import { findPersonEmail, cachedDomainClass, classifyDomain, isM365VerifiedDomain, knownDomainPattern, seedDomainPattern, setGlobalFallbackPattern, bestGuessEmail } from "./finder";
 import { cleanDomain, derivePatternId } from "@/lib/finder/patterns";
+import { companyDomainVariants } from "@/lib/finder/domain-variants";
+import { resolveMx } from "node:dns/promises";
 import { bestFullName, detectProfile, generateGlobalCandidates, learnGlobalPattern, learnedGlobalPattern, mergeLocals, splitFirstLast } from "@/lib/finder/global-name-patterns";
 import { companyMailDomainHint, emailFormatTemplate, escalateL5, isDistinctiveLocal, layerContinues, partitionByDomain, sameCompanyDomain, scrapedEmailTrusted, titleResolvableForReverseLookup, verifyRanked } from "@/lib/finder/verify-orchestration";
-import { analyzeNameEmailStructureViaCrawler, l5WebSearchAvailable, resolveCompanyEmailDomainViaCrawler, withCrawlerRecord, resolvePersonEmailsViaCrawler, resolvePersonByRoleViaCrawler } from "./crawler-client";
+import { analyzeNameEmailStructureViaCrawler, l5WebSearchAvailable, resolveCompanyEmailDomainViaCrawler, withCrawlerRecord, resolvePersonEmailsViaCrawler, resolvePersonByRoleViaCrawler, resolveNameByLinkedinUrlViaCrawler } from "./crawler-client";
 import type { FinderOutcome, FinderResult, FinderState, BulkFinderResponse, BulkFinderResult } from "@/lib/types";
 import type { EmailVerification } from "@/lib/leads/collect-types";
 import type { CollectedPerson } from "@/lib/leads/people-types";
@@ -252,6 +254,13 @@ const PUBLIC_SOURCES_LAYER = (process.env.PEOPLE_VERIFY_PUBLIC_SOURCES ?? "1") !
 // email patterns with that corrected name. On by default; set to "0" to disable.
 const NAME_CORRECTION_LAYER = (process.env.PEOPLE_VERIFY_NAME_CORRECTION ?? "1") !== "0";
 
+// Layer 3a — DIRECT name recovery from the person's OWN LinkedIn URL. When the
+// stored name is incomplete and the vanity slug is ABBREVIATED (slug `gohew`,
+// stored "Goh Wei", real "Goh Eng Wei"), bestFullName can't expand it, but the
+// profile's DISPLAY title can — so the culture-aware finder builds the right
+// local-part (gohengwei@…). On by default; set to "0" to disable.
+const LINKEDIN_NAME_LAYER = (process.env.PEOPLE_VERIFY_LINKEDIN_NAME ?? "1") !== "0";
+
 // Layer 4 — culture-aware global name→pattern engine. When every earlier layer
 // fails, generate candidates from the person's naming convention (Vietnamese
 // given-last, CJK family-first, Hispanic double surname, German umlaut fold, …)
@@ -412,6 +421,33 @@ async function findViaNameCorrection(
     if (pub) result = pub;
   }
   return { altName, result };
+}
+
+/**
+ * Name-recovery (3a) layer. Read the person's DISPLAY name straight off their OWN
+ * LinkedIn profile URL (slug-targeted SERP) when the stored name is incomplete and
+ * the vanity slug is ABBREVIATED (slug `gohew`, stored "Goh Wei", real "Goh Eng
+ * Wei") — the one case `bestFullName` can't recover from the slug alone. Returns
+ * the fuller name (gated to a ≥1-token overlap with the stored name, so it only
+ * ever extends/fixes a name, never swaps in a wholesale-different person), or null.
+ * The caller feeds it into Layer 4 so the culture-aware generator builds the right
+ * local-part ("Goh Eng Wei" → gohengwei@). Kept lean (name only, no email attempts)
+ * so it fits inside the row budget even when SERP is slow.
+ */
+async function findViaLinkedinName(t: store.PersonVerifyTarget): Promise<string | null> {
+  if (!t.linkedin) return null;
+  const linkedin = t.linkedin; // capture narrowed value
+  let corr: Awaited<ReturnType<typeof resolveNameByLinkedinUrlViaCrawler>>;
+  try {
+    corr = await serpLimit(() => resolveNameByLinkedinUrlViaCrawler({ linkedin, knownName: t.name, company: t.company, location: t.location }));
+  } catch {
+    return null;
+  }
+  if (!corr.matched || !corr.changed || !corr.firstName || !corr.lastName) return null;
+  const altName = (corr.name ?? `${corr.firstName} ${corr.lastName}`).trim();
+  const stored = nameTokens(t.name);
+  if (![...nameTokens(altName)].some((tok) => stored.has(tok))) return null;
+  return altName;
 }
 
 /**
@@ -590,6 +626,60 @@ function altEmailDomainFor(company: string, location: string | null, website: st
   return p;
 }
 
+/* --------------------- L2.5 — sibling / variant domains ------------------ */
+// The company's employee-mail domain is often a SIBLING of the website domain:
+// the site is the short brand (`risingwave.com`) but mail is on the legal-entity
+// domain (`risingwave-labs.com`), a joined form (`risingwavelabs.com`) or a
+// different TLD (`risingwave.io`). L2's support-email lookup returns the WEBSITE
+// domain (contact@risingwave.com), which is discarded as "same as website", so the
+// sibling is never tried. Here we generate those candidates DETERMINISTICALLY,
+// MX-gate them (cheap DNS — no SERP/SMTP/LLM), and hand the LIVE ones to the SAME
+// verify layers (L4/L5). Precision is unchanged: only a per-address SMTP-confirmed
+// `valid` is ever surfaced, so a live-but-wrong sibling can't fabricate an email.
+const VARIANT_DOMAIN_LAYER = (process.env.PEOPLE_VERIFY_VARIANT_DOMAINS ?? "1") !== "0";
+const VARIANT_MX_TIMEOUT_MS = Math.max(1_000, Number(process.env.PEOPLE_VERIFY_VARIANT_MX_TIMEOUT_MS ?? 3_000));
+
+// Per-domain MX result cache (process-lifetime): a bulk pass probes the same handful
+// of variant domains for every colleague at a company, so cache the DNS answer.
+const mxLiveCache = new Map<string, Promise<boolean>>();
+function hasLiveMx(domain: string): Promise<boolean> {
+  const d = cleanDomain(domain);
+  let p = mxLiveCache.get(d);
+  if (!p) {
+    if (mxLiveCache.size > 5000) mxLiveCache.clear();
+    p = Promise.race([
+      resolveMx(d).then((recs) => Array.isArray(recs) && recs.length > 0).catch(() => false),
+      sleep(VARIANT_MX_TIMEOUT_MS).then(() => false),
+    ]);
+    mxLiveCache.set(d, p);
+  }
+  return p;
+}
+
+// Memoized per company+website: the LIVE sibling domains for a company. Everyone at
+// one company shares the (bounded) DNS work, so a big bulk pass costs one MX sweep
+// per company, not per row.
+const variantDomainsMemo = new Map<string, Promise<string[]>>();
+function liveVariantDomainsFor(website: string | null, company: string): Promise<string[]> {
+  if (!VARIANT_DOMAIN_LAYER) return Promise.resolve([]);
+  const site = cleanDomain(website ?? "");
+  const key = `${site}|${company.toLowerCase().trim()}`;
+  let p = variantDomainsMemo.get(key);
+  if (!p) {
+    if (variantDomainsMemo.size > 2000) variantDomainsMemo.clear();
+    const cands = companyDomainVariants(site, company, 18);
+    // DNS MX lookups are cheap (non-existent domains reject in ~ms; each capped at
+    // VARIANT_MX_TIMEOUT_MS). Run ALL in parallel — measured ~1s for 18 vs ~2.75s
+    // when batched — so the (memoized, once-per-company) probe never stalls a row.
+    p = (async () => {
+      const oks = await Promise.all(cands.map(async (d) => ((await hasLiveMx(d).catch(() => false)) ? d : null)));
+      return oks.filter((d): d is string => d !== null);
+    })();
+    variantDomainsMemo.set(key, p);
+  }
+  return p;
+}
+
 /**
  * Best guess that prefers the company's REAL mail domain (Layer 2 alt-domain, e.g.
  * s2ceda.com) over the website domain (s2cinc.com) when they differ. The alt lookup
@@ -729,14 +819,41 @@ async function verifyOneInner(
     // ONLY on a reacher-trusted Valid (score >= MIN_VALID_SCORE); anything else falls
     // through to the next layer.
 
-    // #3 — on a dead-MX (no_mx) website, drop the dead domain so Layer 4 doesn't
-    // waste an SMTP mx-check on it; keep only the (live) alt-domain.
-    const domains = uniqueDomains([t.domain, ...extraAltDomains, hintLive]);
-    const liveDomains = outcome.state === "no_mx" ? uniqueDomains([...extraAltDomains, hintLive]) : domains;
+    // Layer 2.5 — sibling / variant domains (deterministic + MX-gated). The mail
+    // domain is often a brand sibling of the website (risingwave.com →
+    // risingwave-labs.com / risingwavelabs.com / risingwave.io), which L2 never
+    // surfaces because the support-email points back at the website. Generate those
+    // candidates offline, keep only the ones with LIVE MX (cheap DNS), and add them
+    // to the domain set so L4 tries the company's real mail domain. MX-live already,
+    // so they're kept even when the website itself is dead-MX.
+    let variantDomains: string[] = [];
+    if (VARIANT_DOMAIN_LAYER && (t.domain || t.company)) {
+      variantDomains = await liveVariantDomainsFor(t.domain, t.company).catch(() => []);
+    }
 
-    // Layer 4 — culture-aware, FRONT-LOADED. Runs on the website + alt-domain.
+    // #3 — on a dead-MX (no_mx) website, drop the dead domain so Layer 4 doesn't
+    // waste an SMTP mx-check on it; keep only the (live) alt-domain + variants.
+    const domains = uniqueDomains([t.domain, ...extraAltDomains, hintLive, ...variantDomains]);
+    const liveDomains = outcome.state === "no_mx" ? uniqueDomains([...extraAltDomains, hintLive, ...variantDomains]) : domains;
+
+    // Layer 3a — DIRECT name recovery from the person's OWN LinkedIn URL. Runs BEFORE
+    // Layer 4 (and before the slow public-sources scrape) so the culture-aware
+    // generator builds the local-part from the FULLER name. Only when we HAVE a
+    // profile URL and the slug did NOT already yield a fuller name — the abbreviated-
+    // slug case (gohew → "Goh Eng Wei") that bestFullName can't recover. Cheap +
+    // targeted (one slug-pinned SERP), so it fits the budget even when SERP is slow.
+    if (
+      LINKEDIN_NAME_LAYER && t.linkedin && !recoveredDiffers && !altName && !overBudget()
+    ) {
+      const alt = await findViaLinkedinName(t).catch(() => null);
+      if (alt) altName = alt;
+    }
+
+    // Layer 4 — culture-aware, FRONT-LOADED. Runs on the website + alt-domain, under
+    // the Layer-3a-corrected name when one was recovered (so "Goh Eng Wei" is what
+    // generates gohengwei@, not the incomplete stored "Goh Wei").
     if (GLOBAL_PATTERN_LAYER && liveDomains.length) {
-      const g = await findViaGlobalPatterns(t, liveDomains).catch(() => null);
+      const g = await findViaGlobalPatterns(t, liveDomains, altName).catch(() => null);
       if (g?.valid) return { ...g, altName: g.altName ?? altName, companyEmail };
     }
 
@@ -749,11 +866,12 @@ async function verifyOneInner(
     }
 
     // Layer 3 — reverse role→profile name-correction (crawler SERP). Skipped when
-    // the slug already recovered a fuller name (P2), OR when the title is too
-    // generic for a reliable reverse lookup (#4: "Product Owner" etc. → let Layer 5
-    // correct the name instead of burning a SERP on namesakes).
+    // the slug already recovered a fuller name (P2), when Layer 3a already corrected
+    // the name from the URL (!altName), OR when the title is too generic for a
+    // reliable reverse lookup (#4: "Product Owner" etc. → let Layer 5 correct the
+    // name instead of burning a SERP on namesakes).
     if (
-      NAME_CORRECTION_LAYER && t.company && t.title && !recoveredDiffers && !overBudget() &&
+      NAME_CORRECTION_LAYER && t.company && t.title && !recoveredDiffers && !altName && !overBudget() &&
       titleResolvableForReverseLookup(t.title)
     ) {
       const corr = await findViaNameCorrection(t).catch(() => null);
@@ -801,8 +919,9 @@ async function verifyOneInner(
   }
   // FINAL fallback — every discovery layer missed (the best guess already ran above).
   if (fallback) return { ...fallback, altName, companyEmail };
-  // No domain, no mailbox, or every layer empty — persist Not found.
-  return notFoundPatch("reacher");
+  // No domain, no mailbox, or every layer empty — persist Not found, keeping a
+  // Layer-3a/3 recovered name so the UI still shows the corrected full name.
+  return { ...notFoundPatch("reacher"), altName, companyEmail };
 }
 
 /* ------------------------- Finder-facing entry points -------------------- */
@@ -966,6 +1085,11 @@ async function fillWithLlmStructure(targets: store.PersonVerifyTarget[], webSear
   }
   if (!resp.configured) return out;
 
+  // Pre-warm the (memoized, once-per-company) variant-domain MX probes for every
+  // target in parallel, so the per-result `await liveVariantDomainsFor(...)` inside
+  // the loop below are instant cache hits instead of serial ~1s DNS sweeps.
+  await Promise.all(targets.map((t) => liveVariantDomainsFor(t.domain, t.company).catch(() => []))).catch(() => {});
+
   const byId = new Map(targets.map((t) => [t.personId, t]));
   for (const r of resp.results) {
     const t = byId.get(r.id);
@@ -981,8 +1105,11 @@ async function fillWithLlmStructure(targets: store.PersonVerifyTarget[], webSear
       : (r.correctName && normName(r.correctName) !== normName(t.name)) ? r.correctName : undefined;
     const altName = corrected;
     // Verify against the LLM-validated domain(s) FIRST — the parent/acquirer domain
-    // leads after an M&A (Camms → riskonnect.com) — then website + company-email.
-    const domains = uniqueDomains([...(r.domains ?? []), r.domain, t.domain, domainOf(t.companyEmail)]).slice(0, 3);
+    // leads after an M&A (Camms → riskonnect.com) — then website + company-email, and
+    // finally the MX-live brand SIBLINGS (risingwave.com → risingwave-labs.com) so the
+    // deferred catch-all/opaque bulk tail also gets the variant-domain coverage L4 gives.
+    const variantDoms = await liveVariantDomainsFor(t.domain, t.company).catch(() => []);
+    const domains = uniqueDomains([...(r.domains ?? []), r.domain, t.domain, domainOf(t.companyEmail), ...variantDoms]).slice(0, 4);
     // Smart: combine the LLM's proposed locals with the FULL deterministic culture-
     // aware generator run on the (corrected) name — so the parent domain the LLM
     // discovered gets Layer-4's whole pattern breadth (initials, short forms, order
