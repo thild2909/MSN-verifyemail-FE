@@ -254,10 +254,23 @@ export async function classifyDomain(domain: string): Promise<{ klass: DomainCla
   // account reads "not found"), the domain is verifiable → "ok" (never opaque), and
   // findPersonEmail checks candidates via GetCredentialType. Verified 2026-09-28:
   // wlo@chelsfield.com, benwong@riverchain.com were Not found before this.
-  if (r.checks.mx !== "fail" && isM365Domain(r.mxRecords) && (await domainDiscriminates(domain).catch(() => null)) === true) {
-    mergeFacts(domain, { m365: true });
-    return { klass: "ok", calls };
+  if (r.checks.mx !== "fail" && isM365Domain(r.mxRecords)) {
+    const disc = await domainDiscriminates(domain).catch(() => null);
+    if (disc === true) {
+      mergeFacts(domain, { m365: true });
+      return { klass: "ok", calls };
+    }
+    // Couldn't tell (throttled / network) — NOT evidence the tenant is opaque. Skip
+    // this row but don't cache, so the next colleague re-asks Microsoft instead of
+    // inheriting a Not found for the whole company.
+    if (disc === null) return { klass: "opaque", calls };
   }
+  // Transient 4xx on the BOGUS probe (greylist, Mimecast "451 Internal resource
+  // temporarily unavailable" for an unknown recipient) while a real mailbox gets 250:
+  // the server discriminates, so sweep instead of writing the domain off as opaque.
+  // (Checked before the third-party branch: a provider's accept-all reading of the
+  // bogus would otherwise skip a domain our own engine can actually verify.)
+  if (r.checks.greylisted && r.status !== "valid" && r.status !== "invalid") return { klass: "ok", calls };
   // Probe did not answer within the short classify deadline → tarpit / unreachable
   // server. Cache it opaque so this row skips the (per-address ~60s) sweep and every
   // colleague at the domain skips too. Recall-safe: a mailbox that a server won't

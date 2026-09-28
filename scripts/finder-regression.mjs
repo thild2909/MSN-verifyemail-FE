@@ -18,6 +18,7 @@ import {
   orderedTokensFromConcatSlug,
 } from "../src/lib/finder/global-name-patterns.ts";
 import { layerContinues, webEscalationTargets, escalateL5, titleResolvableForReverseLookup, isDistinctiveLocal, verifyRanked, partitionByDomain, registrableDomain, sameCompanyDomain, scrapedEmailTrusted, emailFormatTemplate, companyMailDomainHint } from "../src/lib/finder/verify-orchestration.ts";
+import { smtpTransientError } from "../src/lib/verifier/reacher.ts";
 
 const LIMIT = 20; // the verified window Layer 4 actually SMTP-checks
 let failures = 0;
@@ -335,6 +336,25 @@ console.log("\n== Company-email hints (vendor format template / mail domain) =="
   for (const [e, site, want] of H) {
     const got = companyMailDomainHint(e, site);
     got === want ? ok(`hint ${e} @ ${site} → ${want}`) : fail(`hint ${e} @ ${site} → ${got} (want ${want})`);
+  }
+}
+
+console.log("\n== SMTP transient (greylist) detection — apollo_people (17) ==");
+{
+  // Mimecast answers an UNKNOWN recipient with 451 but a real one with 250
+  // (rachael.lee@howdengroup.com, ricky.lui@hysan.com.hk) → must NOT read as opaque.
+  const G = [
+    [{ type: "AsyncSmtpError", message: "transient: Internal resource temporarily unavailable - https://community.mimecast.com/docs/DOC-1369#451" }, true],
+    [{ type: "AsyncSmtpError", message: "451 4.7.1 Greylisted, please try again later" }, true],
+    [{ type: "AsyncSmtpError", message: "permanent: 5.7.1 Service unavailable; client [51.68.203.255] blocked using Proofpoint Dynamic Reputation" }, false],
+    [{ type: "AsyncSmtpError", message: "permanent: Blocked - see https://ipcheck.proofpoint.com/?ip=51.195.149.22" }, false],
+    [{ type: "Microsoft365Error", message: { ReqwestError: "error sending request for url (https://login.microsoftonline.com/common/GetCredentialType)" } }, false],
+    [{ type: "Socks5", message: "Error with reply: General failure." }, false],
+    [null, false],
+  ];
+  for (const [err, want] of G) {
+    const got = smtpTransientError(err);
+    got === want ? ok(`transient=${want}: ${JSON.stringify(err).slice(0, 70)}`) : fail(`transient=${got} (want ${want}): ${JSON.stringify(err).slice(0, 90)}`);
   }
 }
 

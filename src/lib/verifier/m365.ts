@@ -33,7 +33,36 @@ interface GctResult {
   throttled: boolean;
 }
 
+// A bulk People pass fires hundreds of GetCredentialType calls; unpaced, Microsoft
+// throttles them (ThrottleStatus / 429) → `null` → the tenant reads "can't tell" and
+// every colleague settles Not found. Pace them through a small shared slot pool and
+// retry a throttled/failed call with backoff before giving up.
+const GCT_CONCURRENCY = Math.max(1, Number(process.env.M365_GCT_CONCURRENCY ?? 3));
+const GCT_RETRIES = Math.max(0, Number(process.env.M365_GCT_RETRIES ?? 3));
+let gctActive = 0;
+const gctWaiters: Array<() => void> = [];
+async function withGctSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (gctActive >= GCT_CONCURRENCY) await new Promise<void>((r) => gctWaiters.push(r));
+  gctActive++;
+  try {
+    return await fn();
+  } finally {
+    gctActive--;
+    gctWaiters.shift()?.();
+  }
+}
+
 async function getCredentialType(email: string): Promise<GctResult> {
+  let last: GctResult = { ifExists: null, throttled: false };
+  for (let attempt = 0; attempt <= GCT_RETRIES; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * 2 ** (attempt - 1) + Math.floor(Math.random() * 500)));
+    last = await withGctSlot(() => getCredentialTypeOnce(email));
+    if (last.ifExists !== null && !last.throttled) return last;
+  }
+  return last;
+}
+
+async function getCredentialTypeOnce(email: string): Promise<GctResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GCT_TIMEOUT_MS);
   try {

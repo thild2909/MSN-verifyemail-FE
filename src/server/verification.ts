@@ -145,6 +145,10 @@ async function m365Confirmed(outcome: VerifyOutcome, email: string): Promise<Ver
       score: Math.max(r.score, 90),
       suggestedAction: "Safe to send: Microsoft 365 confirms this mailbox exists.",
       checks: { ...r.checks, mailbox: "pass" },
+      // GetCredentialType answered for THIS exact account on a tenant proven to
+      // discriminate — a per-address observation, so trustedValid accepts it even
+      // when a third-party provider had flagged the domain catch-all.
+      perAddressObservation: true,
     },
   };
 }

@@ -110,6 +110,18 @@ const FREE_DOMAINS = new Set([
   "aol.com", "proton.me", "protonmail.com", "gmx.com", "mail.com", "yandex.com",
 ]);
 
+/**
+ * True when the SMTP step failed with a TRANSIENT (4xx) reply — greylisting, or
+ * Mimecast's "451 Internal resource temporarily unavailable", which Mimecast sends
+ * for an UNKNOWN recipient while a real mailbox gets a clean 250. Such a server
+ * still discriminates per address, so it must not be written off as opaque.
+ */
+export function smtpTransientError(v: unknown): boolean {
+  const msg = JSON.stringify((v as { message?: unknown } | null)?.message ?? "");
+  if (/permanent|\b5\.\d\.\d/i.test(msg)) return false; // 5xx block (Proofpoint / Spamhaus) is not greylisting
+  return /transient|greylist|\b4[25]\d\b|try again later|temporarily/i.test(msg);
+}
+
 /* ------------------------------- Mapping --------------------------------- */
 
 export function mapReacherOutput(o: CheckEmailOutput): VerificationResult {
@@ -157,7 +169,7 @@ export function mapReacherOutput(o: CheckEmailOutput): VerificationResult {
     disposable,
     roleBased,
     freeProvider: FREE_DOMAINS.has(domain.toLowerCase()),
-    greylisted: false,
+    greylisted: !smtp && smtpTransientError(o.smtp),
   };
 
   const cls = classify(o.is_reachable, checks, smtp);

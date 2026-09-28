@@ -121,6 +121,9 @@ function mxLive(output: CheckEmailOutput): boolean {
  */
 async function thirdPartyFallback(email: string, output: CheckEmailOutput, result: VerificationResult): Promise<VerifyOutcome | null> {
   if (result.status !== "unknown" || !mxLive(output)) return null;
+  // A transient 4xx (Mimecast 451 for an unknown recipient) is an ANSWER from our own
+  // engine — the real mailbox gets a clean 250 — so don't pay a provider for it.
+  if (result.checks.greylisted) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TP_TIMEOUT_MS);
   try {
@@ -137,7 +140,20 @@ async function thirdPartyFallback(email: string, output: CheckEmailOutput, resul
     // Real source lives in result.provider / suggestedAction; the outcome tag stays
     // "reacher" so the finder's existing per-verdict logic applies unchanged. The
     // `thirdParty` flag tells the domain classifier to use accept-all semantics.
-    return { result: j.result, provider: "reacher", thirdParty: true };
+    // Keep the ENGINE's DNS facts: the provider result carries no MX records, and
+    // without them an M365 domain is no longer recognised (isM365Domain) — so the
+    // free per-address GetCredentialType path was silently skipped and the domain
+    // settled catch-all/opaque. Also keep the engine's greylist flag (Mimecast 451).
+    return {
+      result: {
+        ...j.result,
+        mxRecords: j.result.mxRecords?.length ? j.result.mxRecords : result.mxRecords,
+        provider: j.result.provider ?? result.provider,
+        checks: { ...j.result.checks, greylisted: result.checks.greylisted || j.result.checks.greylisted },
+      },
+      provider: "reacher",
+      thirdParty: true,
+    };
   } catch {
     return null;
   } finally {
