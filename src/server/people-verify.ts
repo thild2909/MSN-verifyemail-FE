@@ -17,7 +17,8 @@ import { VerifierUnavailableError } from "@/lib/verifier/backend";
 import { m365MailboxExists } from "@/lib/verifier/m365";
 import { findPersonEmail, cachedDomainClass, classifyDomain, isM365VerifiedDomain, knownDomainPattern, seedDomainPattern, setGlobalFallbackPattern, bestGuessEmail } from "./finder";
 import { cleanDomain, derivePatternId } from "@/lib/finder/patterns";
-import { companyDomainVariants } from "@/lib/finder/domain-variants";
+import { companyDomainVariants, strongVariantMatch, variantPageRelevant } from "@/lib/finder/domain-variants";
+import { extractSiteMailDomains } from "@/lib/finder/site-mail-domains";
 import { resolveMx } from "node:dns/promises";
 import { bestFullName, detectProfile, generateGlobalCandidates, learnGlobalPattern, learnedGlobalPattern, mergeLocals, splitFirstLast } from "@/lib/finder/global-name-patterns";
 import { companyMailDomainHint, emailFormatTemplate, escalateL5, isDistinctiveLocal, layerContinues, partitionByDomain, sameCompanyDomain, scrapedEmailTrusted, titleResolvableForReverseLookup, verifyRanked } from "@/lib/finder/verify-orchestration";
@@ -660,22 +661,112 @@ function hasLiveMx(domain: string): Promise<boolean> {
 // one company shares the (bounded) DNS work, so a big bulk pass costs one MX sweep
 // per company, not per row.
 const variantDomainsMemo = new Map<string, Promise<string[]>>();
-function liveVariantDomainsFor(website: string | null, company: string): Promise<string[]> {
+// Live variants handed to Layer 4, best-first: each costs a per-domain SMTP sweep.
+const VARIANT_MAX_LIVE = Math.max(1, Number(process.env.PEOPLE_VERIFY_VARIANT_MAX_LIVE ?? 4));
+function liveVariantDomainsFor(
+  website: string | null,
+  company: string,
+  opts: { country?: string | null; companyLinkedin?: string | null } = {},
+): Promise<string[]> {
   if (!VARIANT_DOMAIN_LAYER) return Promise.resolve([]);
   const site = cleanDomain(website ?? "");
-  const key = `${site}|${company.toLowerCase().trim()}`;
+  const key = `${site}|${company.toLowerCase().trim()}|${opts.country ?? ""}|${opts.companyLinkedin ?? ""}`;
   let p = variantDomainsMemo.get(key);
   if (!p) {
     if (variantDomainsMemo.size > 2000) variantDomainsMemo.clear();
-    const cands = companyDomainVariants(site, company, 18);
+    const cands = companyDomainVariants(site, company, 40, opts);
     // DNS MX lookups are cheap (non-existent domains reject in ~ms; each capped at
     // VARIANT_MX_TIMEOUT_MS). Run ALL in parallel — measured ~1s for 18 vs ~2.75s
     // when batched — so the (memoized, once-per-company) probe never stalls a row.
     p = (async () => {
       const oks = await Promise.all(cands.map(async (d) => ((await hasLiveMx(d).catch(() => false)) ? d : null)));
-      return oks.filter((d): d is string => d !== null);
+      const live = oks.filter((d): d is string => d !== null);
+      // Relevance gate (precision): a structural match (strongVariantMatch) is kept; any other
+      // live variant must have a homepage that names this company, else it is a
+      // different business on a generic root (cricket.com, two.com, west.com).
+      const checks = await Promise.all(
+        live.slice(0, VARIANT_MAX_LIVE * 3).map(async (d) => {
+          if (strongVariantMatch(d, { websiteDomain: site, companyName: company, companyLinkedin: opts.companyLinkedin })) return d;
+          const page = (await fetchPage(`https://${d}`)) ?? (await fetchPage(`http://${d}`));
+          return page && variantPageRelevant(page.html, { websiteDomain: site, companyName: company, country: opts.country, variant: d }) ? d : null;
+        }),
+      );
+      return checks.filter((d): d is string => d !== null).slice(0, VARIANT_MAX_LIVE);
     })();
     variantDomainsMemo.set(key, p);
+  }
+  return p;
+}
+
+/* ------------- L2c — mail domains published on the company website ------------- */
+// A website with NO MX (apollo_people (17): 61 rows, 95% Not found) usually means
+// the company mails from another domain, and its homepage says which one — a redirect
+// (gobi-gba.vc → gobi.vc) or a printed address (y-intercept.org → info@y-intercept.net).
+// One homepage fetch per company (memoized), then MX-gated like the variants.
+const SITE_MAIL_LAYER = (process.env.PEOPLE_VERIFY_SITE_MAIL_DOMAINS ?? "1") !== "0";
+const SITE_FETCH_TIMEOUT_MS = Math.max(2_000, Number(process.env.PEOPLE_VERIFY_SITE_FETCH_TIMEOUT_MS ?? 8_000));
+const SITE_MAX_BYTES = 600_000;
+
+async function fetchPage(url: string): Promise<{ html: string; finalHost: string | null } | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SITE_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: controller.signal,
+      cache: "no-store",
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; MSN-Enrich/1.0)", Accept: "text/html,*/*" },
+    });
+    if (!res.ok || !res.body) return null;
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    while (size < SITE_MAX_BYTES) {
+      const { done, value } = await reader.read();
+      if (done || !value) break;
+      chunks.push(value);
+      size += value.length;
+    }
+    reader.cancel().catch(() => {});
+    const html = Buffer.concat(chunks).toString("utf8");
+    let finalHost: string | null = null;
+    try { finalHost = new URL(res.url).hostname; } catch { /* keep null */ }
+    return { html, finalHost };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const siteMailMemo = new Map<string, Promise<string[]>>();
+function liveSiteMailDomainsFor(website: string | null): Promise<string[]> {
+  const site = cleanDomain(website ?? "");
+  if (!SITE_MAIL_LAYER || !site) return Promise.resolve([]);
+  let p = siteMailMemo.get(site);
+  if (!p) {
+    if (siteMailMemo.size > 2000) siteMailMemo.clear();
+    p = (async () => {
+      let found: string[] = [];
+      for (const url of [`https://${site}`, `http://${site}`, `https://www.${site}`]) {
+        const page = await fetchPage(url);
+        if (!page) continue;
+        found = extractSiteMailDomains(page.html, site, page.finalHost);
+        // Nothing on the homepage → the contact page is where companies print it.
+        if (!found.length) {
+          const base = page.finalHost ? `https://${page.finalHost}` : url;
+          for (const path of ["/contact", "/contact-us"]) {
+            const c = await fetchPage(base + path);
+            if (c) found = extractSiteMailDomains(c.html, site, null);
+            if (found.length) break;
+          }
+        }
+        break;
+      }
+      const live = await Promise.all(found.map(async (d) => ((await hasLiveMx(d).catch(() => false)) ? d : null)));
+      return live.filter((d): d is string => d !== null);
+    })().catch(() => []);
+    siteMailMemo.set(site, p);
   }
   return p;
 }
@@ -813,6 +904,14 @@ async function verifyOneInner(
       const hintOutcome = await findPersonEmail({ firstName: ef, lastName: el, domain: hintLive });
       if (hintOutcome.state === "verified") return { ...patchFromFinder(hintOutcome), altName, companyEmail };
     }
+    // Layer 2c — mail domains the company's own website publishes (redirect target /
+    // printed addresses). Runs for every unconfirmed row; memoized per website.
+    const siteMailDomains = (await liveSiteMailDomainsFor(t.domain).catch(() => [] as string[]))
+      .filter((d) => d !== cleanDomain(t.domain!) && d !== hintLive && !extraAltDomains.includes(d));
+    for (const dom of siteMailDomains) {
+      const o = await findPersonEmail({ firstName: ef, lastName: el, domain: dom });
+      if (o.state === "verified") return { ...patchFromFinder(o), altName, companyEmail };
+    }
     // Find & verify is binary (Valid | Not found), so an unconfirmed Layer-1/2 outcome
     // (catch-all / opaque / not_found) is NOT an answer: every such row continues
     // through Layer 4 → public sources → Layer 3 → Layer 5. Each layer ends the row
@@ -828,13 +927,13 @@ async function verifyOneInner(
     // so they're kept even when the website itself is dead-MX.
     let variantDomains: string[] = [];
     if (VARIANT_DOMAIN_LAYER && (t.domain || t.company)) {
-      variantDomains = await liveVariantDomainsFor(t.domain, t.company).catch(() => []);
+      variantDomains = await liveVariantDomainsFor(t.domain, t.company, { country: t.country, companyLinkedin: t.companyLinkedin }).catch(() => []);
     }
 
     // #3 — on a dead-MX (no_mx) website, drop the dead domain so Layer 4 doesn't
     // waste an SMTP mx-check on it; keep only the (live) alt-domain + variants.
-    const domains = uniqueDomains([t.domain, ...extraAltDomains, hintLive, ...variantDomains]);
-    const liveDomains = outcome.state === "no_mx" ? uniqueDomains([...extraAltDomains, hintLive, ...variantDomains]) : domains;
+    const domains = uniqueDomains([t.domain, ...extraAltDomains, hintLive, ...siteMailDomains, ...variantDomains]);
+    const liveDomains = outcome.state === "no_mx" ? uniqueDomains([...extraAltDomains, hintLive, ...siteMailDomains, ...variantDomains]) : domains;
 
     // Layer 3a — DIRECT name recovery from the person's OWN LinkedIn URL. Runs BEFORE
     // Layer 4 (and before the slow public-sources scrape) so the culture-aware

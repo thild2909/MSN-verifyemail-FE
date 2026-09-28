@@ -638,6 +638,7 @@ export interface PersonVerifyTarget {
   title: string | null;
   linkedin: string | null; // for the Layer-5 person↔role↔company verification
   companyEmail: string | null; // existing employer email (don't clobber an imported value)
+  companyLinkedin?: string | null; // company page slug → brand root for sibling mail domains
 }
 function toVerifyTarget(p: CollectedPerson): PersonVerifyTarget {
   let domain = p.companyDomain;
@@ -656,6 +657,7 @@ function toVerifyTarget(p: CollectedPerson): PersonVerifyTarget {
     title: p.title?.value ? String(p.title.value) : null,
     linkedin: p.linkedin?.value ? String(p.linkedin.value) : null,
     companyEmail: p.companyEmail ?? null,
+    companyLinkedin: p.companyLinkedin ?? null,
   };
 }
 

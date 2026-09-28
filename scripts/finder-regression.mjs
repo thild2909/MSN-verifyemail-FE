@@ -19,6 +19,8 @@ import {
 } from "../src/lib/finder/global-name-patterns.ts";
 import { layerContinues, webEscalationTargets, escalateL5, titleResolvableForReverseLookup, isDistinctiveLocal, verifyRanked, partitionByDomain, registrableDomain, sameCompanyDomain, scrapedEmailTrusted, emailFormatTemplate, companyMailDomainHint } from "../src/lib/finder/verify-orchestration.ts";
 import { smtpTransientError } from "../src/lib/verifier/reacher.ts";
+import { companyDomainVariants, strongVariantMatch, variantPageRelevant } from "../src/lib/finder/domain-variants.ts";
+import { extractSiteMailDomains } from "../src/lib/finder/site-mail-domains.ts";
 
 const LIMIT = 20; // the verified window Layer 4 actually SMTP-checks
 let failures = 0;
@@ -336,6 +338,79 @@ console.log("\n== Company-email hints (vendor format template / mail domain) =="
   for (const [e, site, want] of H) {
     const got = companyMailDomainHint(e, site);
     got === want ? ok(`hint ${e} @ ${site} → ${want}`) : fail(`hint ${e} @ ${site} → ${got} (want ${want})`);
+  }
+}
+
+console.log("\n== No-MX website → real mail domain (apollo_people (17)) ==");
+{
+  // [website, company, companyLinkedin, country, expected mail domain in the top-40 variants]
+  const V = [
+    ["hangsenginvestment.com", "Hang Seng Investment", "http://www.linkedin.com/company/hangsenginvestment", "Hong Kong", "hangseng.com"],
+    ["dahsinginsurance.com", "Dah Sing Insurance Company Limited", null, "Hong Kong", "dahsing.com"],
+    ["hktfinancialservices.com", "HKT Digital Ventures - Fintech", "http://www.linkedin.com/company/hkt-financial-services", "Hong Kong", "hkt.com"],
+    ["westk.hk", "West Kowloon Cultural District Authority", "http://www.linkedin.com/company/westk", "Hong Kong", "wkcd.hk"],
+    ["ea-dg.com.cn", "Earthasia Design Group (EADG)", "http://www.linkedin.com/company/eadg", "Hong Kong", "eadg.com"],
+    ["macnicacytech.com", "Macnica Cytech Limited", null, "Hong Kong", "macnica.com"],
+    ["mirumhongkong.com", "Mirum Hong Kong", null, "Hong Kong", "mirum.com"],
+    ["tws-mps.com", "TWS Technology", null, "Hong Kong", "tws.com.hk"],
+    ["ccbintl.com.hk", "CCB International (Holdings) Limited", null, "Hong Kong", "ccbintl.com"],
+    ["dartslive.co.jp", "Dartslive", null, "Hong Kong", "dartslive.com"],
+    ["melcocnc.com.br", "Melco", "http://www.linkedin.com/company/melco", "Hong Kong", "melco.com.hk"],
+    ["gobi-gba.vc", "Gobi Partners GBA", "http://www.linkedin.com/company/gobipartners", "Hong Kong", "gobi.vc"],
+    ["colourliving.shop", "COLOURLIVING", null, "Hong Kong", "colourliving.com.hk"],
+    ["msig.com.hk", "MSIG Hong Kong", "http://www.linkedin.com/company/msighk", "Hong Kong", "msig.com"],
+    ["digift.sg", "DigiFT", null, "Singapore", "digift.io"],
+  ];
+  for (const [site, co, li, country, want] of V) {
+    const got = companyDomainVariants(site, co, 40, { country, companyLinkedin: li });
+    got.includes(want) ? ok(`${site} → ${want} (#${got.indexOf(want) + 1})`) : fail(`${site} → missing ${want}; got ${got.slice(0, 12).join(", ")}`);
+    if (got.includes(site)) fail(`${site} re-proposed itself`);
+  }
+  // Precision gate: structural matches pass without a page; generic single words,
+  // "(Europe)"-style parentheses and parked TLD swaps never do.
+  const M = [
+    ["hangseng.com", "hangsenginvestment.com", "Hang Seng Investment", null, true],
+    ["dahsing.com.hk", "dahsinginsurance.com", "Dah Sing Insurance Company Limited", null, true],
+    ["eadg.com", "ea-dg.com.cn", "Earthasia Design Group (EADG)", null, true],
+    ["gobipartners.com", "gobi-gba.vc", "Gobi Partners GBA", "http://www.linkedin.com/company/gobipartners", true],
+    ["randoli.com", "randoli.io", "Randoli", null, true],
+    ["cricket.com", "crickethongkong.com", "Cricket Hong Kong, China", null, false],
+    ["two.com", "cliv.io", "TWO EIGHT ONE", null, false],
+    ["west.com", "westk.hk", "West Kowloon Cultural District Authority", null, false],
+    ["europe.com", "icbc.eu", "ICBC (Europe)", null, false],
+    ["magic.com", "magic-inno.com", "Microbiota I-Center (MagIC) (香港微生物菌群創新中心)", null, false],
+    ["lesambassadeurs.ai", "lesambassadeurs.com", "Les Ambassadeurs Casino", null, false],
+    ["tech.io", "tech.design", "Tech Design", null, false],
+  ];
+  for (const [v, site, co, li, want] of M) {
+    const got = strongVariantMatch(v, { websiteDomain: site, companyName: co, companyLinkedin: li });
+    got === want ? ok(`strong ${v} for ${site} = ${want}`) : fail(`strong ${v} for ${site} = ${got} (want ${want})`);
+  }
+  const P = [
+    ["<h1>Cricket news, scores</h1>", "crickethongkong.com", "Cricket Hong Kong, China", "cricket.com", false],
+    ["<p>Cricket Hong Kong, China — official site</p>", "crickethongkong.com", "Cricket Hong Kong, China", "cricket.com", true],
+    ["<p>lesambassadeurs.ai — This domain is for sale!</p>", "lesambassadeurs.com", "Les Ambassadeurs Casino", "lesambassadeurs.ai", false],
+    ["<title>lisboa.io</title>", "lisboa.com.hk", "Lisboa Food & Wines Limited (Hong Kong)", "lisboa.io", false],
+    ["<footer>© West Kowloon Cultural District Authority</footer>", "westk.hk", "West Kowloon Cultural District Authority", "wkcd.hk", true],
+  ];
+  for (const [html, site, co, v, want] of P) {
+    const got = variantPageRelevant(html, { websiteDomain: site, companyName: co, country: "Hong Kong", variant: v });
+    got === want ? ok(`page ${v} relevant = ${want}`) : fail(`page ${v} relevant = ${got} (want ${want})`);
+  }
+  // Site-published mail domains: redirect target first, then printed addresses;
+  // tooling domains (Wix/Sentry/onmicrosoft) and free mail are never candidates.
+  const S = [
+    ["gobi-gba.vc", "<html></html>", "www.gobi.vc", ["gobi.vc"]],
+    ["y-intercept.org", '<a href="mailto:info@y-intercept.net">info@y-intercept.net</a>', null, ["y-intercept.net"]],
+    ["colourliving.shop", "x@bschk.onmicrosoft.com sales@colourliving.com", null, ["colourliving.com"]],
+    ["tinsol.net", '"dsn":"https://abc@sentry-next.wixpress.com/1" help@gmail.com', null, []],
+    ["uming.com.tw", "contact: pr@mail.uming.com.tw", null, []],
+    ["trendenterprises.com", "Email: sales&#64;trendent.com", null, ["trendent.com"]],
+    ["asiainsurance.hk", "info@afh.hk icon@2x.png", null, ["afh.hk"]],
+  ];
+  for (const [site, html, fh, want] of S) {
+    const got = extractSiteMailDomains(html, site, fh);
+    JSON.stringify(got) === JSON.stringify(want) ? ok(`site-mail ${site} → [${want}]`) : fail(`site-mail ${site} → ${JSON.stringify(got)} (want ${JSON.stringify(want)})`);
   }
 }
 
