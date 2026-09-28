@@ -238,3 +238,51 @@ export async function escalateL5<R extends { valid: boolean }, T extends EscalTa
   }
   return out;
 }
+
+// Email-format TEMPLATES that data vendors (Apollo) put in a company's email field
+// instead of a real address — "jsmith@chelsfield.com", "flast@saudiacargo.com",
+// "last@shikhara.com". The local part names the company's convention, which is the
+// strongest prior we have for that domain (verified 2026-09-28: chelsfield's real
+// mailbox is wlo@ = {f}{last}, exactly its "jsmith@" template). Map → EmailPattern id.
+const TEMPLATE_LOCALS: Record<string, string> = {
+  "jsmith": "flast", "jdoe": "flast", "flast": "flast", "flastname": "flast",
+  "john.smith": "first.last", "john.doe": "first.last", "jane.doe": "first.last", "first.last": "first.last", "firstname.lastname": "first.last",
+  "johnsmith": "firstlast", "johndoe": "firstlast", "firstlast": "firstlast", "firstnamelastname": "firstlast",
+  "john_smith": "first_last", "john_doe": "first_last", "first_last": "first_last", "firstname_lastname": "first_last",
+  "j.smith": "f.last", "j.doe": "f.last", "f.last": "f.last", "f.lastname": "f.last",
+  "john": "first", "first": "first", "firstname": "first",
+  "smith": "last", "doe": "last", "last": "last", "lastname": "last",
+  "johns": "firstl", "johnd": "firstl", "firstl": "firstl",
+  "smithj": "lastf", "doej": "lastf", "lastf": "lastf",
+  "smith.john": "last.first", "doe.john": "last.first", "last.first": "last.first", "lastname.firstname": "last.first",
+  "smithjohn": "lastfirst", "lastfirst": "lastfirst",
+  "john.s": "first.l", "john.d": "first.l", "first.l": "first.l",
+  "john-smith": "first-last", "john-doe": "first-last", "first-last": "first-last",
+};
+
+/**
+ * Read a vendor email-format template. Returns the pattern id + domain for a
+ * template address ("jsmith@acme.com" → { patternId: "flast", domain: "acme.com" }),
+ * or null for a real address (info@, sales@, a person's mailbox) or garbage.
+ */
+export function emailFormatTemplate(email: string | null | undefined): { patternId: string; domain: string } | null {
+  const m = String(email ?? "").trim().toLowerCase().match(/^([^@\s]+)@([a-z0-9.-]+\.[a-z]{2,})$/);
+  if (!m) return null;
+  const patternId = TEMPLATE_LOCALS[m[1]];
+  return patternId ? { patternId, domain: m[2] } : null;
+}
+
+/**
+ * The mail domain a row's company email points at, when it DIFFERS from the website
+ * (y-intercept.org site, info@y-intercept.net mail; gobi-gba.vc site, jsmith@gobi.vc).
+ * Only a candidate domain — every address on it is still verified — so a stale or
+ * wrong hint costs a few checks, never a false result. Free-mail hosts are ignored.
+ */
+export function companyMailDomainHint(companyEmail: string | null | undefined, websiteDomain: string | null | undefined): string | null {
+  const m = String(companyEmail ?? "").trim().toLowerCase().match(/^[^@\s]+@([a-z0-9.-]+\.[a-z]{2,})$/);
+  if (!m) return null;
+  const dom = m[1].replace(/^(?:mail|email|smtp|mx)\./, "");
+  if (isFreeMailDomain(dom)) return null;
+  if (websiteDomain && dom === websiteDomain.toLowerCase().replace(/^www\./, "")) return null;
+  return dom;
+}

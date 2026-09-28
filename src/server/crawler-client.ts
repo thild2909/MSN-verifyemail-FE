@@ -5,6 +5,7 @@
  * canonical record onto the FE's CollectedCompany shape. No mock data.
  */
 import "server-only";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { initials } from "@/lib/utils";
 import type {
   CollectedCompany,
@@ -16,6 +17,18 @@ import type {
 } from "@/lib/leads/collect-types";
 
 const BASE = process.env.CRAWLER_SERVICE_URL ?? "http://localhost:8090";
+
+// The person row a crawler call is made for. Sent as `x-record-id` so the crawler
+// caps PAID Decodo requests per row (BE decodo-budget.ts, default max 3). Carried
+// via AsyncLocalStorage so no call signature changes; unset → no header (uncapped).
+const recordAls = new AsyncLocalStorage<string>();
+export function withCrawlerRecord<T>(recordId: string | null | undefined, fn: () => Promise<T>): Promise<T> {
+  return recordId ? recordAls.run(recordId, fn) : fn();
+}
+function jsonHeaders(): Record<string, string> {
+  const id = recordAls.getStore();
+  return id ? { "Content-Type": "application/json", "x-record-id": id } : { "Content-Type": "application/json" };
+}
 const TIMEOUT_MS = Number(process.env.CRAWLER_TIMEOUT_MS ?? 240_000);
 // Per-PERSON SERP calls (alt-domain / public-sources / reverse-role in the email
 // finder) must NOT inherit the 240s company-crawl timeout — one slow/hung SERP
@@ -134,7 +147,7 @@ export async function resolveViaCrawler(name: string, location: string): Promise
   try {
     const res = await fetch(`${BASE}/resolve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ company: name, location }),
       signal: controller.signal,
       cache: "no-store",
@@ -170,7 +183,7 @@ export async function resolveCompanyWebsiteViaCrawler(company: string, location:
   try {
     const res = await fetch(`${BASE}/company-website`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ company, location }),
       signal: controller.signal,
       cache: "no-store",
@@ -187,22 +200,24 @@ export interface CompanyEmailDomainResult {
   location: string;
   domain: string | null; // the domain the company actually sends mail from
   email: string | null; // the support/contact address it was derived from
+  domains?: string[]; // every plausible non-website mail domain, best first (≤3)
 }
 
 /**
  * Discover the domain a company ACTUALLY sends email from, via the crawler's
  * Decodo support-email lookup ("email support <company>"). Used by "Find &
  * verify" when no name pattern resolves at the website domain — the company may
- * use a different email domain. Throws on transport error.
+ * use a different email domain. `website` = the domain we already have; the
+ * crawler prefers a mail domain that differs from it. Throws on transport error.
  */
-export async function resolveCompanyEmailDomainViaCrawler(company: string, location: string): Promise<CompanyEmailDomainResult> {
+export async function resolveCompanyEmailDomainViaCrawler(company: string, location: string, website?: string | null): Promise<CompanyEmailDomainResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
   try {
     const res = await fetch(`${BASE}/company-email-domain`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ company, location }),
+      headers: jsonHeaders(),
+      body: JSON.stringify({ company, location, domain: website ?? undefined }),
       signal: controller.signal,
       cache: "no-store",
     });
@@ -226,7 +241,7 @@ export async function resolvePersonEmailsViaCrawler(input: {
   try {
     const res = await fetch(`${BASE}/person-emails`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({
         name: input.name,
         first: input.first,
@@ -271,7 +286,7 @@ export async function resolvePersonByRoleViaCrawler(input: {
   try {
     const res = await fetch(`${BASE}/person-by-role`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({
         title: input.title,
         company: input.company,
@@ -377,7 +392,7 @@ export async function resolvePersonViaCrawler(seed: PeopleSeedInput): Promise<{ 
   try {
     const res = await fetch(`${BASE}/person`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({
         first_name: seed.firstName ?? "",
         last_name: seed.lastName ?? "",
@@ -404,7 +419,7 @@ export async function resolvePeopleViaCrawler(seed: PeopleSeedInput): Promise<{ 
   try {
     const res = await fetch(`${BASE}/people`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({
         company: seed.company,
         location: seed.location ?? "",
@@ -444,7 +459,7 @@ async function llmFetch(path: string, records: unknown[]): Promise<LlmVerifyResp
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ records }),
       signal: controller.signal,
       cache: "no-store",
@@ -465,7 +480,7 @@ export async function llmFindEmailsViaCrawler(records: EmailFindRecord[]): Promi
   try {
     const res = await fetch(`${BASE}/llm/find-emails`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ records }),
       signal: controller.signal,
       cache: "no-store",
@@ -513,7 +528,7 @@ export async function analyzeNameEmailStructureViaCrawler(records: NameStructure
   try {
     const res = await fetch(`${BASE}/llm/name-email-structure`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ records, webSearch }),
       signal: controller.signal,
       cache: "no-store",
@@ -557,7 +572,7 @@ export async function llmEnrichCompaniesViaCrawler(records: CompanySeedRecord[])
   try {
     const res = await fetch(`${BASE}/llm/enrich-companies`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ records }),
       signal: controller.signal,
       cache: "no-store",
@@ -589,7 +604,7 @@ export async function llmEnrichPeopleViaCrawler(records: PeopleEnrichSeedRecord[
   try {
     const res = await fetch(`${BASE}/llm/enrich-people`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ records }),
       signal: controller.signal,
       cache: "no-store",
@@ -622,7 +637,7 @@ export async function tagPeopleViaCrawler(prompt: string, records: TagPersonReco
   try {
     const res = await fetch(`${BASE}/llm/tag-people`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ prompt, records }),
       signal: controller.signal,
       cache: "no-store",
@@ -675,7 +690,7 @@ export async function aiReportViaCrawler(
   try {
     const res = await fetch(`${BASE}/llm/ai-report`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({
         prompt,
         instructions: instructions ?? null,

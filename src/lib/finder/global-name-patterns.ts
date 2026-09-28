@@ -107,6 +107,11 @@ const COUNTRY_TO_PROFILE: Record<string, NamingProfile> = {
  * `linkedin.com/in/kim-lecelyn-bueno` → "Kim Lecelyn Bueno" even when the row
  * only stored "Lecelyn Bueno". Returns null for a single-token or id-only slug.
  */
+// Vanity-slug filler that is never a name token ("thebenwong" → NOT "The Ben Wong";
+// "dr-jane-lee", "iam-john-tan", "john-tan-mba"). Only ever dropped when it is a NEW
+// slug token — a token of the stored name is always kept.
+const SLUG_FILLER = new Set(["the", "its", "iam", "im", "mr", "mrs", "ms", "miss", "mister", "dr", "prof", "real", "official", "hello", "hi", "phd", "mba", "cpa", "cfa", "jr", "sr"]);
+
 export function nameFromLinkedinSlug(url: string | null | undefined): string | null {
   if (!url) return null;
   const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
@@ -116,7 +121,7 @@ export function nameFromLinkedinSlug(url: string | null | undefined): string | n
   // "-123456789"). It MUST contain a digit — otherwise a long all-letter SURNAME
   // ("gunasekera") would be wrongly stripped as an id.
   slug = slug.replace(/-(?=[a-z0-9]*[0-9])[a-z0-9]{3,}$/i, "");
-  const toks = slug.split("-").filter((t) => /^[a-z][a-z']+$/i.test(t) && t.length >= 2);
+  const toks = slug.split("-").filter((t) => /^[a-z][a-z']+$/i.test(t) && t.length >= 2 && !SLUG_FILLER.has(t));
   if (toks.length < 2 || toks.length > 4) return null;
   return toks.map((t) => t[0].toUpperCase() + t.slice(1)).join(" ");
 }
@@ -196,8 +201,11 @@ export function orderedTokensFromConcatSlug(slug: string, storedTokens: string[]
   }
   if (cur < s.length) segs.push({ pos: cur, tok: s.slice(cur) });
   segs.sort((x, y) => x.pos - y.pos);
-  const toks = segs.map((x) => x.tok).filter((t) => t.length >= 2);
-  if (toks.join("").length !== s.length) return null; // stored tokens didn't tile the slug
+  const toks0 = segs.map((x) => x.tok).filter((t) => t.length >= 2);
+  if (toks0.join("").length !== s.length) return null; // stored tokens didn't tile the slug
+  // Drop a recovered FILLER segment ("the" in thebenwong); stored anchors always stay.
+  const anchorSet = new Set(anchors);
+  const toks = toks0.filter((t) => anchorSet.has(t) || !SLUG_FILLER.has(t));
   if (toks.length <= anchors.length || toks.length > 4) return null; // must add ≥1, stay sane
   return toks;
 }

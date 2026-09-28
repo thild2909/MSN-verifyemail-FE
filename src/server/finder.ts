@@ -25,6 +25,7 @@ import "server-only";
 import { cachedVerify } from "./verification";
 import { buildCandidates, buildEmailForPattern, cleanDomain, priorNormForLabel } from "@/lib/finder/patterns";
 import { verifyRanked } from "@/lib/finder/verify-orchestration";
+import { domainDiscriminates, isM365Domain, m365MailboxExists } from "@/lib/verifier/m365";
 import type { BulkFinderResponse, BulkFinderResult, FinderOutcome, FinderResult, FinderState, VerificationResult } from "@/lib/types";
 
 /* ----------------------------- domain cache ----------------------------- */
@@ -48,6 +49,10 @@ interface DomainFacts {
   // corroborating colleagues (more = higher confidence).
   knownPatternId?: string; // EmailPattern id, e.g. "first" / "first.last"
   knownPatternWeight?: number;
+  // Microsoft 365 tenant whose GetCredentialType discriminates real vs fake accounts.
+  // SMTP can't verify M365 (it refuses RCPT probes, and blocklisted egress IPs get a
+  // 5.7.1), so such a domain is verified over HTTPS instead of being written off opaque.
+  m365?: boolean;
   at: number; // epoch ms
 }
 export type DomainClass = "ok" | "catchall" | "opaque" | "dead";
@@ -69,6 +74,9 @@ const DEAD_MX_TTL_MS = Number(process.env.FINDER_DEAD_MX_TTL_MS ?? 3_600_000);
 // these domains return not_found either way, just ~4× faster). Tune / disable
 // (set very high) with FINDER_CLASSIFY_TIMEOUT_MS.
 const CLASSIFY_TIMEOUT_MS = Number(process.env.FINDER_CLASSIFY_TIMEOUT_MS ?? 15_000);
+// One retry for a probe that hit the short deadline (slow ≠ tarpit). Paid once per
+// domain (cached), so colleagues are unaffected.
+const CLASSIFY_RETRY_TIMEOUT_MS = Number(process.env.FINDER_CLASSIFY_RETRY_TIMEOUT_MS ?? 40_000);
 
 /**
  * Confidence bar for reporting an email as found when the backend could NOT
@@ -206,6 +214,7 @@ function markDeadDomain(domain: string, provider: "reacher"): void {
 export async function classifyDomain(domain: string): Promise<{ klass: DomainClass; calls: number }> {
   const f = getFacts(domain);
   if (f?.deadMx) return { klass: "dead", calls: 0 };
+  if (f?.m365) return { klass: "ok", calls: 0 };
   if (f?.catchAll) return { klass: "catchall", calls: 0 };
   if (f?.opaque) return { klass: "opaque", calls: 0 };
 
@@ -213,17 +222,33 @@ export async function classifyDomain(domain: string): Promise<{ klass: DomainCla
   let v: Awaited<ReturnType<typeof cachedVerify>>;
   try {
     v = await cachedVerify(`${rand}@${domain}`, { fresh: true, timeoutMs: CLASSIFY_TIMEOUT_MS });
+    // A SLOW server is not a dead one: mail.wadabento.com answers in ~19s (the
+    // engine's latency probe takes several samples), past the 15s deadline, so the
+    // domain was cached opaque and stephenchan@wadabento.com was never tried. Give a
+    // timed-out probe ONE longer retry before concluding the server is a tarpit.
+    if (v.timedOut) v = await cachedVerify(`${rand}@${domain}`, { fresh: true, timeoutMs: CLASSIFY_RETRY_TIMEOUT_MS });
   } catch {
     return { klass: "opaque", calls: 1 }; // treat an error as inconclusive (don't cache)
   }
   const calls = v.cached ? 0 : 1;
   if (v.provider !== "reacher") return { klass: "ok", calls }; // mock → behave normally, don't classify
+  const r = v.result;
+  // Microsoft 365: SMTP says nothing useful here (RCPT probes refused; a blocklisted
+  // egress IP gets "5.7.1 … blocked using Spamhaus"), which used to classify the
+  // domain opaque → Not found for every colleague. Microsoft's GetCredentialType API
+  // answers per account over HTTPS instead. If the tenant DISCRIMINATES (a fake
+  // account reads "not found"), the domain is verifiable → "ok" (never opaque), and
+  // findPersonEmail checks candidates via GetCredentialType. Verified 2026-09-28:
+  // wlo@chelsfield.com, benwong@riverchain.com were Not found before this.
+  if (r.checks.mx !== "fail" && isM365Domain(r.mxRecords) && (await domainDiscriminates(domain).catch(() => null)) === true) {
+    mergeFacts(domain, { m365: true });
+    return { klass: "ok", calls };
+  }
   // Probe did not answer within the short classify deadline → tarpit / unreachable
   // server. Cache it opaque so this row skips the (per-address ~60s) sweep and every
   // colleague at the domain skips too. Recall-safe: a mailbox that a server won't
   // confirm in time is not obtainable; the row settles not_found either way.
   if (v.timedOut) { markOpaqueDomain(domain, v.provider); return { klass: "opaque", calls }; }
-  const r = v.result;
   if (r.checks.mx === "fail") { markDeadDomain(domain, v.provider); return { klass: "dead", calls }; }
   // ONLY a bogus address coming back `valid` (is_reachable "safe") proves a TRUE
   // "dumb" catch-all — the server marks EVERY address deliverable, so a per-mailbox
@@ -251,10 +276,16 @@ function markOpaqueDomain(domain: string, provider: "reacher"): void {
   mergeFacts(domain, { opaque: true });
 }
 
+/** True when the domain is a discriminating Microsoft 365 tenant (see classifyDomain). */
+export function isM365VerifiedDomain(domain: string): boolean {
+  return !!getFacts(cleanDomain(domain))?.m365;
+}
+
 /** Cached domain class for a domain the finder already classified this pass (else "ok"). */
 export function cachedDomainClass(domain: string): DomainClass {
   const f = getFacts(cleanDomain(domain));
   if (f?.deadMx) return "dead";
+  if (f?.m365) return "ok";
   if (f?.catchAll) return "catchall";
   if (f?.opaque) return "opaque";
   return "ok";
@@ -270,8 +301,10 @@ export function cachedDomainClass(domain: string): DomainClass {
  * positive — reject it. Non-catch-all domains are unaffected; a discriminating catch-all
  * (per-address observed, e.g. resourceledger.com) still passes.
  */
+/** Reacher score floor for a `valid` to count: below it the row is Not found (user rule). */
+const MIN_VALID_SCORE = Number(process.env.FINDER_MIN_VALID_SCORE ?? 60);
 function trustedValid(r: VerificationResult): boolean {
-  return r.status === "valid" && (!r.checks.catchAll || r.perAddressObservation === true);
+  return r.status === "valid" && r.score >= MIN_VALID_SCORE && (!r.checks.catchAll || r.perAddressObservation === true);
 }
 
 function toResult(
@@ -379,8 +412,16 @@ export async function findPersonEmail(input: {
   // Check the learned winning pattern first so a known-format domain confirms
   // on the first call - but every candidate stays eligible and live-checked.
   const ordered = [...candidates];
-  if (cached?.winningPattern) {
-    const i = ordered.findIndex((c) => c.patternLabel === cached.winningPattern);
+  // A convention KNOWN for the domain (a colleague's confirmed email, or the email-
+  // format template Apollo publishes for the company, e.g. "jsmith@chelsfield.com")
+  // is tried first; a SMTP-proven winning pattern outranks it. Reorder only — every
+  // candidate stays eligible and live-checked.
+  const knownLabel = cached?.knownPatternId
+    ? buildEmailForPattern(cached.knownPatternId, input.firstName, input.lastName, domain)?.label
+    : undefined;
+  for (const label of [knownLabel, cached?.winningPattern]) {
+    if (!label) continue;
+    const i = ordered.findIndex((c) => c.patternLabel === label);
     if (i > 0) ordered.unshift(ordered.splice(i, 1)[0]);
   }
 
@@ -415,6 +456,25 @@ export async function findPersonEmail(input: {
     if (cls.klass === "opaque") {
       return outcome(toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "unverified", 0), "not_found", calls, total, provider, calls === 0);
     }
+  }
+
+  // Microsoft 365 tenant that discriminates → verify each candidate over HTTPS
+  // (GetCredentialType, ~0.3s, no SMTP reputation needed), in priority order. A hit
+  // is then run through cachedVerify, which records the engine verdict upgraded by
+  // the SAME M365 confirmation — so the stored status is the real verifier result.
+  if (getFacts(domain)?.m365) {
+    for (const c of ordered) {
+      if ((await m365MailboxExists(c.email).catch(() => "inconclusive")) !== "exists") continue;
+      const v = await cachedVerify(c.email).catch(() => null);
+      if (!v) continue;
+      if (!v.cached) calls++;
+      if (trustedValid(v.result)) {
+        learnWinningPattern(domain, c.patternLabel, v.provider);
+        const fr = toResult(c.email, c.patternLabel, name, domain, "valid", v.result.score);
+        return outcome({ ...fr, bestGuess: true }, "verified", calls, 0, v.provider, calls === 0);
+      }
+    }
+    return outcome(toResult(candidates[0].email, candidates[0].patternLabel, name, domain, "unverified", 0), "not_found", calls, 0, provider, calls === 0);
   }
 
   // Verify candidates, letting the backend's per-mailbox verdict decide. Ranked-

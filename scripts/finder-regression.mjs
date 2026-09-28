@@ -17,7 +17,7 @@ import {
   mergeLocals,
   orderedTokensFromConcatSlug,
 } from "../src/lib/finder/global-name-patterns.ts";
-import { layerContinues, webEscalationTargets, escalateL5, titleResolvableForReverseLookup, isDistinctiveLocal, verifyRanked, partitionByDomain, registrableDomain, sameCompanyDomain, scrapedEmailTrusted } from "../src/lib/finder/verify-orchestration.ts";
+import { layerContinues, webEscalationTargets, escalateL5, titleResolvableForReverseLookup, isDistinctiveLocal, verifyRanked, partitionByDomain, registrableDomain, sameCompanyDomain, scrapedEmailTrusted, emailFormatTemplate, companyMailDomainHint } from "../src/lib/finder/verify-orchestration.ts";
 
 const LIMIT = 20; // the verified window Layer 4 actually SMTP-checks
 let failures = 0;
@@ -103,6 +103,12 @@ const BEST = [
   ["Guillermo Rauch", "linkedin.com/in/rauchg", "Guillermo Rauch"], // unusable slug → keep
   ["Some Other", "www.linkedin.com/in/kim-lecelyn-bueno", "Some Other"], // unrelated slug → keep stored
   ["Kim Lecelyn Bueno", "www.linkedin.com/in/kim-lecelyn-bueno", "Kim Lecelyn Bueno"], // equal → keep
+  // Vanity filler is not a name (real mailbox benwong@riverchain.com, not the.wong@).
+  ["Ben Wong", "www.linkedin.com/in/thebenwong", "Ben Wong"],
+  ["Jane Lee", "www.linkedin.com/in/dr-jane-lee", "Jane Lee"],
+  ["John Tan", "www.linkedin.com/in/iamjohntan", "John Tan"],
+  ["Se Song", "www.linkedin.com/in/se-han-song-94445818", "Se Han Song"], // real extra token still recovered
+  ["Yew Kang", "www.linkedin.com/in/kangyewjin", "Kang Yew Jin"], // concat recovery unchanged
 ];
 for (const [name, url, want] of BEST) {
   const got = bestFullName(name, url);
@@ -298,6 +304,37 @@ console.log("\n== verifyRanked (parallel candidate verify, same winner) ==");
   {
     const r = await verifyRanked(cands, mk({}), isValid, isMx, { concurrency: 2 });
     !r.winner && !r.mxFail && r.results.length === 5 ? ok("none valid → null, all 5 probed") : fail(`none-valid results=${r.results.length}`);
+  }
+}
+
+console.log("\n== Company-email hints (vendor format template / mail domain) ==");
+{
+  const T = [
+    ["jsmith@chelsfield.com", "flast", "chelsfield.com"], // real mailbox wlo@chelsfield.com
+    ["flast@saudiacargo.com", "flast", "saudiacargo.com"],
+    ["last@shikhara.com", "last", "shikhara.com"],
+    ["john.smith@acme.com", "first.last", "acme.com"],
+    ["j.doe@acme.co.uk", "f.last", "acme.co.uk"],
+  ];
+  for (const [e, pid, dom] of T) {
+    const r = emailFormatTemplate(e);
+    r?.patternId === pid && r?.domain === dom ? ok(`template ${e} → ${pid}`) : fail(`template ${e} → ${JSON.stringify(r)} (want ${pid})`);
+  }
+  // Real addresses are NOT templates (precision: a contact mailbox never seeds a pattern).
+  for (const e of ["info@y-intercept.net", "sales@s2ceda.com", "ranmali@randoli.io", "support@fotor.com", "", null, "not-an-email"]) {
+    emailFormatTemplate(e) === null ? ok(`not a template: ${e}`) : fail(`${e} wrongly read as template`);
+  }
+  const H = [
+    ["info@y-intercept.net", "y-intercept.org", "y-intercept.net"], // site ≠ mail domain
+    ["jsmith@gobi.vc", "gobi-gba.vc", "gobi.vc"],
+    ["support@int.visionnav.com", "visionnav.com", "int.visionnav.com"], // mail subdomain kept
+    ["info@dyxnet.com", "dyxnet.com", null], // same as website → no extra domain
+    ["someone@gmail.com", "acme.com", null], // free mail → never a company domain
+    [null, "acme.com", null],
+  ];
+  for (const [e, site, want] of H) {
+    const got = companyMailDomainHint(e, site);
+    got === want ? ok(`hint ${e} @ ${site} → ${want}`) : fail(`hint ${e} @ ${site} → ${got} (want ${want})`);
   }
 }
 

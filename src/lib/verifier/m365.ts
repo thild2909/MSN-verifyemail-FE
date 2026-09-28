@@ -82,7 +82,7 @@ function fakeLocalPart(): string {
  * Returns null when we couldn't tell (throttled / call failed) — caller stays
  * conservative.
  */
-async function domainDiscriminates(domain: string): Promise<boolean | null> {
+export async function domainDiscriminates(domain: string): Promise<boolean | null> {
   const cached = discriminateCache().get(domain);
   if (cached && Date.now() - cached.at <= DISCRIMINATE_TTL_MS) return cached.discriminates;
 

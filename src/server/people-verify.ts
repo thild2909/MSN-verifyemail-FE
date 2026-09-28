@@ -11,13 +11,15 @@
  * is verified directly rather than replaced by a pattern guess.
  */
 import "server-only";
+import { AsyncResource } from "node:async_hooks";
 import { cachedVerify } from "./verification";
 import { VerifierUnavailableError } from "@/lib/verifier/backend";
-import { findPersonEmail, cachedDomainClass, classifyDomain, seedDomainPattern, setGlobalFallbackPattern, bestGuessEmail } from "./finder";
+import { m365MailboxExists } from "@/lib/verifier/m365";
+import { findPersonEmail, cachedDomainClass, classifyDomain, isM365VerifiedDomain, knownDomainPattern, seedDomainPattern, setGlobalFallbackPattern, bestGuessEmail } from "./finder";
 import { cleanDomain, derivePatternId } from "@/lib/finder/patterns";
 import { bestFullName, detectProfile, generateGlobalCandidates, learnGlobalPattern, learnedGlobalPattern, mergeLocals, splitFirstLast } from "@/lib/finder/global-name-patterns";
-import { escalateL5, isDistinctiveLocal, layerContinues, partitionByDomain, sameCompanyDomain, scrapedEmailTrusted, titleResolvableForReverseLookup, verifyRanked } from "@/lib/finder/verify-orchestration";
-import { analyzeNameEmailStructureViaCrawler, l5WebSearchAvailable, resolveCompanyEmailDomainViaCrawler, resolvePersonEmailsViaCrawler, resolvePersonByRoleViaCrawler } from "./crawler-client";
+import { companyMailDomainHint, emailFormatTemplate, escalateL5, isDistinctiveLocal, layerContinues, partitionByDomain, sameCompanyDomain, scrapedEmailTrusted, titleResolvableForReverseLookup, verifyRanked } from "@/lib/finder/verify-orchestration";
+import { analyzeNameEmailStructureViaCrawler, l5WebSearchAvailable, resolveCompanyEmailDomainViaCrawler, withCrawlerRecord, resolvePersonEmailsViaCrawler, resolvePersonByRoleViaCrawler } from "./crawler-client";
 import type { FinderOutcome, FinderResult, FinderState, BulkFinderResponse, BulkFinderResult } from "@/lib/types";
 import type { EmailVerification } from "@/lib/leads/collect-types";
 import type { CollectedPerson } from "@/lib/leads/people-types";
@@ -51,8 +53,10 @@ const now = () => new Date().toISOString();
  * a "dumb" catch-all marks every address deliverable, so a `valid` there without one is
  * a false positive. Mirrors the finder's guard so every layer applies it consistently.
  */
-function trustedValid(r: { status: string; checks: { catchAll: boolean }; perAddressObservation?: boolean }): boolean {
-  return r.status === "valid" && (!r.checks.catchAll || r.perAddressObservation === true);
+/** Reacher score floor for a `valid` to count: below it the row is Not found (user rule). */
+const MIN_VALID_SCORE = Number(process.env.FINDER_MIN_VALID_SCORE ?? 60);
+function trustedValid(r: { status: string; score: number; checks: { catchAll: boolean }; perAddressObservation?: boolean }): boolean {
+  return r.status === "valid" && r.score >= MIN_VALID_SCORE && (!r.checks.catchAll || r.perAddressObservation === true);
 }
 
 /**
@@ -63,7 +67,7 @@ function trustedValid(r: { status: string; checks: { catchAll: boolean }; perAdd
  * a likely address instead of a bare Not found. Returns null when best-guessing is off,
  * the domain is dead, or no pattern applies. NEVER call before the discovery layers.
  */
-function bestGuessResult(domain: string | null, first: string, last: string): VerifyOneResult | null {
+async function bestGuessResult(domain: string | null, first: string, last: string): Promise<VerifyOneResult | null> {
   const dom = cleanDomain(domain ?? "");
   if (!dom) return null;
   // Best-guess ONLY on domains SMTP could NOT verify (catch-all / opaque). On an "ok"
@@ -74,16 +78,37 @@ function bestGuessResult(domain: string | null, first: string, last: string): Ve
   if (cls !== "catchall" && cls !== "opaque") return null;
   const bg = bestGuessEmail(dom, first, last);
   if (!bg) return null;
+  // The shown status/score is what reacher ACTUALLY returned for this exact address
+  // (per-email cached, so usually free) — never a hard-coded "catch_all".
+  const v = await reacherVerdict(bg.email);
   return {
     patch: {
       email: { value: bg.email, source: "other", confidence: bg.confidence },
-      emailKind: "pattern",
-      emailVerification: { email: bg.email, status: "catch_all", score: bg.confidence, provider: "reacher", verifiedAt: now() },
+      emailKind: v.valid ? "found" : "pattern",
+      emailVerification: v.ev,
     },
-    valid: false,
-    found: false,
+    valid: v.valid,
+    found: v.valid,
     provider: "reacher",
   };
+}
+
+/**
+ * Reacher's real verdict for one address, as stored on the row. A `valid` that is NOT
+ * trustworthy (catch-all server, no per-address observation — a bogus address on the
+ * same domain gets the identical `valid`) is stored as reacher's own catch-all flag,
+ * with reacher's score. An engine error settles as an honest `unknown`.
+ */
+async function reacherVerdict(email: string): Promise<{ ev: EmailVerification; valid: boolean }> {
+  try {
+    const v = await cachedVerify(email);
+    const r = v.result;
+    const valid = trustedValid(r);
+    const status = r.status === "valid" && !valid ? "catch_all" : r.status;
+    return { ev: { email, status, score: r.score, provider: v.provider, verifiedAt: r.verifiedAt }, valid };
+  } catch {
+    return { ev: { email, status: "unknown", score: 0, provider: "reacher", verifiedAt: now() }, valid: false };
+  }
 }
 
 /**
@@ -137,9 +162,11 @@ function makeLimiter(max: number) {
   };
   return <T>(fn: () => Promise<T>): Promise<T> =>
     new Promise<T>((resolve, reject) => {
-      queue.push(() => {
+      // Bind to the ENQUEUER's async context: pump() may start this job from another
+      // row's `finally`, and the crawler call must still carry THIS row's record id.
+      queue.push(AsyncResource.bind(() => {
         fn().then(resolve, reject).finally(() => { active--; pump(); });
-      });
+      }));
       pump();
     });
 }
@@ -192,7 +219,9 @@ function patchFromFinder(o: FinderOutcome): VerifyOneResult {
     };
   }
   if (o.state === "accept_all") {
-    const status = r.status === "unverified" ? "catch_all" : r.status;
+    // Reacher's status for this address as-is. Not verified → "unknown" (not a made-up
+    // catch_all); a `valid` here was NOT trusted by the finder → reacher's catch-all flag.
+    const status = r.status === "unverified" ? "unknown" : r.status === "valid" ? "catch_all" : r.status;
     return {
       patch: {
         email: { value: r.email, source: "other", confidence: r.score },
@@ -242,14 +271,14 @@ const CANDIDATE_CONCURRENCY = Math.max(1, Math.min(Number(process.env.PEOPLE_VER
 // (public-sources, reverse-role) are SKIPPED → the row returns Not found fast
 // instead of hanging. Coverage-safe: normal finds resolve well within budget; only
 // pathologically slow rows (which rarely find anything anyway) skip the SERP tail.
-const ROW_BUDGET_MS = Math.max(5_000, Number(process.env.PEOPLE_VERIFY_ROW_BUDGET_MS ?? 25_000));
+const ROW_BUDGET_MS = Math.max(5_000, Number(process.env.PEOPLE_VERIFY_ROW_BUDGET_MS ?? 60_000));
 
 // HARD per-row deadline (backstop, no-hang guarantee): no single row may occupy a
 // worker longer than this regardless of how slow any downstream call is. On expiry
 // the row is settled Not-found and the worker moves on. verifyOne keeps its own
 // per-layer timeouts; this only catches a pathological combination. Must exceed the
 // slowest single layer (reacher 25s, crawler SERP 20s) so it never cuts a healthy row.
-const ROW_HARD_MS = Math.max(20_000, Number(process.env.PEOPLE_VERIFY_ROW_HARD_MS ?? 60_000));
+const ROW_HARD_MS = Math.max(20_000, Number(process.env.PEOPLE_VERIFY_ROW_HARD_MS ?? 150_000));
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
@@ -411,11 +440,38 @@ async function findViaGlobalPatterns(
     // opaque / dead): a per-candidate SMTP sweep there can't confirm anything, so
     // it's pure wasted time. Cached from Layer 1's probe → free.
     if (cachedDomainClass(domain) !== "ok") continue;
+    // Classify first (cached; the same one probe Layer 1 would pay) so a Microsoft 365
+    // tenant is known BEFORE the sweep — there SMTP is refused per address, and a
+    // 20-candidate SMTP sweep blew the per-row deadline (benwong@riverchain.com was
+    // missed in the bulk pass but found alone). Dead/opaque/catch-all → next domain.
+    if ((await classifyDomain(domain).catch(() => ({ klass: "ok" as const }))).klass !== "ok") continue;
     const learned = learnedGlobalPattern(domain);
     const candidates = generateGlobalCandidates(rawName, {
       country: t.country, domain, learnedPatternId: learned, limit: GLOBAL_PATTERN_MAX,
     });
     if (candidates.length === 0) continue;
+    if (isM365VerifiedDomain(domain)) {
+      // Microsoft answers per account over HTTPS (~0.3s); a hit is then recorded
+      // through cachedVerify so the stored verdict is the verifier's own.
+      for (const c of candidates) {
+        if ((await m365MailboxExists(c.email).catch(() => "inconclusive")) !== "exists") continue;
+        const v = await cachedVerify(c.email).catch(() => null);
+        if (!v || !trustedValid(v.result)) continue;
+        learnGlobalPattern(domain, c.patternId);
+        return {
+          patch: {
+            email: { value: c.email, source: "other", confidence: 82 },
+            emailKind: "found",
+            emailVerification: { email: c.email, status: "valid", score: v.result.score, provider: v.provider, verifiedAt: now() },
+          },
+          valid: true,
+          found: true,
+          provider: v.provider,
+          altName: recovered,
+        };
+      }
+      continue;
+    }
     // Ranked-parallel verify: candidate[0] (learned pattern) alone first, the rest
     // in parallel — same winner as sequential, just faster. mxFail → next domain.
     const { winner, mxFail } = await verifyRanked(
@@ -482,7 +538,7 @@ function uniqueDomains(list: (string | null | undefined)[]): string[] {
  * that guess is usually the wrong format, so replace the displayed local-part
  * with the culture-aware top pattern (still an unconfirmed catch-all guess).
  */
-function overrideAcceptAllGuess(res: VerifyOneResult, t: store.PersonVerifyTarget, effectiveName?: string): VerifyOneResult {
+async function overrideAcceptAllGuess(res: VerifyOneResult, t: store.PersonVerifyTarget, effectiveName?: string): Promise<VerifyOneResult> {
   if (!GLOBAL_PATTERN_LAYER || !t.domain || !res.patch.email) return res;
   // Use the SAME name Layer 1 searched (slug-recovered when fuller), so the shown
   // catch-all guess stays consistent with the address we actually tried.
@@ -492,14 +548,18 @@ function overrideAcceptAllGuess(res: VerifyOneResult, t: store.PersonVerifyTarge
   if (!top?.email) return res;
   const currentLocal = String(res.patch.email.value).split("@")[0];
   if (top.local === currentLocal) return res;
-  const ev = res.patch.emailVerification;
+  // A different address → it needs ITS OWN reacher verdict, not the replaced one's.
+  const v = await reacherVerdict(top.email);
   return {
     ...res,
     patch: {
       ...res.patch,
       email: { ...res.patch.email, value: top.email },
-      emailVerification: ev ? { ...ev, email: top.email } : ev,
+      emailKind: v.valid ? "found" : "pattern",
+      emailVerification: v.ev,
     },
+    valid: v.valid,
+    found: v.valid,
   };
 }
 
@@ -509,30 +569,65 @@ function overrideAcceptAllGuess(res: VerifyOneResult, t: store.PersonVerifyTarge
  * memoized per company+location so everyone at one company costs at most ONE SERP
  * lookup. Failures memoize as null. Returns null on any error.
  */
-type AltEmailHit = { domain: string | null; email: string | null };
+type AltEmailHit = { domain: string | null; email: string | null; domains: string[] };
 const altDomainMemo = new Map<string, Promise<AltEmailHit | null>>();
-function altEmailDomainFor(company: string, location: string | null): Promise<AltEmailHit | null> {
-  const key = `${company.toLowerCase().trim()}|${(location ?? "").toLowerCase().trim()}`;
+function altEmailDomainFor(company: string, location: string | null, website: string | null): Promise<AltEmailHit | null> {
+  // Website is part of the key: the crawler returns the best mail domain that
+  // DIFFERS from it (its SERP evidence is cached per company, so this adds no SERP).
+  const site = cleanDomain(website ?? "");
+  const key = `${company.toLowerCase().trim()}|${(location ?? "").toLowerCase().trim()}|${site}`;
   let p = altDomainMemo.get(key);
   if (!p) {
     if (altDomainMemo.size > 1000) altDomainMemo.clear();
-    p = serpLimit(() => resolveCompanyEmailDomainViaCrawler(company, location ?? ""))
-      .then((r) => ({ domain: r.domain, email: r.email }))
+    p = serpLimit(() => resolveCompanyEmailDomainViaCrawler(company, location ?? "", site || null))
+      .then((r) => ({ domain: r.domain, email: r.email, domains: r.domains?.length ? r.domains : r.domain ? [r.domain] : [] }))
       .catch(() => null);
     altDomainMemo.set(key, p);
+    // Don't pin a miss for the whole process (engines may just be rate-limited now):
+    // an empty/failed lookup is dropped so the next row of the company retries it.
+    void p.then((hit) => { if (!hit || !hit.domains.length) altDomainMemo.delete(key); });
   }
   return p;
 }
 
-/** Verify one person, discovering the real email when we only have a guess. */
-async function verifyOne(
+/**
+ * Best guess that prefers the company's REAL mail domain (Layer 2 alt-domain, e.g.
+ * s2ceda.com) over the website domain (s2cinc.com) when they differ. The alt lookup
+ * is memoized per company, so this costs no extra SERP after Layer 2 has run.
+ */
+async function bestGuessPreferMailDomain(
+  t: Pick<store.PersonVerifyTarget, "company" | "location" | "domain">,
+  first: string,
+  last: string,
+): Promise<VerifyOneResult | null> {
+  if (ALT_DOMAIN_LAYER && t.company) {
+    const alt = await altEmailDomainFor(t.company, t.location, t.domain);
+    const altDom = alt?.domain ? cleanDomain(alt.domain) : "";
+    if (altDom && altDom !== cleanDomain(t.domain ?? "")) {
+      const bg = await bestGuessResult(altDom, first, last);
+      if (bg) return bg;
+    }
+  }
+  return bestGuessResult(t.domain, first, last);
+}
+
+/**
+ * Verify one person, discovering the real email when we only have a guess. Every
+ * crawler call made for this row carries its id, so the crawler caps the row's PAID
+ * Decodo requests (max 3 per record by default).
+ */
+function verifyOne(t: store.PersonVerifyTarget, opts: { skipLlm?: boolean } = {}): Promise<VerifyOneResult> {
+  return withCrawlerRecord(t.personId, () => verifyOneInner(t, opts));
+}
+
+async function verifyOneInner(
   t: store.PersonVerifyTarget,
   opts: { skipLlm?: boolean } = {},
 ): Promise<VerifyOneResult> {
   if (t.emailKind === "found" && t.email) {
     const v = await cachedVerify(t.email);
     const ev: EmailVerification = { email: v.result.email, status: v.result.status, score: v.result.score, provider: v.provider, verifiedAt: v.result.verifiedAt };
-    return { patch: { emailVerification: ev }, valid: v.result.status === "valid", found: false, provider: v.provider };
+    return { patch: { emailVerification: ev }, valid: trustedValid(v.result), found: false, provider: v.provider };
   }
 
   // Effective first/last for the pattern layers. Prefer the LinkedIn-slug-recovered
@@ -561,6 +656,16 @@ async function verifyOne(
   if (canPattern) {
     const nonWestern = detectProfile(t.country, recovered || t.name) !== "western";
 
+    // The row's company email is evidence of the company's MAIL setup:
+    //  • a vendor format template (Apollo's "jsmith@chelsfield.com") names the
+    //    convention → seed it so that pattern is verified FIRST on its domain (only
+    //    when no colleague-proven convention exists — real evidence outranks a template);
+    //  • its domain, when it differs from the website, is a candidate MAIL domain
+    //    (y-intercept.org site / y-intercept.net mail). Still verified like any other.
+    const tmpl = emailFormatTemplate(t.companyEmail);
+    if (tmpl && !knownDomainPattern(tmpl.domain)) seedDomainPattern(tmpl.domain, tmpl.patternId, 1);
+    const hintDomain = companyMailDomainHint(t.companyEmail, t.domain);
+
     // SPEED + ACCURACY for non-Western names: verify the culture-aware candidates
     // FIRST, with early-exit. The real local-part follows the person's naming
     // system (Vietnamese `thild` = given+family-initial+middle-initial, CJK
@@ -572,7 +677,7 @@ async function verifyOne(
     // verifier is untouched — only the ORDER we try candidates in changes.
     if (GLOBAL_PATTERN_LAYER && nonWestern) {
       const g = await findViaGlobalPatterns(t, uniqueDomains([t.domain]), recoveredDiffers ? recovered : undefined).catch(() => null);
-      if (g) return { ...g, altName: g.altName ?? altName, companyEmail };
+      if (g?.valid) return { ...g, altName: g.altName ?? altName, companyEmail };
     }
 
     // Layer 1 — Western pattern finder on the website domain (primary for Western
@@ -580,56 +685,67 @@ async function verifyOne(
     const outcome = await findPersonEmail({ firstName: ef, lastName: el, domain: t.domain! });
     const res = patchFromFinder(outcome);
     if (res.found) return { ...res, altName }; // confirmed mailbox → done
-    if (outcome.state === "accept_all") return { ...overrideAcceptAllGuess(res, t, recoveredDiffers ? recovered : undefined), altName };
-    fallback = res;
+    fallback = outcome.state === "accept_all" ? await overrideAcceptAllGuess(res, t, recoveredDiffers ? recovered : undefined) : res;
 
-    // BULK-PASS FAST PATH: Layer 1 just classified the domain. If it's UNVERIFIABLE
-    // (catch-all / opaque — the server confirms nothing), the SERP alt-domain, public-
-    // sources and reverse-role layers can't produce a verified address either, and the
-    // row will be best-guessed from the domain convention anyway. So on the bulk pass
-    // (skipLlm) skip straight to the L5/best-guess phase — this removes ~1-2 min of
-    // futile per-row SERP on exactly the domains that dominate a big list, making a
-    // 6000-row pass practical. Single lookups (not skipLlm) keep the full discovery, so
-    // a moved/published address (e.g. jack@vaudit.com) is still found on demand.
-    if (opts.skipLlm && t.domain) {
-      const dc = cachedDomainClass(t.domain);
-      if (dc === "opaque" || dc === "catchall") {
-        return { ...(fallback ?? notFoundPatch("reacher")), needsLlm: true, altName, companyEmail };
-      }
-    }
-
-    // Layer 2 — alt-domain (company sends mail from a different domain). Needs a
-    // company name to look up; skipped for a bare name+domain input (e.g. Finder).
+    // Layer 2 — company contact → alt-domain (company sends mail from a different
+    // domain than its website, e.g. s2cinc.com → sales@s2ceda.com). Runs for EVERY
+    // unconfirmed outcome — including catch-all / opaque websites, which are exactly
+    // where a mismatched mail domain hides — and BEFORE the bulk fast path, so the
+    // company email is always captured. Memoized per company+location → at most ONE
+    // SERP per company even on a 6000-row pass. Skipped for a bare name+domain input.
     let altDomain: string | null = null;
-    if (ALT_DOMAIN_LAYER && t.company && layerContinues(outcome.state)) {
-      const alt = await altEmailDomainFor(t.company, t.location);
-      companyEmail = !t.companyEmail && alt?.email ? alt.email : undefined;
-      if (alt?.domain && cleanDomain(alt.domain) !== cleanDomain(t.domain!)) {
-        altDomain = cleanDomain(alt.domain);
-        const altOutcome = await findPersonEmail({ firstName: ef, lastName: el, domain: altDomain });
-        if (altOutcome.state === "verified" || altOutcome.state === "accept_all") {
-          return { ...patchFromFinder(altOutcome), altName, companyEmail };
+    const extraAltDomains: string[] = [];
+    if (ALT_DOMAIN_LAYER && t.company) {
+      const alt = await altEmailDomainFor(t.company, t.location, t.domain);
+      if (!t.companyEmail && alt?.email) companyEmail = alt.email;
+      // EVERY plausible non-website mail domain (≤3, best first) — a group can mail
+      // from several: Wada FoodTech sells from wadafoodtech.jp while staff use
+      // wadabento.com (stephenchan@). Each is pattern-verified; first confirmed wins.
+      for (const raw of alt?.domains ?? []) {
+        const dom = cleanDomain(raw);
+        if (!dom || dom === cleanDomain(t.domain!) || extraAltDomains.includes(dom)) continue;
+        extraAltDomains.push(dom);
+        const altOutcome = await findPersonEmail({ firstName: ef, lastName: el, domain: dom });
+        if (altOutcome.state === "verified") return { ...patchFromFinder(altOutcome), altName, companyEmail };
+        if (!altDomain) {
+          altDomain = dom; // the best one drives the (legacy) guess/fallback below
+          // The mail domain differs from the website: a guess on the REAL mail domain
+          // beats a guess on the website domain (which may not even receive mail).
+          if (altOutcome.state === "accept_all") fallback = patchFromFinder(altOutcome);
+          else if (outcome.state === "accept_all") fallback = (await bestGuessResult(dom, ef, el)) ?? fallback; // opaque mail domain
         }
       }
     }
+    // Layer 2b — the company-email domain hint (see above), when it is neither the
+    // website nor the SERP alt-domain. Verified patterns only; no guess from it.
+    const hintLive = hintDomain && !extraAltDomains.includes(hintDomain) ? hintDomain : null;
+    if (hintLive) {
+      const hintOutcome = await findPersonEmail({ firstName: ef, lastName: el, domain: hintLive });
+      if (hintOutcome.state === "verified") return { ...patchFromFinder(hintOutcome), altName, companyEmail };
+    }
+    // Find & verify is binary (Valid | Not found), so an unconfirmed Layer-1/2 outcome
+    // (catch-all / opaque / not_found) is NOT an answer: every such row continues
+    // through Layer 4 → public sources → Layer 3 → Layer 5. Each layer ends the row
+    // ONLY on a reacher-trusted Valid (score >= MIN_VALID_SCORE); anything else falls
+    // through to the next layer.
 
     // #3 — on a dead-MX (no_mx) website, drop the dead domain so Layer 4 doesn't
     // waste an SMTP mx-check on it; keep only the (live) alt-domain.
-    const domains = uniqueDomains([t.domain, altDomain]);
-    const liveDomains = outcome.state === "no_mx" ? uniqueDomains([altDomain]) : domains;
+    const domains = uniqueDomains([t.domain, ...extraAltDomains, hintLive]);
+    const liveDomains = outcome.state === "no_mx" ? uniqueDomains([...extraAltDomains, hintLive]) : domains;
 
     // Layer 4 — culture-aware, FRONT-LOADED. Runs on the website + alt-domain.
-    if (GLOBAL_PATTERN_LAYER && layerContinues(outcome.state) && liveDomains.length) {
+    if (GLOBAL_PATTERN_LAYER && liveDomains.length) {
       const g = await findViaGlobalPatterns(t, liveDomains).catch(() => null);
-      if (g) return { ...g, altName: g.altName ?? altName, companyEmail };
+      if (g?.valid) return { ...g, altName: g.altName ?? altName, companyEmail };
     }
 
     // Public-sources: a DIFFERENT published address (personal/parent domain).
     // Company-scoped scrape, so skip it for a bare name+domain input. Skipped once
     // past the row budget (anti-hang).
-    if (PUBLIC_SOURCES_LAYER && t.company && !overBudget() && layerContinues(outcome.state)) {
+    if (PUBLIC_SOURCES_LAYER && t.company && !overBudget()) {
       const pub = await findViaPublicSources(t);
-      if (pub) return { ...pub, altName, companyEmail };
+      if (pub?.valid) return { ...pub, altName, companyEmail };
     }
 
     // Layer 3 — reverse role→profile name-correction (crawler SERP). Skipped when
@@ -638,15 +754,15 @@ async function verifyOne(
     // correct the name instead of burning a SERP on namesakes).
     if (
       NAME_CORRECTION_LAYER && t.company && t.title && !recoveredDiffers && !overBudget() &&
-      titleResolvableForReverseLookup(t.title) && layerContinues(outcome.state)
+      titleResolvableForReverseLookup(t.title)
     ) {
       const corr = await findViaNameCorrection(t).catch(() => null);
       if (corr) {
         altName = corr.altName;
-        if (corr.result) return { ...corr.result, altName, companyEmail: corr.result.companyEmail ?? companyEmail };
+        if (corr.result?.valid) return { ...corr.result, altName, companyEmail: corr.result.companyEmail ?? companyEmail };
         if (GLOBAL_PATTERN_LAYER && liveDomains.length) {
           const g2 = await findViaGlobalPatterns(t, liveDomains, altName).catch(() => null);
-          if (g2) return { ...g2, altName, companyEmail };
+          if (g2?.valid) return { ...g2, altName, companyEmail };
         }
       }
     }
@@ -666,19 +782,24 @@ async function verifyOne(
       cap: 1,
       notFound: () => notFoundPatch("reacher"),
     })).get(t.personId);
-    if (chosen) return { ...chosen, altName: chosen.altName ?? altName, companyEmail: chosen.companyEmail ?? companyEmail };
+    // Only a REAL L5 find ends the row here; a miss falls through to the same best
+    // guess the bulk pass uses (so "Access email" and "Find & verify" agree).
+    if (chosen && (chosen.valid || (chosen.found && !!chosen.patch.email))) {
+      return { ...chosen, altName: chosen.altName ?? altName, companyEmail: chosen.companyEmail ?? companyEmail };
+    }
   }
+
+  // Best guess on the real mail domain (alt-domain first) BEFORE re-checking a stored
+  // pattern email: that stored value is our own earlier guess, often on the website domain.
+  const bgFirst = await bestGuessPreferMailDomain(t, ef, el);
+  if (bgFirst) return { ...bgFirst, altName, companyEmail };
 
   if (t.email) {
     const v = await cachedVerify(t.email);
     const ev: EmailVerification = { email: v.result.email, status: v.result.status, score: v.result.score, provider: v.provider, verifiedAt: v.result.verifiedAt };
-    return { patch: { emailVerification: ev }, valid: v.result.status === "valid", found: false, provider: v.provider };
+    return { patch: { emailVerification: ev }, valid: trustedValid(v.result), found: false, provider: v.provider };
   }
-  // FINAL fallback — every discovery layer missed. Surface a best guess (colleague-
-  // learned convention, else global prior) on a live but unverifiable domain, so the
-  // row isn't a bare Not found. Clearly marked catch_all/pattern, never "valid".
-  const bg = bestGuessResult(t.domain, ef, el);
-  if (bg) return { ...bg, altName, companyEmail };
+  // FINAL fallback — every discovery layer missed (the best guess already ran above).
   if (fallback) return { ...fallback, altName, companyEmail };
   // No domain, no mailbox, or every layer empty — persist Not found.
   return notFoundPatch("reacher");
@@ -706,7 +827,8 @@ export interface LayeredFinderInput {
 function toLayeredTarget(input: LayeredFinderInput): store.PersonVerifyTarget {
   const name = (input.name || `${input.firstName} ${input.lastName}`).trim();
   return {
-    personId: "finder",
+    // Unique per lookup: the id also scopes the crawler's per-record Decodo budget.
+    personId: `finder-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     name,
     company: (input.company ?? "").trim(),
     firstName: input.firstName,
@@ -990,7 +1112,21 @@ export interface SinglePersonVerifyResult {
  * that row. Same pipeline as the bulk pass, scoped to a single record.
  */
 /** Fold the top-level companyEmail / altName (if discovered) into the patch. */
+/**
+ * Find & verify outcome is binary: Valid or Not found. A DISCOVERED/guessed address
+ * whose reacher verdict is anything but `valid` (catch_all, unknown, risky, invalid…)
+ * is settled as Not found (no email shown). An imported address that was only
+ * re-checked (patch carries no `email` field) is left untouched so user data is never wiped.
+ */
+function settleNonValid(res: VerifyOneResult): VerifyOneResult {
+  const ev = res.patch.emailVerification;
+  const keep = ev?.status === "valid" && ev.score >= MIN_VALID_SCORE;
+  if (!ev || keep || ev.status === "not_found" || !("email" in res.patch)) return res;
+  return { ...notFoundPatch(res.provider), companyEmail: res.companyEmail, altName: res.altName };
+}
+
 function patchToPersist(res: VerifyOneResult): PersonPatch {
+  res = settleNonValid(res);
   let patch = res.patch;
   if (res.companyEmail) patch = { ...patch, companyEmail: res.companyEmail };
   if (res.altName) patch = { ...patch, altName: res.altName };
@@ -998,6 +1134,7 @@ function patchToPersist(res: VerifyOneResult): PersonPatch {
 }
 
 function persistLookup(jobId: string, personId: string, res: VerifyOneResult): SinglePersonVerifyResult {
+  res = settleNonValid(res); // so the returned status matches what is stored
   store.updatePersonResolved(jobId, personId, patchToPersist(res));
   store.markPersonVerifying(jobId, personId, false);
   store.commitVerification(jobId);
@@ -1117,8 +1254,9 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
         // (live progress instead of a frozen count until the terminal L5 batch).
         // The L5 pass UPGRADES it in place if it resolves a mailbox. In-memory
         // patch only; the final apply() in the L5 loop counts each row once.
-        store.updatePersonResolved(jobId, t.personId, res.patch);
-        pendingLlm.push(t);
+        store.updatePersonResolved(jobId, t.personId, patchToPersist(res));
+        // Hand L5 the Layer-2 company email so it also tries the real mail domain.
+        pendingLlm.push(res.companyEmail && !t.companyEmail ? { ...t, companyEmail: res.companyEmail } : t);
       } else apply(t, res);
     } finally {
       store.markPersonVerifying(jobId, t.personId, false);
@@ -1178,7 +1316,7 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
         // (e.g. a cheap model with no web_search, or a huge batch) — fall back to a
         // best guess HERE, in the caller, so it ALWAYS applies regardless of the LLM.
         const real = !!hit && (hit.valid || (hit.found && !!hit.patch.email));
-        const r = real ? hit! : (bestGuessResult(t.domain, t.firstName, t.lastName) ?? hit ?? notFoundPatch("reacher"));
+        const r = real ? hit! : ((await bestGuessPreferMailDomain(t, t.firstName, t.lastName)) ?? hit ?? notFoundPatch("reacher"));
         const ce = deferredCompanyEmail.get(t.personId);
         const an = deferredAltName.get(t.personId);
         apply(t, {
@@ -1192,7 +1330,7 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
       // Even if the whole L5 phase threw, still surface best guesses so the pass isn't
       // a wall of Not-found on unverifiable domains.
       for (const t of pendingLlm) {
-        const bg = bestGuessResult(t.domain, t.firstName, t.lastName);
+        const bg = await bestGuessPreferMailDomain(t, t.firstName, t.lastName);
         if (bg) apply(t, { ...bg, companyEmail: deferredCompanyEmail.get(t.personId), altName: deferredAltName.get(t.personId) });
       }
     }
