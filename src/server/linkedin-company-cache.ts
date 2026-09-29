@@ -14,7 +14,7 @@ import type { LinkedInCompanyInfo } from "./linkedin-jobs-crawler-client";
 
 export interface CachedSignal { at: number; found: boolean; revenueBand: string | null; parentGroup: string | null }
 export interface CachedBacking { at: number; parentGroup: string | null; source: string | null }
-interface Entry { at?: number; info?: LinkedInCompanyInfo; signal?: CachedSignal; backing?: CachedBacking }
+interface Entry { at?: number; info?: LinkedInCompanyInfo; signal?: CachedSignal; backing?: CachedBacking; blocks?: number }
 
 const DAY = 86_400_000;
 const COMPANY_TTL = 30 * DAY;
@@ -77,8 +77,17 @@ export function getCompany(key: string): LinkedInCompanyInfo | null {
 export function putCompany(key: string, info: LinkedInCompanyInfo) {
   if (!info.found && !info.notFound) return; // blocked/walled → retry next time, don't remember it
   const c = cache();
-  c[key] = { ...c[key], at: Date.now(), info };
+  c[key] = { ...c[key], at: Date.now(), info, blocks: 0 };
   scheduleSave();
+}
+
+/** Record one Qualify run on which this company was walled on every IP; returns the running count. */
+export function noteBlocked(key: string): number {
+  const c = cache();
+  const blocks = (c[key]?.blocks ?? 0) + 1;
+  c[key] = { ...c[key], blocks };
+  scheduleSave();
+  return blocks;
 }
 
 export function getSignal(key: string): CachedSignal | null {

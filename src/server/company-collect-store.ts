@@ -9,7 +9,7 @@ import { employeeBucket, type CollectSummary, type CollectedCompany, type Compan
 
 export const MAX_COLLECT_COMPANIES = Number(process.env.APP_MAX_COLLECT_COMPANIES ?? 200);
 // Find Leads tabs cache only the N most-recent runs so `.data/*.json` can't grow unbounded.
-export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 3);
+export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 9);
 
 interface CollectStoreData {
   jobs: CompanyCollectJob[];

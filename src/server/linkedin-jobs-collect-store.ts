@@ -24,7 +24,7 @@ import type { LinkedInRawJob, LinkedInJobDetail, LinkedInCompanyInfo } from "./l
 
 // Full-coverage scrapes can return several thousand roles per query.
 export const MAX_LINKEDIN_JOBS = Number(process.env.APP_MAX_LINKEDIN_JOBS ?? 20000);
-export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 3);
+export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 9);
 
 interface StoreData {
   jobs: LinkedInSearchJob[];

@@ -26,6 +26,14 @@ const CRAWL_CONCURRENCY = Math.max(1, Math.min(Number(process.env.CRAWLER_LINKED
 const COMPANY_CONCURRENCY = Math.max(1, Math.min(Number(process.env.CRAWLER_LINKEDIN_COMPANY_CONCURRENCY ?? 6), 12));
 const DETAIL_CONCURRENCY = Math.max(1, Math.min(Number(process.env.CRAWLER_LINKEDIN_ENRICH_CONCURRENCY ?? 6), 12));
 const NO_COMPANY: LinkedInCompanyInfo = { employeeRange: null, employeeMin: null, industry: null, website: null, found: false };
+// LinkedIn walls /school/ pages for guests on every IP (999), and /company/<slug>
+// of a school redirects there — fetching is guaranteed waste. Classify instead.
+const SCHOOL: LinkedInCompanyInfo = {
+  employeeRange: null, employeeMin: null, industry: "Education", website: null,
+  companyType: "Educational Institution", affiliates: [], found: true,
+};
+/** Qualify runs a walled company may stay pending before it's settled as unverified. */
+const MAX_BLOCKED_RUNS = Math.max(1, Number(process.env.CRAWLER_LINKEDIN_MAX_BLOCKED_RUNS ?? 2));
 
 const crawling = new Set<string>();
 const enriching = new Set<string>();
@@ -123,14 +131,18 @@ async function runEnrich(id: string) {
   // Phase 1 — company page (cache first). This alone decides qualification
   // (size / industry), so it runs before any per-row work.
   await pool(groupList, COMPANY_CONCURRENCY, async (g) => {
-    let info = g.name === "—" ? NO_COMPANY : companyCache.getCompany(g.key);
+    let info = g.name === "—" ? NO_COMPANY
+      : /linkedin\.com\/school\//i.test(g.ref) ? SCHOOL
+      : companyCache.getCompany(g.key);
     if (!info) {
       try {
         info = await companyViaCrawler(g.ref);
         companyCache.putCompany(g.key, info);
-        // Walled on every IP (not a 404): leave PENDING so the next Qualify retries,
-        // rather than judging the row on data we never saw.
-        if (!info.found && !info.notFound) return;
+        // Walled on every IP (not a 404): leave PENDING so the next Qualify retries —
+        // but only for a couple of runs, so a permanently walled page can't keep a
+        // row pending forever; after that it's settled with no company data
+        // (→ "company size unverified" when a size/industry filter is set).
+        if (!info.found && !info.notFound && companyCache.noteBlocked(g.key) < MAX_BLOCKED_RUNS) return;
       } catch {
         // Transport error (crawler restart / timeout): leave these rows PENDING —
         // not "qualified" on missing data, and the next Qualify click retries them.
