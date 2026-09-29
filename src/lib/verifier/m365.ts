@@ -18,6 +18,7 @@
  * mailbox's `0` means it genuinely exists.
  */
 import "server-only";
+import https from "node:https";
 
 const GCT_URL = "https://login.microsoftonline.com/common/GetCredentialType?mkt=en-US";
 const GCT_TIMEOUT_MS = Number(process.env.M365_GCT_TIMEOUT_MS ?? 8000);
@@ -62,28 +63,65 @@ async function getCredentialType(email: string): Promise<GctResult> {
   return last;
 }
 
+// Microsoft throttles GetCredentialType PER SOURCE IP (ThrottleStatus=1 + a
+// meaningless IfExistsResult=0). A bulk pass from the single primary IP trips it
+// and every M365 candidate reads "can't tell" → Not found. When the host has
+// several public IPs, rotate the call across them and fail over to the next IP
+// on a throttled answer. Comma list, e.g. "51.195.149.22,51.38.86.17,51.68.203.255";
+// empty → default route (previous behaviour).
+const GCT_SOURCE_IPS = (process.env.M365_GCT_SOURCE_IPS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+let gctIpCursor = 0;
+
 async function getCredentialTypeOnce(email: string): Promise<GctResult> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GCT_TIMEOUT_MS);
-  try {
-    const res = await fetch(GCT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ Username: email }),
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    if (!res.ok) return { ifExists: null, throttled: res.status === 429 };
-    const json = (await res.json()) as { IfExistsResult?: number; ThrottleStatus?: number };
-    return {
-      ifExists: typeof json.IfExistsResult === "number" ? json.IfExistsResult : null,
-      throttled: (json.ThrottleStatus ?? 0) !== 0,
-    };
-  } catch {
-    return { ifExists: null, throttled: false };
-  } finally {
-    clearTimeout(timer);
+  if (GCT_SOURCE_IPS.length === 0) return getCredentialTypeVia(email, undefined);
+  let last: GctResult = { ifExists: null, throttled: false };
+  for (let i = 0; i < GCT_SOURCE_IPS.length; i++) {
+    const ip = GCT_SOURCE_IPS[gctIpCursor++ % GCT_SOURCE_IPS.length];
+    last = await getCredentialTypeVia(email, ip);
+    if (last.ifExists !== null && !last.throttled) return last;
   }
+  return last;
+}
+
+function getCredentialTypeVia(email: string, localAddress: string | undefined): Promise<GctResult> {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({ Username: email });
+    const req = https.request(
+      GCT_URL,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json", "Content-Length": Buffer.byteLength(body) },
+        localAddress,
+        family: 4, // the bound source IPs are IPv4
+        timeout: GCT_TIMEOUT_MS,
+      },
+      (res) => {
+        let raw = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (raw += c));
+        res.on("end", () => {
+          if ((res.statusCode ?? 0) < 200 || (res.statusCode ?? 0) >= 300) {
+            return resolve({ ifExists: null, throttled: res.statusCode === 429 });
+          }
+          try {
+            const json = JSON.parse(raw) as { IfExistsResult?: number; ThrottleStatus?: number };
+            resolve({
+              ifExists: typeof json.IfExistsResult === "number" ? json.IfExistsResult : null,
+              throttled: (json.ThrottleStatus ?? 0) !== 0,
+            });
+          } catch {
+            resolve({ ifExists: null, throttled: false });
+          }
+        });
+      },
+    );
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => resolve({ ifExists: null, throttled: false }));
+    req.end(body);
+  });
 }
 
 /** Per-domain: does GetCredentialType tell existing and non-existing apart? */
