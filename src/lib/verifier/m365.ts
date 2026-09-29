@@ -167,7 +167,7 @@ export async function domainDiscriminates(domain: string): Promise<boolean | nul
  * to discriminate and Microsoft says this exact account exists; otherwise
  * "inconclusive" (never a false positive — an ambiguous tenant stays unknown).
  */
-export async function m365MailboxExists(email: string): Promise<"exists" | "inconclusive"> {
+export async function m365MailboxExists(email: string): Promise<"exists" | "absent" | "inconclusive"> {
   const domain = email.split("@")[1]?.toLowerCase();
   if (!domain) return "inconclusive";
 
@@ -176,5 +176,8 @@ export async function m365MailboxExists(email: string): Promise<"exists" | "inco
 
   const real = await getCredentialType(email);
   if (real.throttled || real.ifExists === null) return "inconclusive";
-  return real.ifExists === 0 ? "exists" : "inconclusive";
+  if (real.ifExists === 0 || real.ifExists === 5 || real.ifExists === 6) return "exists";
+  // A clean (unthrottled) "not found" on a discriminating tenant. Distinct from
+  // "inconclusive" so callers only spend a fallback check on the throttled ones.
+  return real.ifExists === 1 ? "absent" : "inconclusive";
 }

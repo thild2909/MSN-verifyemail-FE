@@ -260,10 +260,11 @@ export async function classifyDomain(domain: string): Promise<{ klass: DomainCla
       mergeFacts(domain, { m365: true });
       return { klass: "ok", calls };
     }
-    // Couldn't tell (throttled / network) — NOT evidence the tenant is opaque. Skip
-    // this row but don't cache, so the next colleague re-asks Microsoft instead of
-    // inheriting a Not found for the whole company.
-    if (disc === null) return { klass: "opaque", calls };
+    // Couldn't tell (throttled / network) — NOT evidence the tenant is opaque. Fall
+    // through and classify from the ENGINE's verdict on the bogus probe below: the
+    // engine's hybrid (IP-rotating GetCredentialType, then SMTP — an M365 tenant with
+    // directory-based edge blocking rejects a fake with 5.4.1 → invalid → "ok") can
+    // still verify here. Nothing is cached, so the next colleague re-asks Microsoft.
   }
   // Transient 4xx on the BOGUS probe (greylist, Mimecast "451 Internal resource
   // temporarily unavailable" for an unknown recipient) while a real mailbox gets 250:
@@ -558,7 +559,10 @@ export async function findPersonEmail(input: {
   // the SAME M365 confirmation — so the stored status is the real verifier result.
   if (getFacts(domain)?.m365) {
     for (const c of ordered) {
-      if ((await m365MailboxExists(c.email).catch(() => "inconclusive")) !== "exists") continue;
+      // "absent" = Microsoft cleanly said no → skip. "inconclusive" (throttled /
+      // network) is NOT a no: let the engine decide (its own GetCredentialType with
+      // IP-rotating retries, then the SMTP/DBEB fallback) instead of dropping it.
+      if ((await m365MailboxExists(c.email).catch(() => "inconclusive" as const)) === "absent") continue;
       const v = await cachedVerify(c.email).catch(() => null);
       if (!v) continue;
       if (!v.cached) calls++;
