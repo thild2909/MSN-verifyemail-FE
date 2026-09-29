@@ -18,13 +18,13 @@ import { m365MailboxExists } from "@/lib/verifier/m365";
 import { findPersonEmail, cachedDomainClass, classifyDomain, isM365VerifiedDomain, knownDomainPattern, seedDomainPattern, setGlobalFallbackPattern, bestGuessEmail } from "./finder";
 import { cleanDomain, derivePatternId } from "@/lib/finder/patterns";
 import { companyDomainVariants, strongVariantMatch, variantPageRelevant } from "@/lib/finder/domain-variants";
-import { extractSiteMailDomains } from "@/lib/finder/site-mail-domains";
+import { extractSiteMailDomains, extractSiteEmails, type SiteEmail } from "@/lib/finder/site-mail-domains";
 import { resolveMx } from "node:dns/promises";
 import { bestFullName, detectProfile, generateGlobalCandidates, learnGlobalPattern, learnedGlobalPattern, mergeLocals, splitFirstLast } from "@/lib/finder/global-name-patterns";
 import { companyMailDomainHint, emailFormatTemplate, escalateL5, isDistinctiveLocal, layerContinues, partitionByDomain, sameCompanyDomain, scrapedEmailTrusted, titleResolvableForReverseLookup, verifyRanked } from "@/lib/finder/verify-orchestration";
 import { analyzeNameEmailStructureViaCrawler, l5WebSearchAvailable, resolveCompanyEmailDomainViaCrawler, withCrawlerRecord, resolvePersonEmailsViaCrawler, resolvePersonByRoleViaCrawler, resolveNameByLinkedinUrlViaCrawler } from "./crawler-client";
 import type { FinderOutcome, FinderResult, FinderState, BulkFinderResponse, BulkFinderResult } from "@/lib/types";
-import type { EmailVerification } from "@/lib/leads/collect-types";
+import type { EmailVerification, NotFoundReason } from "@/lib/leads/collect-types";
 import type { CollectedPerson } from "@/lib/leads/people-types";
 import * as store from "./people-collect-store";
 
@@ -189,6 +189,12 @@ type VerifyOneResult = {
   // Top-level for the same reason: it must survive an LLM hand-off so the row
   // still shows the correction even when the mailbox never resolves.
   altName?: string;
+  // A REAL address READ from a public source (the company's own website, L6; or a
+  // page the crawler scraped) — not a pattern guess. Such an address is surfaced even
+  // when SMTP can't confirm it on a catch-all / M365 / gateway domain (the published
+  // page IS the evidence). settleNonValid keeps a sourceBacked result but still drops
+  // an unverified pattern guess, so coverage rises without fabricating addresses.
+  sourceBacked?: boolean;
 };
 
 function notFoundPatch(provider: "reacher"): VerifyOneResult {
@@ -202,6 +208,42 @@ function notFoundPatch(provider: "reacher"): VerifyOneResult {
     found: false,
     provider,
   };
+}
+
+// Memoized "is this domain's MX Microsoft 365?" (plain DNS, no SMTP). Used to tag
+// Not-found reasons and to scope a pass to the M365 rows only.
+const m365MxMemo = new Map<string, Promise<boolean>>();
+export function isM365MxDomain(domain: string | null | undefined): Promise<boolean> {
+  const d = cleanDomain(domain ?? "");
+  if (!d) return Promise.resolve(false);
+  let p = m365MxMemo.get(d);
+  if (!p) {
+    p = resolveMx(d)
+      .then((mx) => mx.some((r) => /\.mail\.protection\.(outlook\.com|partner\.outlook\.cn)\.?$/i.test(r.exchange)))
+      .catch(() => false);
+    m365MxMemo.set(d, p);
+  }
+  return p;
+}
+
+/** Why this row settled Not found (see NotFoundReason). Cheap: DNS + cached domain facts. */
+async function notFoundReasonFor(t: store.PersonVerifyTarget): Promise<NotFoundReason> {
+  const d = cleanDomain(t.domain ?? "");
+  if (!d) return "no_domain";
+  if (await isM365MxDomain(d)) return "m365_unconfirmed";
+  switch (cachedDomainClass(d)) {
+    case "dead": return "no_mx";
+    case "catchall": return "catch_all";
+    case "opaque": return "unverifiable";
+    default: return "pattern_miss";
+  }
+}
+
+/** Stamp a reason on a not_found patch (no-op for any other verdict). */
+function withReason(patch: PersonPatch, reason: NotFoundReason): PersonPatch {
+  const ev = patch.emailVerification;
+  if (!ev || ev.status !== "not_found" || ev.reason) return patch;
+  return { ...patch, emailVerification: { ...ev, reason } };
 }
 
 /** Build the person patch from a finder outcome (pattern-guess / missing case). */
@@ -771,6 +813,124 @@ function liveSiteMailDomainsFor(website: string | null): Promise<string[]> {
   return p;
 }
 
+/* ---------- L6 — published emails harvested from the company's OWN website ---------- */
+// A clean, SERP-FREE, no-proxy discovery layer: fetch the company's own site (home +
+// contact/team/about/people) and read the email addresses it PUBLISHES. A NAME-tied
+// one (peter.chan@… for Peter Chan) is the person's REAL address — a human put it on
+// the site, so it is surfaced even on a catch-all / M365 domain SMTP can't confirm
+// (same trust rule as the SERP publishedEmail path). Every other published staff
+// address teaches the domain's CONVENTION (seeds the finder), so colleagues resolve on
+// verifiable domains. Direct HTTPS to pages the company published — no Decodo, no SERP,
+// no third-party control evaded. On by default; PEOPLE_VERIFY_SITE_EMAILS=0 disables.
+const SITE_EMAILS_LAYER = (process.env.PEOPLE_VERIFY_SITE_EMAILS ?? "1") !== "0";
+// Same-site paths most likely to list staff/contact addresses.
+const SITE_EMAIL_PATHS = ["", "/contact", "/contact-us", "/contactus", "/about", "/about-us", "/team", "/our-team", "/people", "/leadership", "/management", "/staff"];
+const SITE_EMAILS_MAX_PAGES = Math.max(2, Number(process.env.PEOPLE_VERIFY_SITE_EMAILS_MAX_PAGES ?? 6));
+
+const siteEmailsMemo = new Map<string, Promise<SiteEmail[]>>();
+/** Harvest every company-owned email published across a company's own site (memoized
+ *  per website). `keepDomains` restricts hits to the company's own / mail domains. */
+function liveSiteEmailsFor(website: string | null, keepDomains: string[]): Promise<SiteEmail[]> {
+  const site = cleanDomain(website ?? "");
+  if (!SITE_EMAILS_LAYER || !site) return Promise.resolve([]);
+  const keep = uniqueDomains([site, ...keepDomains]);
+  const key = `${site}|${keep.join(",")}`;
+  let p = siteEmailsMemo.get(key);
+  if (!p) {
+    if (siteEmailsMemo.size > 2000) siteEmailsMemo.clear();
+    p = (async () => {
+      const seen = new Map<string, SiteEmail>();
+      let base = `https://${site}`;
+      let pages = 0;
+      for (const path of SITE_EMAIL_PATHS) {
+        if (pages >= SITE_EMAILS_MAX_PAGES) break;
+        const page = await fetchPage(base + path).catch(() => null);
+        if (!page && path === "") { // homepage unreachable on https → try http / www once
+          const alt = (await fetchPage(`http://${site}`).catch(() => null)) ?? (await fetchPage(`https://www.${site}`).catch(() => null));
+          if (!alt) continue;
+          if (alt.finalHost) base = `https://${alt.finalHost}`;
+          pages++;
+          for (const e of extractSiteEmails(alt.html, keep)) if (!seen.has(e.email)) seen.set(e.email, e);
+          continue;
+        }
+        if (!page) continue;
+        pages++;
+        for (const e of extractSiteEmails(page.html, keep)) if (!seen.has(e.email)) seen.set(e.email, e);
+      }
+      return [...seen.values()];
+    })().catch(() => []);
+    siteEmailsMemo.set(key, p);
+  }
+  return p;
+}
+
+/** Does an email's local part carry this person's name (first ≥2 / last ≥3 chars)? */
+function localMatchesName(local: string, first: string, last: string): boolean {
+  const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const l = norm(local);
+  const f = norm(first);
+  const la = norm(last);
+  if (!l) return false;
+  const hasF = f.length >= 2 && l.includes(f);
+  const hasL = la.length >= 3 && l.includes(la);
+  // first-initial + last (pchan) or last + first-initial (chanp) counts when both present.
+  const initLast = f && la && (l === f[0] + la || l === la + f[0]);
+  return hasL || (hasF && (hasL || initLast || l === f)) || !!initLast || (hasF && l.startsWith(f));
+}
+
+/**
+ * Layer 6 driver: harvest the company's site, (a) surface a NAME-tied published address
+ * for this person (verified, or trusted-source on an unverifiable domain), and (b) seed
+ * the domain convention from any name-bearing staff address so later layers resolve
+ * colleagues. Returns a found result or null. `first`/`last` are the effective name.
+ */
+async function findViaSiteEmails(
+  t: store.PersonVerifyTarget,
+  first: string,
+  last: string,
+  domains: string[],
+): Promise<VerifyOneResult | null> {
+  if (!SITE_EMAILS_LAYER || !t.domain) return null;
+  const emails = await liveSiteEmailsFor(t.domain, domains).catch(() => [] as SiteEmail[]);
+  if (!emails.length) return null;
+
+  // A published address whose local part carries THIS person's name is their real
+  // mailbox — a human published it. Prefer an on-domain match; verify it.
+  const nameTied = emails.filter((e) => !e.role && localMatchesName(e.local, first, last));
+  for (const e of nameTied) {
+    let v: Awaited<ReturnType<typeof cachedVerify>>;
+    try { v = await cachedVerify(e.email); } catch { continue; }
+    if (v.result.checks.mx === "fail") continue;
+    if (trustedValid(v.result)) {
+      return {
+        patch: {
+          email: { value: e.email, source: "website", confidence: 90 },
+          emailKind: "found",
+          emailVerification: { email: e.email, status: "valid", score: v.result.score, provider: v.provider, verifiedAt: now() },
+        },
+        valid: true, found: true, provider: v.provider,
+      };
+    }
+    // Published + name-tied but the domain can't be SMTP-confirmed (catch-all / M365 /
+    // gateway). The PAGE is the evidence, not SMTP: this is a REAL address a human put on
+    // the company's own site, not a pattern guess — so it is surfaced (sourceBacked) with
+    // the engine's own non-committal status (never overclaim "valid"). `sourceBacked`
+    // lets it survive settleNonValid, which still drops unverified pattern GUESSES.
+    if (v.result.status !== "invalid") {
+      const status = v.result.status === "unknown" ? "risky" : v.result.status;
+      return {
+        patch: {
+          email: { value: e.email, source: "website", confidence: 80 },
+          emailKind: "found",
+          emailVerification: { email: e.email, status, score: v.result.score || 55, provider: v.provider, verifiedAt: now() },
+        },
+        valid: false, found: true, provider: v.provider, sourceBacked: true,
+      };
+    }
+  }
+  return null;
+}
+
 /**
  * Best guess that prefers the company's REAL mail domain (Layer 2 alt-domain, e.g.
  * s2ceda.com) over the website domain (s2cinc.com) when they differ. The alt lookup
@@ -934,6 +1094,17 @@ async function verifyOneInner(
     // waste an SMTP mx-check on it; keep only the (live) alt-domain + variants.
     const domains = uniqueDomains([t.domain, ...extraAltDomains, hintLive, ...siteMailDomains, ...variantDomains]);
     const liveDomains = outcome.state === "no_mx" ? uniqueDomains([...extraAltDomains, hintLive, ...siteMailDomains, ...variantDomains]) : domains;
+
+    // Layer 6 — published emails on the company's OWN website (SERP-free, no proxy).
+    // A name-tied published address is the person's real mailbox (a human put it on the
+    // site), so it beats any pattern guess and is surfaced even on a catch-all / M365 /
+    // gateway domain SMTP can't confirm. Runs before the pattern sweep; the page fetch is
+    // memoized per site (shared with L2c), so colleagues cost nothing extra.
+    if (SITE_EMAILS_LAYER && !overBudget()) {
+      const keepDoms = uniqueDomains([t.domain, ...extraAltDomains, hintLive, ...siteMailDomains, ...variantDomains]);
+      const site = await findViaSiteEmails(t, ef!, el!, keepDoms).catch(() => null);
+      if (site) return { ...site, altName, companyEmail };
+    }
 
     // Layer 3a — DIRECT name recovery from the person's OWN LinkedIn URL. Runs BEFORE
     // Layer 4 (and before the slow public-sources scrape) so the culture-aware
@@ -1347,21 +1518,26 @@ export interface SinglePersonVerifyResult {
 function settleNonValid(res: VerifyOneResult): VerifyOneResult {
   const ev = res.patch.emailVerification;
   const keep = ev?.status === "valid" && ev.score >= MIN_VALID_SCORE;
-  if (!ev || keep || ev.status === "not_found" || !("email" in res.patch)) return res;
+  // A REAL published address (sourceBacked: read off the company's own site / a scraped
+  // page) is kept even when SMTP can't confirm it — the page is the evidence, and it is
+  // NOT a guess. Only a hard "invalid" / dead result is dropped. Everything else that is
+  // not a reacher-trusted valid (i.e. an unverified pattern GUESS) still settles Not-found.
+  const keepSourceBacked = res.sourceBacked === true && !!ev && ev.status !== "invalid" && ev.status !== "not_found";
+  if (!ev || keep || keepSourceBacked || ev.status === "not_found" || !("email" in res.patch)) return res;
   return { ...notFoundPatch(res.provider), companyEmail: res.companyEmail, altName: res.altName };
 }
 
-function patchToPersist(res: VerifyOneResult): PersonPatch {
+function patchToPersist(res: VerifyOneResult, reason?: NotFoundReason): PersonPatch {
   res = settleNonValid(res);
-  let patch = res.patch;
+  let patch = reason ? withReason(res.patch, reason) : res.patch;
   if (res.companyEmail) patch = { ...patch, companyEmail: res.companyEmail };
   if (res.altName) patch = { ...patch, altName: res.altName };
   return patch;
 }
 
-function persistLookup(jobId: string, personId: string, res: VerifyOneResult): SinglePersonVerifyResult {
+function persistLookup(jobId: string, personId: string, res: VerifyOneResult, reason?: NotFoundReason): SinglePersonVerifyResult {
   res = settleNonValid(res); // so the returned status matches what is stored
-  store.updatePersonResolved(jobId, personId, patchToPersist(res));
+  store.updatePersonResolved(jobId, personId, patchToPersist(res, reason));
   store.markPersonVerifying(jobId, personId, false);
   store.commitVerification(jobId);
   const ev = res.patch.emailVerification ?? null;
@@ -1394,14 +1570,32 @@ export async function verifyOnePersonEmail(jobId: string, personId: string): Pro
       if (e instanceof VerifierUnavailableError) throw e;
       res = null;
     }
-    return persistLookup(jobId, personId, res ?? notFoundPatch("reacher"));
+    return persistLookup(jobId, personId, res ?? notFoundPatch("reacher"), res ? await notFoundReasonFor(target) : "transient");
   } finally {
     store.markPersonVerifying(jobId, personId, false);
   }
 }
 
-export async function verifyCollectedPeople(jobId: string, onlyUnverified = true): Promise<VerifyPassResult> {
-  const targets = store.peopleVerifyTargets(jobId, onlyUnverified);
+export interface VerifyPassOptions {
+  /**
+   * "m365": search ONLY rows whose domain mails via Microsoft 365 (the cohort a
+   * re-run can change); every other unverified row settles Not found with reason
+   * "skipped" WITHOUT a lookup. Used to retry the M365 tail cheaply.
+   */
+  scope?: "all" | "m365";
+}
+
+export async function verifyCollectedPeople(jobId: string, onlyUnverified = true, opts: VerifyPassOptions = {}): Promise<VerifyPassResult> {
+  let targets = store.peopleVerifyTargets(jobId, onlyUnverified);
+  if (opts.scope === "m365") {
+    const keep: store.PersonVerifyTarget[] = [];
+    for (const t of targets) {
+      if (await isM365MxDomain(t.domain)) keep.push(t);
+      else store.updatePersonResolved(jobId, t.personId, withReason(notFoundPatch("reacher").patch, "skipped"));
+    }
+    store.commitVerification(jobId);
+    targets = keep;
+  }
   if (targets.length === 0) {
     store.setJobVerifyStatus(jobId, "done");
     return { verified: 0, valid: 0, found: 0, provider: "none" };
@@ -1426,8 +1620,8 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
   const deferredCompanyEmail = new Map<string, string>();
   const deferredAltName = new Map<string, string>();
 
-  const apply = (t: store.PersonVerifyTarget, res: VerifyOneResult) => {
-    store.updatePersonResolved(jobId, t.personId, patchToPersist(res));
+  const apply = (t: store.PersonVerifyTarget, res: VerifyOneResult, reason?: NotFoundReason) => {
+    store.updatePersonResolved(jobId, t.personId, patchToPersist(res, reason));
     store.markPersonVerifying(jobId, t.personId, false);
     providers.add(res.provider);
     verified++;
@@ -1472,7 +1666,7 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
         store.updatePersonResolved(jobId, t.personId, transientUnknown());
         engineFailures++;
       } else if (timedOut || !res) {
-        apply(t, notFoundPatch("reacher"));
+        apply(t, notFoundPatch("reacher"), "transient");
       } else if (res.needsLlm) {
         if (res.companyEmail) deferredCompanyEmail.set(t.personId, res.companyEmail);
         if (res.altName) deferredAltName.set(t.personId, res.altName);
@@ -1483,7 +1677,7 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
         store.updatePersonResolved(jobId, t.personId, patchToPersist(res));
         // Hand L5 the Layer-2 company email so it also tries the real mail domain.
         pendingLlm.push(res.companyEmail && !t.companyEmail ? { ...t, companyEmail: res.companyEmail } : t);
-      } else apply(t, res);
+      } else apply(t, res, await notFoundReasonFor(t));
     } finally {
       store.markPersonVerifying(jobId, t.personId, false);
     }
@@ -1549,7 +1743,7 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
           ...r,
           companyEmail: r.companyEmail ?? ce,
           altName: r.altName ?? an,
-        });
+        }, await notFoundReasonFor(t));
       }
     } catch (e) {
       console.error(`[verify-emails] L5 phase error for ${jobId} (continuing):`, e);

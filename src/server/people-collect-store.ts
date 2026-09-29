@@ -577,11 +577,16 @@ export function resetPeopleVerification(jobId?: string): number {
  * sealed email/emailKind) makes the row a live verify target again. Returns how
  * many misses were re-opened.
  */
-export function resetPeopleNotFound(jobId: string): number {
+/** Read-only view of a job's people (for selecting which rows to re-open). */
+export function listJobPeople(jobId: string): readonly CollectedPerson[] {
+  return store().people[jobId] ?? [];
+}
+
+export function resetPeopleNotFound(jobId: string, only?: (p: CollectedPerson) => boolean): number {
   const s = store();
   let reset = 0;
   for (const p of s.people[jobId] ?? []) {
-    if (p.emailVerification?.status === "not_found") {
+    if (p.emailVerification?.status === "not_found" && (!only || only(p))) {
       p.emailVerification = null;
       reset++;
     }

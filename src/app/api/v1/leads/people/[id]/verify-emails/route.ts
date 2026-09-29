@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import * as store from "@/server/people-collect-store";
-import { verifyCollectedPeople } from "@/server/people-verify";
+import { isM365MxDomain, verifyCollectedPeople } from "@/server/people-verify";
+import { RETRYABLE_NOT_FOUND_REASONS } from "@/lib/leads/collect-types";
 import { clearVerifyCache } from "@/server/verification";
 import { clearDomainCache } from "@/server/finder";
 import { pingBackend } from "@/lib/verifier/backend";
@@ -29,7 +30,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   const q = new URL(req.url).searchParams;
   const fresh = q.get("fresh") === "1" || q.get("keep") === "0";
+  // notfound=1 → SMART retry: re-open only Not-found rows a re-run can change
+  // (retryable reason, or a legacy row with no reason on a Microsoft 365 domain).
+  // Catch-all / gateway-blocked / dead-MX / no-domain rows keep their verdict.
+  // notfound=all → the old behaviour (re-open every Not found).
   const notfound = q.get("notfound") === "1";
+  const notfoundAll = q.get("notfound") === "all";
+  // scope=m365 → search only Microsoft 365 rows; other unverified rows settle
+  // Not found ("skipped") without a lookup.
+  const scope = q.get("scope") === "m365" ? "m365" : "all";
 
   // A pass is already running — don't start a second, racing one.
   if (job.verifyStatus === "verifying") {
@@ -53,13 +62,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     clearVerifyCache();
     clearDomainCache();
     store.resetPeopleVerification(id);
-  } else if (notfound) {
+  } else if (notfound || notfoundAll) {
     // Retry only the misses: drop cached verdicts/domains so the finder actually
     // re-searches (rather than replaying the same Not found), then re-open the
     // not_found rows. Settled addresses are left as-is.
     clearVerifyCache();
     clearDomainCache();
-    store.resetPeopleNotFound(id);
+    if (notfoundAll) store.resetPeopleNotFound(id);
+    else {
+      const retry = new Set<string>();
+      for (const p of store.listJobPeople(id)) {
+        const ev = p.emailVerification;
+        if (ev?.status !== "not_found") continue;
+        const retryable = ev.reason
+          ? RETRYABLE_NOT_FOUND_REASONS.includes(ev.reason)
+          : await isM365MxDomain(p.companyDomain ?? (p.email ? String(p.email.value).split("@")[1] : null));
+        if (retryable) retry.add(p.id);
+      }
+      store.resetPeopleNotFound(id, (p) => retry.has(p.id));
+    }
   }
 
   const pending = store.peopleVerifyTargets(id, true).length;
@@ -68,7 +89,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Fire-and-forget: the pass persists after every person and sets the job to
   // "done" when finished. On a hard failure, drop back to "idle" so it can be
   // retried. (verifyCollectedPeople already resets to idle on engine outage.)
-  void verifyCollectedPeople(id, true).catch((err) => {
+  void verifyCollectedPeople(id, true, { scope }).catch((err) => {
     store.setJobVerifyStatus(id, "idle");
     console.error(`[verify-emails] background pass failed for ${id}:`, err);
   });

@@ -20,7 +20,7 @@ import {
 import { layerContinues, webEscalationTargets, escalateL5, titleResolvableForReverseLookup, isDistinctiveLocal, verifyRanked, partitionByDomain, registrableDomain, sameCompanyDomain, scrapedEmailTrusted, emailFormatTemplate, companyMailDomainHint } from "../src/lib/finder/verify-orchestration.ts";
 import { smtpTransientError } from "../src/lib/verifier/reacher.ts";
 import { companyDomainVariants, strongVariantMatch, variantPageRelevant } from "../src/lib/finder/domain-variants.ts";
-import { extractSiteMailDomains } from "../src/lib/finder/site-mail-domains.ts";
+import { extractSiteMailDomains, extractSiteEmails } from "../src/lib/finder/site-mail-domains.ts";
 
 const LIMIT = 20; // the verified window Layer 4 actually SMTP-checks
 let failures = 0;
@@ -411,6 +411,48 @@ console.log("\n== No-MX website → real mail domain (apollo_people (17)) ==");
   for (const [site, html, fh, want] of S) {
     const got = extractSiteMailDomains(html, site, fh);
     JSON.stringify(got) === JSON.stringify(want) ? ok(`site-mail ${site} → [${want}]`) : fail(`site-mail ${site} → ${JSON.stringify(got)} (want ${JSON.stringify(want)})`);
+  }
+  // L6 — published emails harvested from a company site: keep company-domain addresses,
+  // flag role mailboxes, drop free-mail / infra / obfuscation-decoded correctly.
+  const E = [
+    // [html, keepDomains, expect {email:role}] — check membership + role flag
+    ['<a href="mailto:peter.chan@acme.com">Peter</a> info@acme.com jane_lee@acme.com', ["acme.com"],
+      { "peter.chan@acme.com": false, "info@acme.com": true, "jane_lee@acme.com": false }],
+    // obfuscated + keep filter drops the partner/free address
+    ['ceo&#64;kanetix.hk , sales (at) kanetix.hk , random@gmail.com , vendor@other.com', ["kanetix.hk"],
+      { "ceo@kanetix.hk": false, "sales@kanetix.hk": true }],
+  ];
+  for (const [html, keep, want] of E) {
+    const got = extractSiteEmails(html, keep);
+    const map = Object.fromEntries(got.map((e) => [e.email, e.role]));
+    let good = true;
+    for (const [em, role] of Object.entries(want)) if (!(em in map) || map[em] !== role) good = false;
+    // none of the excluded domains leaked in
+    if (got.some((e) => e.email.endsWith("@gmail.com") || e.email.endsWith("@other.com"))) good = false;
+    good ? ok(`site-emails → ${got.map((e) => e.email).join(",")}`) : fail(`site-emails → ${JSON.stringify(map)} (want ${JSON.stringify(want)})`);
+  }
+  // Name matching (L6 per-person tie).
+  const NM = [
+    ["peter.chan", "Peter", "Chan", true],
+    ["pchan", "Peter", "Chan", true],
+    ["chan", "Peter", "Chan", true],
+    ["info", "Peter", "Chan", false],
+    ["david.wong", "Peter", "Chan", false],
+    ["peterc", "Peter", "Chan", true],
+  ];
+  // localMatchesName is module-private in people-verify; mirror its rule here to guard intent.
+  const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const lm = (local, first, last) => {
+    const l = norm(local), f = norm(first), la = norm(last);
+    if (!l) return false;
+    const hasF = f.length >= 2 && l.includes(f);
+    const hasL = la.length >= 3 && l.includes(la);
+    const initLast = f && la && (l === f[0] + la || l === la + f[0]);
+    return hasL || (hasF && (hasL || initLast || l === f)) || !!initLast || (hasF && l.startsWith(f));
+  };
+  for (const [local, f, l, want] of NM) {
+    const got = lm(local, f, l);
+    got === want ? ok(`name-tie ${local} vs ${f} ${l} = ${want}`) : fail(`name-tie ${local} vs ${f} ${l} = ${got} (want ${want})`);
   }
 }
 

@@ -40,7 +40,34 @@ export interface EmailVerification {
   score: number; // 0-100
   provider: "reacher" | "none";
   verifiedAt: string; // ISO
+  /**
+   * Why a lookup settled `not_found` — drives "Retry notfound", which only re-opens
+   * rows whose reason can change on a re-run (see RETRYABLE_NOT_FOUND_REASONS).
+   */
+  reason?: NotFoundReason;
 }
+
+/**
+ * - `m365_unconfirmed`: Microsoft 365 domain; GetCredentialType gave no positive
+ *   (often throttling) → worth retrying later.
+ * - `catch_all` / `unverifiable` / `no_mx` / `no_domain`: the domain cannot confirm
+ *   ANY mailbox (accept-all, gateway-blocked/opaque, dead MX, unknown domain) — a
+ *   re-run returns the same answer.
+ * - `pattern_miss`: the domain discriminates but no candidate existed.
+ * - `transient`: engine timeout/error on this row.
+ * - `skipped`: deliberately not searched (scoped pass).
+ */
+export type NotFoundReason =
+  | "m365_unconfirmed"
+  | "catch_all"
+  | "unverifiable"
+  | "no_mx"
+  | "no_domain"
+  | "pattern_miss"
+  | "transient"
+  | "skipped";
+
+export const RETRYABLE_NOT_FOUND_REASONS: readonly NotFoundReason[] = ["m365_unconfirmed", "transient"];
 
 /** What the Company Resolver found before any crawling. */
 export interface ResolutionInfo {
