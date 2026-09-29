@@ -67,7 +67,7 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
     mutationFn: (id: string) => qualifyLinkedInCompanies(id),
     onSuccess: ({ targets }) => {
       qc.invalidateQueries({ queryKey: ["linkedin-search", activeId] });
-      toast({ variant: "success", title: "Qualifying companies…", description: `Enriching ${formatNumber(targets)} qualified role${targets === 1 ? "" : "s"} (job detail + company page).` });
+      toast({ variant: "success", title: "Qualifying companies…", description: `Verifying ${formatNumber(targets)} role${targets === 1 ? "" : "s"} (job detail + company page).` });
     },
     onError: (e) => toast({ variant: "error", title: "Couldn't qualify", description: e instanceof Error ? e.message : "Try again." }),
   });
@@ -94,7 +94,10 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
   const enriching = active?.enrichStatus === "enriching";
   const s = active?.summary;
   const retryable = active?.coverage?.filter((c) => c.status === "blocked" || c.status === "failed").length ?? 0;
-  const canQualify = !!active && !live && !enriching && (s ? s.qualified > s.enriched : false);
+  // Older saved summaries lack `pending` — fall back to the legacy qualified-but-unenriched count.
+  const pending = s ? (s.pending ?? Math.max(0, s.qualified - s.enriched)) : 0;
+  const canQualify = !!active && !live && !enriching && pending > 0;
+  const enrichPct = s && s.enriched + pending > 0 ? Math.round((s.enriched / (s.enriched + pending)) * 100) : 100;
 
   const modals = (
     <>
@@ -156,6 +159,7 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
           {canQualify && (
             <Button size="sm" variant="outline" onClick={() => qualify.mutate(active!.id)} disabled={qualify.isPending}>
               {qualify.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Qualify companies
+              <span className="ml-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary tabular-nums">{formatNumber(pending)}</span>
             </Button>
           )}
           {enriching && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Qualifying…</span>}
@@ -182,7 +186,7 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
           {s.blocked > 0 && <Stat icon={Ban} label="Blocked" value={formatNumber(s.blocked)} tone="risky" />}
           {(live || enriching) && (
             <div className="flex min-w-[160px] flex-1 items-center gap-2">
-              <Progress value={live ? active!.progress : 100} className="flex-1" /><span className="tabular-nums text-muted-foreground">{live ? `${active!.progress}%` : "enriching…"}</span>
+              <Progress value={live ? active!.progress : enrichPct} className="flex-1" /><span className="tabular-nums text-muted-foreground">{live ? `${active!.progress}%` : `${formatNumber(s.enriched)}/${formatNumber(s.enriched + pending)} verified`}</span>
             </div>
           )}
         </StatsBar>
@@ -212,10 +216,15 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
   );
 }
 
+/** "2,871 / 3,000+ found" — progress against LinkedIn's reported total. */
+function ofTotal(c: LinkedInQueryCoverage) {
+  return `${formatNumber(c.jobsFound)} / ${formatNumber(c.total ?? 0)}${c.totalCapped ? "+" : ""} found`;
+}
+
 const COVERAGE_META: Record<LinkedInQueryCoverage["status"], { className: string; label: (c: LinkedInQueryCoverage) => string; spin?: boolean }> = {
   pending: { className: "bg-muted text-muted-foreground", label: () => "queued" },
-  collecting: { className: "bg-muted text-muted-foreground", label: () => "scraping…", spin: true },
-  done: { className: "bg-valid/12 text-[hsl(var(--valid))]", label: (c) => `${c.jobsFound} found` },
+  collecting: { className: "bg-muted text-muted-foreground", label: (c) => (c.total != null ? `${ofTotal(c)}${c.slices ? ` · slice ${c.slices}` : ""}…` : "scraping…"), spin: true },
+  done: { className: "bg-valid/12 text-[hsl(var(--valid))]", label: (c) => (c.total != null ? ofTotal(c) : `${c.jobsFound} found`) },
   blocked: { className: "bg-amber-500/12 text-amber-600 dark:text-amber-400", label: (c) => (c.jobsFound ? `${c.jobsFound} · blocked` : "blocked") },
   failed: { className: "bg-invalid/12 text-[hsl(var(--invalid))]", label: () => "failed" },
 };

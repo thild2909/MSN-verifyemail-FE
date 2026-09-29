@@ -19,10 +19,11 @@ import {
   type LinkedInSearchSummary,
   type LinkedInQueryCoverage,
 } from "@/lib/leads/linkedin-jobs-types";
-import { normalizeLocation, normalizeTitle, postedDaysAgo, qualifyJob, scoreJob } from "@/lib/leads/linkedin-normalize";
+import { isRemoteJob, normalizeLocation, normalizeTitle, postedDaysAgo, qualifyJob, scoreJob } from "@/lib/leads/linkedin-normalize";
 import type { LinkedInRawJob, LinkedInJobDetail, LinkedInCompanyInfo } from "./linkedin-jobs-crawler-client";
 
-export const MAX_LINKEDIN_JOBS = Number(process.env.APP_MAX_LINKEDIN_JOBS ?? 3000);
+// Full-coverage scrapes can return several thousand roles per query.
+export const MAX_LINKEDIN_JOBS = Number(process.env.APP_MAX_LINKEDIN_JOBS ?? 20000);
 export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 3);
 
 interface StoreData {
@@ -45,7 +46,9 @@ function load(): StoreData {
       const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
       if (parsed && Array.isArray(parsed.jobs) && parsed.results) {
         const data = parsed as StoreData;
-        if (data.jobs.length > FIND_LEADS_HISTORY_LIMIT) { pruneHistory(data); persist(data); }
+        if (data.jobs.length > FIND_LEADS_HISTORY_LIMIT) pruneHistory(data);
+        recoverInterrupted(data);
+        persist(data);
         return data;
       }
     }
@@ -53,6 +56,26 @@ function load(): StoreData {
   const empty: StoreData = { jobs: [], results: {}, coverage: {} };
   persist(empty);
   return empty;
+}
+
+/**
+ * Background runners live in memory only, so any "collecting"/"enriching" state
+ * read from disk at process start is orphaned (the server restarted mid-run) and
+ * would spin forever in the UI. Settle it: unfinished queries → "failed" (Retry
+ * picks them up), enrich → idle (unqualified rows stay pending for Qualify).
+ */
+function recoverInterrupted(data: StoreData) {
+  for (const job of data.jobs) {
+    if (job.enrichStatus === "enriching") job.enrichStatus = "idle";
+    if (job.status === "collecting") {
+      for (const c of data.coverage[job.id] ?? []) {
+        if (c.status === "pending" || c.status === "collecting") { c.status = "failed"; c.error = "interrupted (server restarted)"; }
+      }
+      job.status = "completed";
+      job.progress = 100;
+      job.completedAt = job.completedAt ?? new Date().toISOString();
+    }
+  }
 }
 
 function store(): StoreData {
@@ -102,6 +125,9 @@ export interface LinkedInJobsQuery {
   roleFamilies?: string[];
   countries?: string[];
   seniorities?: string[];
+  industries?: string[];
+  excludedIndustries?: string[];
+  employeeRanges?: string[];
   remoteOnly?: boolean;
   qualifiedOnly?: boolean;
   minScore?: number;
@@ -111,8 +137,13 @@ export interface LinkedInJobsFacets {
   roleFamilies: Record<string, number>;
   countries: Record<string, number>;
   seniorities: Record<string, number>;
+  industries: Record<string, number>;
+  employeeRanges: Record<string, number>;
   companies: { name: string; count: number }[];
 }
+
+/** A row's industry: the company page's (Qualify pass), else the job detail's first. */
+const industryOf = (j: CollectedLinkedInJob): string | null => j.companyIndustry || j.industries[0] || null;
 export interface LinkedInJobsPage {
   jobs: CollectedLinkedInJob[]; total: number; page: number; pageSize: number; facets: LinkedInJobsFacets;
 }
@@ -121,23 +152,28 @@ function facetsOf(all: CollectedLinkedInJob[]): LinkedInJobsFacets {
   const roleFamilies: Record<string, number> = {};
   const countries: Record<string, number> = {};
   const seniorities: Record<string, number> = {};
+  const industries: Record<string, number> = {};
+  const employeeRanges: Record<string, number> = {};
   const companyCounts = new Map<string, number>();
   for (const j of all) {
     if (j.roleFamily) roleFamilies[j.roleFamily] = (roleFamilies[j.roleFamily] ?? 0) + 1;
     if (j.country) countries[j.country] = (countries[j.country] ?? 0) + 1;
     if (j.seniorityLevel) seniorities[j.seniorityLevel] = (seniorities[j.seniorityLevel] ?? 0) + 1;
+    const ind = industryOf(j);
+    if (ind) industries[ind] = (industries[ind] ?? 0) + 1;
+    if (j.companyEmployeeRange) employeeRanges[j.companyEmployeeRange] = (employeeRanges[j.companyEmployeeRange] ?? 0) + 1;
     const name = j.company.trim();
     if (name && name !== "—") companyCounts.set(name, (companyCounts.get(name) ?? 0) + 1);
   }
   const companies = [...companyCounts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, 40);
-  return { roleFamilies, countries, seniorities, companies };
+  return { roleFamilies, countries, seniorities, industries, employeeRanges, companies };
 }
 
 export function getLinkedInJobs(jobId: string, query: LinkedInJobsQuery = {}): LinkedInJobsPage {
   const all = store().results[jobId] ?? [];
   const {
     page = 1, pageSize = 25, search = "", roleFamilies = [], countries = [], seniorities = [],
-    remoteOnly = false, qualifiedOnly = false, minScore = 0, postedWithinDays = 0,
+    industries = [], excludedIndustries = [], employeeRanges = [], remoteOnly = false, qualifiedOnly = false, minScore = 0, postedWithinDays = 0,
   } = query;
   const facets = facetsOf(all);
 
@@ -147,6 +183,10 @@ export function getLinkedInJobs(jobId: string, query: LinkedInJobsQuery = {}): L
   if (roleFamilies.length) filtered = filtered.filter((j) => !!j.roleFamily && roleFamilies.includes(j.roleFamily));
   if (countries.length) filtered = filtered.filter((j) => !!j.country && countries.includes(j.country));
   if (seniorities.length) filtered = filtered.filter((j) => !!j.seniorityLevel && seniorities.includes(j.seniorityLevel));
+  // Include keeps only rows with a matching (known) industry; exclude keeps unknowns.
+  if (industries.length) filtered = filtered.filter((j) => { const i = industryOf(j); return !!i && industries.includes(i); });
+  if (excludedIndustries.length) filtered = filtered.filter((j) => { const i = industryOf(j); return !i || !excludedIndustries.includes(i); });
+  if (employeeRanges.length) filtered = filtered.filter((j) => !!j.companyEmployeeRange && employeeRanges.includes(j.companyEmployeeRange));
   if (remoteOnly) filtered = filtered.filter((j) => j.remote);
   if (qualifiedOnly) filtered = filtered.filter((j) => j.qualified);
   if (minScore > 0) filtered = filtered.filter((j) => j.fitScore >= minScore);
@@ -201,11 +241,11 @@ export function setQueryCollecting(jobId: string, key: string) {
   scheduleSave();
 }
 
-/** Append a query's discovered cards: normalize + dedup (linkedinJobId) + qualify + score. */
-export function appendLinkedInJobs(jobId: string, key: string, raw: LinkedInRawJob[], meta: { pages: number }) {
+/** Append a query's discovered cards: normalize + dedup (linkedinJobId) + qualify + score. Returns rows added. */
+export function appendLinkedInJobs(jobId: string, key: string, raw: LinkedInRawJob[], meta: { pages: number }): number {
   const job = getJob(jobId);
   const list = store().results[jobId];
-  if (!job || !list) return;
+  if (!job || !list) return 0;
   const seen = new Set(list.map((j) => j.linkedinJobId));
   const now = new Date().toISOString();
   let added = 0;
@@ -251,8 +291,10 @@ export function appendLinkedInJobs(jobId: string, key: string, raw: LinkedInRawJ
       sourceQuery: key,
       discoveredAt: now,
     };
+    // Pre-gate (role/age) only rejects; passing rows stay unqualified ("pending")
+    // until the opt-in Qualify pass verifies them with company data.
     const gate = qualifyJob(row, job.params, false);
-    row.qualified = gate.qualified;
+    row.qualified = false;
     row.rejectReason = gate.rejectReason;
     row.fitScore = scoreJob(row, job.params);
     list.push(row);
@@ -262,6 +304,32 @@ export function appendLinkedInJobs(jobId: string, key: string, raw: LinkedInRawJ
   if (cov) { cov.jobsFound += added; cov.pages += meta.pages; }
   recompute(jobId);
   scheduleSave();
+  return added;
+}
+
+/** Record LinkedIn's reported total / slice progress for a query (full-coverage mode). */
+export function setQueryMeta(jobId: string, key: string, meta: { total?: number | null; totalCapped?: boolean; slices?: number }) {
+  const cov = store().coverage[jobId]?.find((c) => c.key === key);
+  if (!cov) return;
+  if (meta.total !== undefined) cov.total = meta.total;
+  if (meta.totalCapped !== undefined) cov.totalCapped = meta.totalCapped;
+  if (meta.slices !== undefined) cov.slices = meta.slices;
+  scheduleSave();
+}
+
+/** Titles of the roles a query has discovered — seeds the planner's split terms. */
+export function queryTitles(jobId: string, key: string): string[] {
+  return (store().results[jobId] ?? []).filter((j) => j.sourceQuery === key).map((j) => j.title);
+}
+
+/** Current rows of a scrape keyed by row id (live objects — read only). */
+export function rowsById(jobId: string): Map<string, CollectedLinkedInJob> {
+  return new Map((store().results[jobId] ?? []).map((r) => [r.id, r]));
+}
+
+/** Roles a query has discovered so far. */
+export function queryFound(jobId: string, key: string): number {
+  return store().coverage[jobId]?.find((c) => c.key === key)?.jobsFound ?? 0;
 }
 
 export function finalizeQuery(jobId: string, key: string, status: "done" | "blocked" | "failed", error?: string) {
@@ -274,6 +342,10 @@ export function finalizeQuery(jobId: string, key: string, status: "done" | "bloc
 export function finalizeLinkedInSearch(jobId: string) {
   const job = getJob(jobId);
   if (!job) return;
+  // A crawl that aborted mid-way leaves queries unfinished — surface them as failed (retryable).
+  for (const c of store().coverage[jobId] ?? []) {
+    if (c.status === "pending" || c.status === "collecting") { c.status = "failed"; c.error = c.error ?? "crawl aborted"; }
+  }
   recompute(jobId);
   job.progress = 100;
   job.status = "completed";
@@ -292,6 +364,7 @@ function recompute(jobId: string) {
     s.jobs++;
     if (j.qualified) s.qualified++;
     if (j.enriched) s.enriched++;
+    else if (!j.rejectReason) s.pending = (s.pending ?? 0) + 1;
     const c = j.company.trim().toLowerCase();
     if (c && c !== "—") companies.add(c);
   }
@@ -320,7 +393,7 @@ export function retryBlockedQueries(jobId: string): string[] {
   const retry: string[] = [];
   for (const c of coverage) {
     if (c.status === "blocked" || c.status === "failed") {
-      c.status = "pending"; c.jobsFound = 0; c.pages = 0;
+      c.status = "pending"; c.jobsFound = 0; c.pages = 0; c.slices = 0;
       retry.push(c.key);
     }
   }
@@ -351,38 +424,90 @@ export function setEnrichStatus(jobId: string, status: LinkedInSearchJob["enrich
   if (job) { job.enrichStatus = status; scheduleSave(); }
 }
 
-/** Qualified rows not yet enriched — the targets of the opt-in enrich pass. */
+/** Pending rows (passed the role/age pre-gate, not yet enriched) — targets of the Qualify pass. */
 export function enrichTargets(jobId: string): CollectedLinkedInJob[] {
-  return (store().results[jobId] ?? []).filter((j) => j.qualified && !j.enriched);
+  return (store().results[jobId] ?? []).filter((j) => !j.enriched && !j.rejectReason);
 }
 
-/** Apply one job's detail + company info, then re-qualify + re-score in place. */
-export function applyEnrichment(jobId: string, rowId: string, detail: LinkedInJobDetail, company: LinkedInCompanyInfo) {
+/** Apply a company's page data to its rows, then qualify (company known) + score. */
+export function applyCompany(jobId: string, rowIds: string[], company: LinkedInCompanyInfo) {
+  const job = getJob(jobId);
+  const list = store().results[jobId];
+  if (!job || !list) return;
+  const ids = new Set(rowIds);
+  for (const row of list) {
+    if (!ids.has(row.id)) continue;
+    if (company.found) {
+      row.companyEmployeeRange = company.employeeRange;
+      row.companyEmployeeMin = company.employeeMin;
+      row.companyIndustry = company.industry;
+      row.companyWebsite = company.website;
+      row.companyType = company.companyType ?? null;
+      row.companyAffiliates = company.affiliates ?? [];
+      if (!row.industries.length && company.industry) row.industries = [company.industry];
+    }
+    row.enriched = true;
+    const gate = qualifyJob(row, job.params, true);
+    row.qualified = gate.qualified;
+    row.rejectReason = gate.rejectReason;
+    row.fitScore = scoreJob(row, job.params);
+  }
+  recompute(jobId);
+  scheduleSave();
+}
+
+/**
+ * Apply one job's detail page. Qualification is company-driven, except the
+ * Remote job type: guest cards rarely say "remote", so it is decided here once
+ * the description is known (a failed detail fetch falls back to location/title).
+ */
+export function applyDetail(jobId: string, rowId: string, detail: LinkedInJobDetail) {
   const job = getJob(jobId);
   const row = store().results[jobId]?.find((j) => j.id === rowId);
   if (!job || !row) return;
-  if (detail.found) {
-    row.description = detail.description ?? row.description;
-    row.applicants = detail.applicants ?? row.applicants;
-    row.employmentType = detail.employmentType ?? row.employmentType;
-    row.seniority = detail.seniority ?? row.seniority;
-    row.jobFunction = detail.jobFunction ?? row.jobFunction;
-    if (detail.industries.length) row.industries = detail.industries;
-    if (detail.companyLinkedinUrl && !row.companyLinkedinUrl) row.companyLinkedinUrl = detail.companyLinkedinUrl;
+  if (job.params.jobType === "remote" && row.qualified && !isRemoteJob({ ...row, description: detail.description ?? row.description })) {
+    row.qualified = false;
+    row.rejectReason = "not remote";
+    recompute(jobId);
   }
-  if (company.found) {
-    row.companyEmployeeRange = company.employeeRange;
-    row.companyEmployeeMin = company.employeeMin;
-    row.companyIndustry = company.industry;
-    row.companyWebsite = company.website;
-    if (!row.industries.length && company.industry) row.industries = [company.industry];
+  if (!detail.found) { scheduleSave(); return; }
+  row.description = detail.description ?? row.description;
+  row.applicants = detail.applicants ?? row.applicants;
+  row.employmentType = detail.employmentType ?? row.employmentType;
+  row.seniority = detail.seniority ?? row.seniority;
+  row.jobFunction = detail.jobFunction ?? row.jobFunction;
+  if (detail.industries.length) row.industries = detail.industries;
+  if (detail.companyLinkedinUrl && !row.companyLinkedinUrl) row.companyLinkedinUrl = detail.companyLinkedinUrl;
+  scheduleSave();
+}
+
+/** Apply a company's revenue band / corporate parent to its rows, then re-score. */
+export function applyCompanySignal(jobId: string, rowIds: string[], signal: { revenueBand: string | null; parentGroup: string | null }) {
+  const job = getJob(jobId);
+  const list = store().results[jobId];
+  if (!job || !list) return;
+  const ids = new Set(rowIds);
+  for (const row of list) {
+    if (!ids.has(row.id)) continue;
+    row.companyRevenue = signal.revenueBand ?? row.companyRevenue ?? null;
+    row.companyParentGroup = signal.parentGroup ?? row.companyParentGroup ?? null;
+    row.fitScore = scoreJob(row, job.params);
   }
-  row.enriched = true;
-  const gate = qualifyJob(row, job.params, true);
-  row.qualified = gate.qualified;
-  row.rejectReason = gate.rejectReason;
-  row.fitScore = scoreJob(row, job.params);
-  recompute(jobId);
+  scheduleSave();
+}
+
+/** Apply a live-search corporate parent (with its evidence URL), then re-score. */
+export function applyCompanyBacking(jobId: string, rowIds: string[], backing: { parentGroup: string; source: string | null }) {
+  const job = getJob(jobId);
+  const list = store().results[jobId];
+  if (!job || !list) return;
+  const ids = new Set(rowIds);
+  for (const row of list) {
+    if (!ids.has(row.id)) continue;
+    row.companyParentGroup = backing.parentGroup;
+    row.companyParentSource = backing.source;
+    row.fitScore = scoreJob(row, job.params);
+  }
   scheduleSave();
 }
 

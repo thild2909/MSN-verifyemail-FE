@@ -12,7 +12,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!store.getLinkedInSearch(id)) return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "Scrape not found." } }, { status: 404 });
   if (isLinkedInEnriching(id)) return NextResponse.json({ success: false, error: { code: "BUSY", message: "Qualification is already running." } }, { status: 409 });
   const targets = store.enrichTargets(id).length;
-  if (targets === 0) return NextResponse.json({ success: false, error: { code: "NOTHING_TO_ENRICH", message: "No qualified roles left to enrich." } }, { status: 400 });
+  if (targets === 0) return NextResponse.json({ success: false, error: { code: "NOTHING_TO_ENRICH", message: "No roles left to qualify." } }, { status: 400 });
   startLinkedInEnrich(id);
   return NextResponse.json({ success: true, data: { id, targets } });
 }

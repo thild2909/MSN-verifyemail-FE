@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { getLeadItems, removeLeadItems, type LeadItem, type LeadKind } from "@/lib/api/client";
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
+import { peopleExportTable } from "@/lib/leads/people-export";
 import { formatNumber, cn } from "@/lib/utils";
 import { Avatar } from "./leads-ui";
 import { CompanyLogo, Sourced, VerificationBadge, LlmBadge, COLLECT_STATUS_META } from "./collect-ui";
@@ -238,11 +239,9 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
     try {
       const chosen = sel.selectedObjs();
       if (chosen.length === 0) { sel.toast({ variant: "info", title: "Nothing to export", description: "Select some people first." }); return; }
-      const headers = ["First Name", "Last Name", "Company Name", "Email", "Full Name", "LinkedIn", "Title", "Industry", "Employees Count", "Location"];
-      const csv = toCsv(headers, chosen.map((p) => [
-        p.firstName, p.lastName, p.company, p.email?.value ?? "", p.name, p.linkedin?.value ?? "",
-        p.title?.value ?? "", p.companyIndustry ?? "", p.companyEmployees ?? "", p.location ?? "",
-      ]));
+      // Same columns as the imported CSV(s) (or the full Apollo layout), current values.
+      const { headers, rows } = peopleExportTable(chosen);
+      const csv = toCsv(headers, rows);
       downloadCsv(`${(listName?.trim() || `list-${listId}`)}-people`, csv);
       sel.toast({ variant: "success", title: `Exported ${formatNumber(chosen.length)} ${chosen.length === 1 ? "person" : "people"}` });
     } catch { sel.toast({ variant: "error", title: "Export failed" }); }
@@ -250,9 +249,9 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
   };
 
   return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+    <div className="relative flex min-h-0 flex-1 overflow-clip">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-hidden border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
           <PeopleFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_PEOPLE_FILTERS)} />
         </aside>
       )}
@@ -449,7 +448,7 @@ function ColumnsMenu<K extends string>({ defs, cols, onToggle, onReset }: {
           </div>
           <div className="max-h-72 overflow-y-auto">
             {defs.map((c) => (
-              <label key={c.key} className="group flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
+              <label key={c.key} className="group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
                 <CheckboxIndicator checked={cols[c.key]} />
                 <input type="checkbox" className="sr-only" checked={cols[c.key]} onChange={() => onToggle(c.key)} />
                 <span className="flex-1">{c.label}</span>
@@ -558,9 +557,9 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
   };
 
   return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+    <div className="relative flex min-h-0 flex-1 overflow-clip">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-hidden border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
           <CompanyFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_COMPANY_FILTERS)} />
         </aside>
       )}

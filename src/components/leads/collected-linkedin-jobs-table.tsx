@@ -51,9 +51,9 @@ function seedsFromJobs(jobs: CollectedLinkedInJob[]): PeopleSeedInput[] {
 }
 
 function countActive(f: LinkedInJobFilters): number {
-  let n = f.roleFamilies.length + f.countries.length + f.seniorities.length;
+  let n = f.roleFamilies.length + f.countries.length + f.seniorities.length + f.industries.length + f.excludedIndustries.length + f.employeeRanges.length;
   if (f.remoteOnly) n++;
-  if (!f.qualifiedOnly) n++; // qualified-only is the default; showing all is an active choice
+  if (f.qualifiedOnly) n++;
   if (f.minScore > 0) n++;
   if (f.postedWithinDays > 0) n++;
   return n;
@@ -93,6 +93,9 @@ export function CollectedLinkedInJobsTable({
     roleFamilies: filters.roleFamilies,
     countries: filters.countries,
     seniorities: filters.seniorities,
+    industries: filters.industries,
+    excludedIndustries: filters.excludedIndustries,
+    employeeRanges: filters.employeeRanges,
     remoteOnly: filters.remoteOnly,
     qualifiedOnly: filters.qualifiedOnly,
     minScore: filters.minScore > 0 ? filters.minScore : undefined,
@@ -183,10 +186,11 @@ export function CollectedLinkedInJobsTable({
     setBusy("export");
     try {
       const sel = await resolveSelected();
-      const headers = ["Title", "Company", "Location", "Country", "Role family", "Seniority", "Employment", "Industry", "Employees", "Fit", "Qualified", "Posted", "URL"];
+      const headers = ["Title", "Company", "Location", "Country", "Role family", "Seniority", "Employment", "Industry", "Employees", "Revenue", "Parent group", "Company type", "Fit", "Qualified", "Posted", "URL"];
       const csv = toCsv(headers, sel.map((j) => [
         j.title, j.company, j.location ?? "", j.country ?? "", j.roleFamily ?? "", j.seniorityLevel ?? "",
-        j.employmentType ?? "", j.companyIndustry ?? "", j.companyEmployeeRange ?? "", String(j.fitScore),
+        j.employmentType ?? "", j.companyIndustry ?? "", j.companyEmployeeRange ?? "",
+        j.companyRevenue ?? "", j.companyParentGroup ?? (j.companyAffiliates ?? []).join("; "), j.companyType ?? "", String(j.fitScore),
         j.qualified ? "yes" : "no", postedLabel(j), j.jobUrl,
       ]));
       downloadCsv(`linkedin-jobs-${jobId}`, csv);
@@ -212,7 +216,7 @@ export function CollectedLinkedInJobsTable({
   return (
     <div className="flex min-h-0 flex-1">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-hidden border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
           <LinkedInJobsFilterSidebar filters={filters} onChange={onChangeFilters} activeCount={activeFilterCount} onClear={onClearFilters} facets={facets} />
         </aside>
       )}
@@ -239,7 +243,7 @@ export function CollectedLinkedInJobsTable({
             <EmptyState
               icon={Briefcase}
               title={live ? "Scraping LinkedIn…" : "No roles found"}
-              description={live ? "Roles appear here as each query returns." : "No roles matched the current filter. Try turning off “Qualified only” or clearing filters."}
+              description={live ? "Roles appear here as each query returns." : "No roles matched the current filter. Run “Qualify companies” first, or turn off “Qualified only” / clear filters."}
               className="m-6"
             />
           ) : (
@@ -319,6 +323,7 @@ export function CollectedLinkedInJobsTable({
                             {j.employmentType && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{j.employmentType}</span>}
                             {j.primaryLanguage && <span className="rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">{j.primaryLanguage}</span>}
                             {!j.qualified && j.rejectReason && <span className="rounded bg-amber-500/12 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-400">{j.rejectReason}</span>}
+                            {!j.enriched && !j.rejectReason && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">Not qualified yet</span>}
                           </div>
                         </td>
                         <td className="px-3 py-2">
@@ -331,6 +336,7 @@ export function CollectedLinkedInJobsTable({
                             )}
                           </div>
                           {j.companyIndustry && <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{j.companyIndustry}</div>}
+                          <CompanyStrength j={j} />
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                           {j.companyEmployeeRange ? <span className="inline-flex items-center gap-1"><Building2 className="size-3 opacity-60" />{j.companyEmployeeRange}</span> : "—"}
@@ -408,6 +414,24 @@ export function CollectedLinkedInJobsTable({
           </DialogFooter>
         </Dialog>
       </div>
+    </div>
+  );
+}
+
+/** Revenue / corporate-group chips — the signals behind the +10 fit bonus. */
+function CompanyStrength({ j }: { j: CollectedLinkedInJob }) {
+  const listed = /public company/i.test(j.companyType ?? "");
+  const group = j.companyParentGroup ?? (j.companyAffiliates?.length ? j.companyAffiliates[0] : null);
+  if (!j.companyRevenue && !listed && !group) return null;
+  return (
+    <div className="mt-1 flex flex-wrap gap-1 text-[11px]">
+      {j.companyRevenue && <span className="rounded bg-emerald-500/12 px-1.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-400" title="Annual revenue (estimate)">Rev {j.companyRevenue}</span>}
+      {listed && <span className="rounded bg-emerald-500/12 px-1.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">Listed</span>}
+      {group && (j.companyParentSource ? (
+        <a href={j.companyParentSource} target="_blank" rel="noopener noreferrer" className="rounded bg-sky-500/12 px-1.5 py-0.5 font-medium text-sky-700 hover:underline dark:text-sky-400" title="Backing group — open the source">Group: {group}</a>
+      ) : (
+        <span className="rounded bg-sky-500/12 px-1.5 py-0.5 font-medium text-sky-700 dark:text-sky-400" title={j.companyParentGroup ? "Parent / backing group" : `Affiliated: ${(j.companyAffiliates ?? []).join(", ")}`}>Group: {group}</span>
+      ))}
     </div>
   );
 }

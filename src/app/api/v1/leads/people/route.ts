@@ -46,6 +46,7 @@ const seedSchema = z.object({
   companyFoundedYear: z.string().trim().nullish(),
   companySeoDescription: z.string().trim().nullish(),
   companyShortDescription: z.string().trim().nullish(),
+  sourceRow: z.array(z.string()).max(500).nullish(),
   // Full snapshot from a saved list (import dedup) — shown as-is, no crawl.
   prefill: z.record(z.unknown()).nullish(),
 });
@@ -57,7 +58,7 @@ const seedSchema = z.object({
 const createSchema = z.union([
   // Accept large uploads; the store dedups + truncates to MAX_PEOPLE_SEEDS and
   // reports `truncated`, so a big file never hard-fails here.
-  z.object({ name: z.string().trim().min(1).max(120), seeds: z.array(seedSchema).min(1).max(100000), apolloUrl: z.string().trim().max(2000).optional() }),
+  z.object({ name: z.string().trim().min(1).max(120), seeds: z.array(seedSchema).min(1).max(100000), apolloUrl: z.string().trim().max(2000).optional(), sourceColumns: z.array(z.string()).max(500).optional() }),
   z.object({
     name: z.string().trim().min(1).max(120),
     fromCompanyJob: z.string().trim().min(1),
@@ -125,7 +126,8 @@ export async function POST(req: Request) {
   }
 
   const apolloUrl = "apolloUrl" in parsed.data ? parsed.data.apolloUrl : undefined;
-  const { job, truncated } = store.createPeopleJob({ name: parsed.data.name, seeds, apolloUrl });
+  const sourceColumns = "sourceColumns" in parsed.data ? parsed.data.sourceColumns : undefined;
+  const { job, truncated } = store.createPeopleJob({ name: parsed.data.name, seeds, apolloUrl, sourceColumns });
   startPeopleJob(job.id);
   return NextResponse.json({ success: true, data: job, truncated }, { status: 201 });
 }

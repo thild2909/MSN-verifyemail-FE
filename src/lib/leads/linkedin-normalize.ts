@@ -96,11 +96,31 @@ export function postedDaysAgo(postedAt: string | null, postedText: string | null
 }
 
 /**
+ * The keyword actually sent to LinkedIn for one query.
+ *  - polygon mode wraps it as an exact phrase: Python → "python".
+ *  - Remote job type appends `remote`: guest search ignores f_WT, so the term is
+ *    the only lever that narrows discovery; qualifyJob then enforces it.
+ */
+export function discoveryKeyword(keyword: string, params: Pick<LinkedInScrapeParams, "searchMode" | "jobType">): string {
+  let k = keyword.trim();
+  if (params.searchMode === "polygon") k = `"${k.replace(/"/g, "").trim().toLowerCase()}"`;
+  if (params.jobType === "remote" && !REMOTE_RE.test(k)) k = `${k} remote`;
+  return k;
+}
+
+/** Remote signal from location, title or (once the detail is fetched) description. */
+export function isRemoteJob(job: CollectedLinkedInJob): boolean {
+  return job.remote || REMOTE_RE.test(job.title) || REMOTE_RE.test(job.description ?? "");
+}
+
+/**
  * Apply the qualification gate (Filter step 5 + company criteria from step 6).
  * Returns the qualified flag + the FIRST failing reason. `companyKnown` gates
  * the employee/industry checks: before the enrich pass they are unknown, so we
  * don't reject on missing company data.
  */
+const RECRUITER_RE = /staffing|recruit/i;
+
 export function qualifyJob(
   job: CollectedLinkedInJob,
   params: LinkedInScrapeParams,
@@ -113,8 +133,21 @@ export function qualifyJob(
     return { qualified: false, rejectReason: `older than ${params.maxAgeDays}d` };
   }
   if (companyKnown) {
+    // Recruitment agencies post on behalf of undisclosed clients — the agency is
+    // not the buyer. Excluded unless the user explicitly targets that industry.
+    if (job.companyIndustry && RECRUITER_RE.test(job.companyIndustry)
+      && !params.targetIndustries.some((t) => RECRUITER_RE.test(t))) {
+      return { qualified: false, rejectReason: "recruitment agency" };
+    }
+    // A size / industry criterion we couldn't verify must not pass as "qualified".
+    if (params.employeeMax > 0 && job.companyEmployeeMin == null) {
+      return { qualified: false, rejectReason: "company size unverified" };
+    }
     if (params.employeeMax > 0 && job.companyEmployeeMin != null && job.companyEmployeeMin > params.employeeMax) {
       return { qualified: false, rejectReason: `company > ${params.employeeMax} employees` };
+    }
+    if (params.targetIndustries.length && !job.companyIndustry) {
+      return { qualified: false, rejectReason: "industry unverified" };
     }
     if (params.targetIndustries.length && job.companyIndustry) {
       const ind = job.companyIndustry.toLowerCase();
@@ -124,6 +157,17 @@ export function qualifyJob(
     }
   }
   return { qualified: true, rejectReason: null };
+}
+
+/** Known annual revenue of ≥ $1M, or a listed (public) company. */
+export function hasRevenue(job: Pick<CollectedLinkedInJob, "companyRevenue" | "companyType">): boolean {
+  if (job.companyRevenue && job.companyRevenue !== "<$1M") return true;
+  return /public company/i.test(job.companyType ?? "");
+}
+
+/** Owned/backed by a corporate group: known parent, or affiliated company pages on LinkedIn. */
+export function isGroupBacked(job: Pick<CollectedLinkedInJob, "companyParentGroup" | "companyAffiliates">): boolean {
+  return !!job.companyParentGroup || (job.companyAffiliates?.length ?? 0) > 0;
 }
 
 /** 0-100 fit score. Recency + role match + seniority weight, plus company size/
@@ -140,6 +184,11 @@ export function scoreJob(job: CollectedLinkedInJob, params: LinkedInScrapeParams
   if (job.roleFamily) s += params.targetRoles.length && params.targetRoles.includes(job.roleFamily) ? 15 : 8;
   // seniority (senior+ roles = stronger technical hiring signal)
   if (job.seniorityLevel && /senior|principal|staff|lead|manager|director/i.test(job.seniorityLevel)) s += 6;
+  // commercial strength — outweighs a senior title (+6). Corporate backing is
+  // the strongest signal: a small team with a group's budget behind it (Setel ←
+  // Petronas, Amplify Health ← AIA, Linxio ← Banyan) is a prime lead. Not additive.
+  if (isGroupBacked(job)) s += 15;
+  else if (hasRevenue(job)) s += 10;
   // company size — reward being within the target cap when one is set.
   if (job.companyEmployeeMin != null) {
     if (params.employeeMax > 0) {

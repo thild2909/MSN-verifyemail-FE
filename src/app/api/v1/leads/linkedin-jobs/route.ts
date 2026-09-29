@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import * as store from "@/server/linkedin-jobs-collect-store";
 import { startLinkedInSearch } from "@/server/linkedin-jobs-collect-job";
-import { LINKEDIN_JOB_TYPES } from "@/lib/leads/linkedin-jobs-types";
+import { LINKEDIN_JOB_TYPES, LINKEDIN_SEARCH_MODES } from "@/lib/leads/linkedin-jobs-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,9 +12,10 @@ const paramsSchema = z.object({
   locations: z.array(z.string().trim().max(120)).max(20).default([]),
   datePosted: z.enum(["24h", "7d", "30d", "any"]).default("any"),
   jobType: z.enum(LINKEDIN_JOB_TYPES).default("any"),
+  searchMode: z.enum(LINKEDIN_SEARCH_MODES).default("normal"),
   targetRoles: z.array(z.string().trim()).max(30).default([]),
   maxAgeDays: z.number().int().min(0).max(365).default(0),
-  maxPages: z.number().int().min(1).catch(30).default(30), // clamped downstream; never 400 on depth
+  maxPages: z.number().int().min(0).catch(0).default(0), // 0 = all results (auto-split); clamped downstream
   employeeMax: z.number().int().min(0).max(1_000_000).default(0),
   targetIndustries: z.array(z.string().trim()).max(30).default([]),
 });
