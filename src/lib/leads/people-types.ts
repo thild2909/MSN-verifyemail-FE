@@ -80,6 +80,11 @@ export interface CollectedPerson {
   companyFoundedYear?: string | null;
   companySeoDescription?: string | null;
   companyShortDescription?: string | null;
+  // The original CSV row (cells aligned with the job's `sourceColumns`) so an
+  // export can reproduce every imported column, not just the mapped ones.
+  sourceRow?: string[] | null;
+  // That import's header — set only on saved-list snapshots, which outlive the job.
+  sourceColumns?: string[] | null;
   emailVerification: EmailVerification | null;
   llmVerification?: LlmVerdict | null; // DeepSeek founder↔company cross-check (opt-in)
   collection: CollectionAttempt[];
@@ -146,6 +151,8 @@ export interface PeopleCollectJob {
   completedAt?: string;
   /** Source Apollo list URL entered at import time (People CSV import). */
   apolloUrl?: string;
+  /** Header row of the imported CSV (People import) — the export reuses it verbatim. */
+  sourceColumns?: string[];
 }
 
 /** Faceted filter state for the People table sidebar. */
@@ -233,6 +240,8 @@ export interface PeopleSeedInput {
   companyFoundedYear?: string | null;
   companySeoDescription?: string | null;
   companyShortDescription?: string | null;
+  // The raw CSV row, aligned with the job's `sourceColumns` (export round-trip).
+  sourceRow?: string[] | null;
   // A full snapshot pulled from a saved list (import dedup). When present the row
   // is shown straight from this snapshot — no crawl, no re-verify.
   prefill?: CollectedPerson | null;

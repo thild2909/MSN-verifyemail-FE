@@ -22,7 +22,7 @@ import {
 
 export const MAX_JOBS_PER_SEARCH = Number(process.env.APP_MAX_JOBS_PER_SEARCH ?? 2000);
 // Find Leads tabs cache only the N most-recent runs so `.data/*.json` can't grow unbounded.
-export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 3);
+export const FIND_LEADS_HISTORY_LIMIT = Number(process.env.APP_FIND_LEADS_HISTORY ?? 9);
 
 interface JobStoreData {
   jobs: JobCollectJob[];

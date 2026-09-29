@@ -13,6 +13,7 @@ import { getCollectedPeople, verifyPersonEmail, getLeadLists, createLeadList, ad
 import { formatNumber, cn } from "@/lib/utils";
 import { addToListToast } from "@/lib/leads/lead-snapshot";
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
+import { peopleExportTable } from "@/lib/leads/people-export";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Avatar } from "./leads-ui";
 import { CompanyLogo, VerificationBadge, LlmBadge } from "./collect-ui";
@@ -57,21 +58,6 @@ function loadCols(): Record<ColKey, boolean> {
   return base;
 }
 
-/**
- * City / State / Country for export. Uses the separately-stored fields when the
- * person carries them; otherwise best-effort splits the combined `location`
- * ("City, State, Country" — some parts may be missing): 1 part → city; 2 →
- * city + country; 3+ → city + state + country.
- */
-function splitLocation(p: CollectedPerson): { city: string; state: string; country: string } {
-  if (p.city || p.state || p.country) return { city: p.city ?? "", state: p.state ?? "", country: p.country ?? "" };
-  const parts = (p.location ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (parts.length === 0) return { city: "", state: "", country: "" };
-  if (parts.length === 1) return { city: parts[0], state: "", country: "" };
-  if (parts.length === 2) return { city: parts[0], state: "", country: parts[1] };
-  return { city: parts[0], state: parts.slice(1, -1).join(", "), country: parts[parts.length - 1] };
-}
-
 const SENIORITY_STYLE: Record<PersonSeniority, string> = {
   founder: "bg-[hsl(var(--valid))]/12 text-[hsl(var(--valid))]",
   c_level: "bg-primary/12 text-primary",
@@ -99,6 +85,7 @@ const linkedinHref = (v: string) => (/^https?:\/\//i.test(v) ? v : `https://${v}
 export function CollectedPeopleTable({
   jobId,
   jobName,
+  sourceColumns,
   live,
   bulkVerifying = false,
   verifyingPersonIds: jobVerifyingIds,
@@ -106,6 +93,8 @@ export function CollectedPeopleTable({
 }: {
   jobId: string;
   jobName?: string;
+  /** Imported CSV header — the export reproduces these columns. */
+  sourceColumns?: string[];
   live: boolean;
   bulkVerifying?: boolean;
   verifyingPersonIds?: string[];
@@ -251,15 +240,9 @@ export function CollectedPeopleTable({
         toast({ variant: "info", title: "Nothing to export", description: "Select some people (or Select all) first." });
         return;
       }
-      const headers = ["First Name", "Last Name", "Company Name", "Company Website", "Email", "Full Name", "LinkedIn", "Title", "Industry", "Employees Count", "City", "State", "Country"];
-      const csv = toCsv(headers, sel.map((p) => {
-        const loc = splitLocation(p);
-        return [
-          p.firstName, p.lastName, p.company, p.companyDomain ?? "",
-          p.email?.value ?? "", p.name, p.linkedin?.value ?? "", p.title?.value ?? "",
-          p.companyIndustry ?? "", p.companyEmployees ?? "", loc.city, loc.state, loc.country,
-        ];
-      }));
+      // Same columns as the imported CSV (or the full Apollo layout), current values.
+      const { headers, rows } = peopleExportTable(sel, sourceColumns);
+      const csv = toCsv(headers, rows);
       downloadCsv(jobName?.trim() || `people-${jobId}`, csv);
       const withValid = sel.filter((p) => p.emailVerification?.status === "valid").length;
       toast({
@@ -315,7 +298,7 @@ export function CollectedPeopleTable({
   return (
     <div className="flex min-h-0 flex-1">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-hidden border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
           <PeopleFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_PEOPLE_FILTERS)} />
         </aside>
       )}
@@ -732,7 +715,7 @@ function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean
           </div>
           <div className="max-h-72 overflow-y-auto">
             {COLUMN_DEFS.map((c) => (
-              <label key={c.key} className="group flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
+              <label key={c.key} className="group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
                 <CheckboxIndicator checked={cols[c.key]} />
                 <input type="checkbox" className="sr-only" checked={cols[c.key]} onChange={() => onToggle(c.key)} />
                 <span className="flex-1">{c.label}</span>

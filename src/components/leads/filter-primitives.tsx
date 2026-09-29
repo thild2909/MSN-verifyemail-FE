@@ -162,7 +162,7 @@ export function CheckboxList({
             <label
               key={o.value}
               className={cn(
-                "group flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors hover:bg-muted/60",
+                "group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors hover:bg-muted/60",
                 checked && "bg-primary/[0.06]",
               )}
             >

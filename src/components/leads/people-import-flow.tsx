@@ -30,7 +30,7 @@ const FULLNAME_RE = /full.?name|^name$|contact/i;
  * (esp. a verified email) — but these show immediately. `not` skips a column
  * that also matches a broader pattern (person LinkedIn vs Company Linkedin).
  */
-const OPTIONAL_FIELDS: { key: string; label: string; re: RegExp; not?: RegExp }[] = [
+const OPTIONAL_FIELDS = [
   { key: "title", label: "Title", re: /^title$|job.?title|position|^role$/i },
   { key: "headline", label: "Headline", re: /headline/i },
   { key: "seniority", label: "Seniority", re: /senior/i },
@@ -55,7 +55,7 @@ const OPTIONAL_FIELDS: { key: string; label: string; re: RegExp; not?: RegExp }[
   { key: "companyFoundedYear", label: "Company Founded Year", re: /company.?founded|founded.?year|year.?founded/i },
   { key: "companySeoDescription", label: "Company SEO Description", re: /seo.?desc/i },
   { key: "companyShortDescription", label: "Company Short Description", re: /short.?desc/i },
-];
+] as const satisfies readonly { key: string; label: string; re: RegExp; not?: RegExp }[];
 
 type OptKey = (typeof OPTIONAL_FIELDS)[number]["key"];
 type Mapping = { firstName: string; lastName: string; company: string; city: string; state: string; country: string } & Record<OptKey, string>;
@@ -109,7 +109,7 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
       const opt = { ...EMPTY_OPT };
       let anyOpt = false;
       for (const f of OPTIONAL_FIELDS) {
-        const col = bestColumn(cols, data, f.re, claimed, f.not);
+        const col = bestColumn(cols, data, f.re, claimed, "not" in f ? f.not : undefined);
         if (col) { opt[f.key] = col; claimed.push(col); anyOpt = true; }
       }
       setMap({ firstName, lastName, company, city, state, country, ...opt });
@@ -165,7 +165,7 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
       if (!((firstName || lastName) && company)) continue;
       const opt = {} as Record<OptKey, string>;
       for (const f of OPTIONAL_FIELDS) opt[f.key] = cell(r, optI[f.key]);
-      out.push({ firstName, lastName, company, location, city, state, country, ...opt });
+      out.push({ firstName, lastName, company, location, city, state, country, ...opt, raw: parsed.columns.map((_c, i) => r[i] ?? "") });
     }
     return out;
   }, [parsed, map]);
@@ -202,6 +202,7 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
       const { job, truncated } = await createPeopleJob({
         name: name.trim() || parsed.fileName,
         apolloUrl: apolloUrl.trim() || undefined,
+        sourceColumns: parsed.columns,
         seeds: built.map((r, i) => ({
           // A saved-list hit fills the row straight from its snapshot — no crawl.
           prefill: (matches[String(i)]?.data as unknown as CollectedPerson | undefined) ?? undefined,
@@ -217,6 +218,7 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
           companyRevenue: r.companyRevenue || undefined, companyFunding: r.companyFunding || undefined,
           companyTechnologies: r.companyTechnologies || undefined, companyFoundedYear: r.companyFoundedYear || undefined,
           companySeoDescription: r.companySeoDescription || undefined, companyShortDescription: r.companyShortDescription || undefined,
+          sourceRow: r.raw,
         })),
       });
       toast({ variant: "success", title: "Finding people…", description: `Enriching ${formatNumber(job.totalCompanies)} people${truncated ? ` · ${formatNumber(truncated)} over cap` : ""}.` });
@@ -317,7 +319,7 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
   );
 }
 
-type ImportRow = { firstName: string; lastName: string; company: string; location: string; city: string; state: string; country: string } & Record<OptKey, string>;
+type ImportRow = { firstName: string; lastName: string; company: string; location: string; city: string; state: string; country: string; raw: string[] } & Record<OptKey, string>;
 
 function MapField({ label, required, value, cols, onChange }: { label: string; required?: boolean; value: string; cols: string[]; onChange: (v: string) => void }) {
   return (

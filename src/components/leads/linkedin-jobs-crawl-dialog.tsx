@@ -12,13 +12,17 @@ import { createLinkedInSearch } from "@/lib/api/client";
 import { TokenList } from "./filter-primitives";
 import {
   LINKEDIN_ROLE_FAMILIES, LINKEDIN_DATE_LABEL, LINKEDIN_JOB_TYPES, LINKEDIN_JOB_TYPE_LABEL,
-  type LinkedInDatePosted, type LinkedInJobType,
+  type LinkedInDatePosted, type LinkedInJobType, type LinkedInSearchMode,
 } from "@/lib/leads/linkedin-jobs-types";
 
 const DATE_OPTIONS: LinkedInDatePosted[] = ["24h", "7d", "30d", "any"];
 const DEPTH_OPTIONS = [
-  { v: 10, l: "~100 roles (fast)" }, { v: 20, l: "~200 roles" }, { v: 30, l: "~300 roles (recommended)" },
-  { v: 50, l: "~500 roles" }, { v: 100, l: "Deepest (time-capped, ~500–1,000)" },
+  { v: 0, l: "All results — auto-split past LinkedIn's 1,000 cap (recommended)" },
+  { v: 10, l: "Top ~100 roles (fast)" }, { v: 30, l: "Top ~300 roles" }, { v: 100, l: "Top ~1,000 roles" },
+];
+const SEARCH_MODE_OPTIONS: Array<{ v: LinkedInSearchMode; l: string; hint: string }> = [
+  { v: "normal", l: "Normal search", hint: "Python" },
+  { v: "polygon", l: "Polygon search", hint: "“python” — exact phrase" },
 ];
 const EMPLOYEE_OPTIONS = [
   { v: 0, l: "No maximum" }, { v: 50, l: "Up to 50" }, { v: 200, l: "Up to 200" },
@@ -43,8 +47,9 @@ export function LinkedInJobsCrawlDialog({
   const [locations, setLocations] = React.useState<string[]>(seed?.locations ?? []);
   const [datePosted, setDatePosted] = React.useState<LinkedInDatePosted>("7d");
   const [jobType, setJobType] = React.useState<LinkedInJobType>("full_time");
+  const [searchMode, setSearchMode] = React.useState<LinkedInSearchMode>("normal");
   const [targetRoles, setTargetRoles] = React.useState<string[]>([]);
-  const [maxPages, setMaxPages] = React.useState(30);
+  const [maxPages, setMaxPages] = React.useState(0);
   const [employeeMax, setEmployeeMax] = React.useState(0);
   const [targetIndustries, setTargetIndustries] = React.useState<string[]>([]);
 
@@ -60,7 +65,7 @@ export function LinkedInJobsCrawlDialog({
     mutationFn: () =>
       createLinkedInSearch({
         name: `${keywords.join(", ")}${locations.length ? ` · ${locations.join(", ")}` : ""}`.slice(0, 120) || "LinkedIn scrape",
-        params: { keywords, locations, datePosted, jobType, targetRoles, maxAgeDays, maxPages, employeeMax, targetIndustries },
+        params: { keywords, locations, datePosted, jobType, searchMode, targetRoles, maxAgeDays, maxPages, employeeMax, targetIndustries },
       }),
     onSuccess: (job) => {
       const combos = keywords.length * Math.max(1, locations.length);
@@ -89,6 +94,22 @@ export function LinkedInJobsCrawlDialog({
           <div className="space-y-1.5">
             <Label className="text-xs">Locations <span className="text-muted-foreground">(optional)</span></Label>
             <TokenList values={locations} onChange={setLocations} placeholder="Singapore / Germany" />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label className="text-xs">Search mode</Label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {SEARCH_MODE_OPTIONS.map((o) => {
+              const on = searchMode === o.v;
+              return (
+                <button key={o.v} type="button" onClick={() => setSearchMode(o.v)}
+                  className={cn("flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors", on ? "border-primary bg-primary/10 text-primary" : "border-input hover:bg-muted")}>
+                  <span className="font-medium">{o.l}</span>
+                  <span className="font-mono text-muted-foreground">{o.hint}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -123,7 +144,7 @@ export function LinkedInJobsCrawlDialog({
         </div>
 
         <div className="space-y-1.5">
-          <Label className="text-xs">Depth per query <span className="text-muted-foreground">(how far to page through results)</span></Label>
+          <Label className="text-xs">Depth per query <span className="text-muted-foreground">(LinkedIn serves ≤1,000 per search — &ldquo;All results&rdquo; splits the search to reach the full total; slower)</span></Label>
           <Select value={String(maxPages)} onChange={(e) => setMaxPages(Number(e.target.value))}>
             {DEPTH_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
           </Select>

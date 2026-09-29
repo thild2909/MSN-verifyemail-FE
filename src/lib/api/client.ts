@@ -496,7 +496,7 @@ export async function getPeopleJob(id: string): Promise<PeopleCollectJob | null>
 }
 
 export type CreatePeopleInput =
-  | { name: string; seeds: PeopleSeedInput[]; apolloUrl?: string }
+  | { name: string; seeds: PeopleSeedInput[]; apolloUrl?: string; sourceColumns?: string[] }
   | { name: string; fromCompanyJob: string; companyIds?: string[]; allMatching?: boolean; search?: string; filter?: string };
 
 export async function createPeopleJob(input: CreatePeopleInput): Promise<{ job: PeopleCollectJob; truncated: number }> {
@@ -922,11 +922,12 @@ export async function retryBlockedLinkedInQueries(id: string): Promise<{ id: str
 export interface CollectedLinkedInJobsQuery {
   page?: number; pageSize?: number; search?: string;
   roleFamilies?: string[]; countries?: string[]; seniorities?: string[];
+  industries?: string[]; excludedIndustries?: string[]; employeeRanges?: string[];
   remoteOnly?: boolean; qualifiedOnly?: boolean; minScore?: number; postedWithinDays?: number;
 }
 export interface CollectedLinkedInJobsPage {
   jobs: CollectedLinkedInJob[]; total: number; page: number; pageSize: number;
-  facets: { roleFamilies: Record<string, number>; countries: Record<string, number>; seniorities: Record<string, number>; companies: { name: string; count: number }[] };
+  facets: { roleFamilies: Record<string, number>; countries: Record<string, number>; seniorities: Record<string, number>; industries?: Record<string, number>; employeeRanges?: Record<string, number>; companies: { name: string; count: number }[] };
 }
 export async function getCollectedLinkedInJobs(id: string, query: CollectedLinkedInJobsQuery = {}): Promise<CollectedLinkedInJobsPage> {
   const params = new URLSearchParams();
@@ -936,6 +937,11 @@ export async function getCollectedLinkedInJobs(id: string, query: CollectedLinke
   if (query.roleFamilies?.length) params.set("roleFamilies", query.roleFamilies.join(","));
   if (query.countries?.length) params.set("countries", query.countries.join(","));
   if (query.seniorities?.length) params.set("seniorities", query.seniorities.join(","));
+  // "|"-joined: industry names contain commas ("Technology, Information and Internet").
+  if (query.industries?.length) params.set("industries", query.industries.join("|"));
+  if (query.excludedIndustries?.length) params.set("excludedIndustries", query.excludedIndustries.join("|"));
+  // "|"-joined: bands contain commas ("1,001-5,000 employees").
+  if (query.employeeRanges?.length) params.set("employeeRanges", query.employeeRanges.join("|"));
   if (query.remoteOnly) params.set("remoteOnly", "1");
   if (query.qualifiedOnly) params.set("qualifiedOnly", "1");
   if (query.minScore) params.set("minScore", String(query.minScore));

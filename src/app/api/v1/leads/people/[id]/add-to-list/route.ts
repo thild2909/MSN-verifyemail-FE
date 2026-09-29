@@ -75,7 +75,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ success: true, data: { added: 0, skipped: 0, count: 0 } });
   }
 
-  const items = people.map((p) => personToLeadItem(p, id));
+  // Snapshots outlive the job, so carry the imported CSV header with each row —
+  // the list export can then reproduce every imported column.
+  const sourceColumns = store.getPeopleJob(id)?.sourceColumns;
+  const items = people.map((p) => personToLeadItem(p.sourceRow && sourceColumns ? { ...p, sourceColumns } : p, id));
   let added = 0;
   let skipped = 0;
   for (let i = 0; i < items.length; i += FORWARD_CHUNK) {

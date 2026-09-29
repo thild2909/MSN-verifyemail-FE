@@ -161,7 +161,7 @@ export function CollectedCompaniesTable({ jobId, jobName, live, onOpenCompany, o
   return (
     <div className="flex min-h-0 flex-1">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-hidden border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
           <CompanyFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_COMPANY_FILTERS)} />
         </aside>
       )}

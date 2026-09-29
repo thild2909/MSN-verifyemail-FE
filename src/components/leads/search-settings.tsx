@@ -47,7 +47,7 @@ export function SearchSettings({
             {columns.map((c) => {
               const checked = visible.has(c.key);
               return (
-                <label key={c.key} className="group flex cursor-pointer items-center gap-2 text-[13px]">
+                <label key={c.key} className="group relative flex cursor-pointer items-center gap-2 text-[13px]">
                   <CheckboxIndicator checked={checked} />
                   <input type="checkbox" className="sr-only" checked={checked} onChange={() => onToggleColumn(c.key)} />
                   {c.label}

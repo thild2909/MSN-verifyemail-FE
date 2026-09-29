@@ -39,7 +39,7 @@ export function MobileFilterDrawer({
       <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
       <aside
         className={cn(
-          "absolute inset-y-0 left-0 flex w-[86vw] max-w-xs flex-col overflow-hidden border-r bg-card shadow-2xl animate-slide-in-right",
+          "absolute inset-y-0 left-0 flex w-[86vw] max-w-xs flex-col overflow-clip border-r bg-card shadow-2xl animate-slide-in-right",
           className,
         )}
       >
@@ -49,7 +49,7 @@ export function MobileFilterDrawer({
             <X className="size-5" />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+        <div className="min-h-0 flex-1 overflow-clip">{children}</div>
       </aside>
     </div>,
     document.body,

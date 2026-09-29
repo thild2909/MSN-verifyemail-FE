@@ -329,6 +329,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
         <CollectedPeopleTable
           jobId={activeId}
           jobName={active?.name}
+          sourceColumns={active?.sourceColumns}
           live={!!live}
           bulkVerifying={verifying}
           verifyingPersonIds={active?.verifyingPersonIds}

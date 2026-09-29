@@ -337,6 +337,7 @@ export interface CreatePeopleJobInput {
   name: string;
   seeds: PeopleSeedInput[];
   apolloUrl?: string;
+  sourceColumns?: string[];
 }
 
 export function createPeopleJob(input: CreatePeopleJobInput): { job: PeopleCollectJob; truncated: number } {
@@ -365,6 +366,7 @@ export function createPeopleJob(input: CreatePeopleJobInput): { job: PeopleColle
     totalCompanies: capped.length, processedCompanies: 0, progress: 0,
     summary: emptySummary(capped.length), createdAt: now,
     ...(input.apolloUrl?.trim() ? { apolloUrl: input.apolloUrl.trim() } : {}),
+    ...(input.sourceColumns?.length ? { sourceColumns: input.sourceColumns } : {}),
   };
   const s = store();
   s.seeds[id] = capped.map((seed) => ({ ...seed, status: "pending", peopleFound: 0 }));
@@ -437,6 +439,7 @@ export function applySeedPeople(jobId: string, index: number, crawled: CrawledPe
       companyFoundedYear: seed.companyFoundedYear || null,
       companySeoDescription: seed.companySeoDescription || null,
       companyShortDescription: seed.companyShortDescription || null,
+      sourceRow: seed.sourceRow ?? null,
     });
   });
   seed.status = "done";
@@ -463,6 +466,9 @@ export function applyPrefillPerson(jobId: string, index: number, snapshot: Colle
     jobId,
     companyId: seed.companyId ?? snapshot.companyId ?? null,
     companyLogoText: initials(snapshot.company || seed.company),
+    // A snapshot's own sourceRow belongs to another import's columns — only keep this CSV's.
+    sourceRow: seed.sourceRow ?? null,
+    sourceColumns: null,
     collection: [
       ...(snapshot.collection ?? []),
       { source: "other", status: "ok", proxy: null, ms: 0, fieldsFound: 1, detail: "imported from saved list, not re-enriched", provider: "import" },
