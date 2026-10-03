@@ -12,9 +12,9 @@
  */
 import "server-only";
 import { AsyncResource } from "node:async_hooks";
-import { cachedVerify } from "./verification";
-import { VerifierUnavailableError } from "@/lib/verifier/backend";
-import { m365MailboxExists } from "@/lib/verifier/m365";
+import { cachedVerify, currentRowCancelled, newRowContext, rowStalledMs, runInRowContext, RowCancelledError, setRowPhase, smtpGateStats, type RowContext } from "./verification";
+import { VerifierUnavailableError, pingBackend, thirdPartyStats } from "@/lib/verifier/backend";
+import { m365GctStats, m365MailboxExists } from "@/lib/verifier/m365";
 import { findPersonEmail, cachedDomainClass, classifyDomain, isM365VerifiedDomain, knownDomainPattern, seedDomainPattern, setGlobalFallbackPattern, bestGuessEmail } from "./finder";
 import { cleanDomain, derivePatternId } from "@/lib/finder/patterns";
 import { companyDomainVariants, strongVariantMatch, variantPageRelevant } from "@/lib/finder/domain-variants";
@@ -163,15 +163,18 @@ function makeLimiter(max: number) {
     active++;
     job();
   };
-  return <T>(fn: () => Promise<T>): Promise<T> =>
+  const run = <T>(fn: () => Promise<T>): Promise<T> =>
     new Promise<T>((resolve, reject) => {
       // Bind to the ENQUEUER's async context: pump() may start this job from another
       // row's `finally`, and the crawler call must still carry THIS row's record id.
       queue.push(AsyncResource.bind(() => {
-        fn().then(resolve, reject).finally(() => { active--; pump(); });
+        // A row cancelled while queued (past its deadline) must not spend a crawler call.
+        const started = currentRowCancelled() ? Promise.reject(new RowCancelledError()) : fn();
+        started.then(resolve, reject).finally(() => { active--; pump(); });
       }));
       pump();
     });
+  return Object.assign(run, { stats: () => ({ active, queued: queue.length, max }) });
 }
 const serpLimit = makeLimiter(Math.max(1, Math.min(Number(process.env.CRAWLER_SERP_CONCURRENCY ?? 6), 24)));
 
@@ -331,7 +334,128 @@ const ROW_BUDGET_MS = Math.max(5_000, Number(process.env.PEOPLE_VERIFY_ROW_BUDGE
 // per-layer timeouts; this only catches a pathological combination. Must exceed the
 // slowest single layer (reacher 25s, crawler SERP 20s) so it never cuts a healthy row.
 const ROW_HARD_MS = Math.max(20_000, Number(process.env.PEOPLE_VERIFY_ROW_HARD_MS ?? 150_000));
+// The hard deadline counts the row's OWN work time: time stalled waiting for a
+// shared SMTP slot (other rows / other jobs hold them) is excluded, otherwise a busy
+// engine made every row "time out" without having run. ROW_ABS_MS is the absolute
+// wall-clock backstop (incl. stalls) so no row can ever wedge a worker.
+const ROW_ABS_MS = Math.max(ROW_HARD_MS, Number(process.env.PEOPLE_VERIFY_ROW_ABS_MS ?? ROW_HARD_MS * 4));
+// Rows that time out / hit an engine error are retried in extra rounds (lower
+// concurrency, longer deadline) BEFORE the pass ends — a pass only reaches "done"
+// once every row has a settled verdict (no leftover "Not searched").
+const RETRY_ROUNDS = Math.max(0, Math.min(Number(process.env.PEOPLE_VERIFY_RETRY_ROUNDS ?? 2), 5));
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+type RowRun =
+  | { kind: "ok"; res: VerifyOneResult }
+  | { kind: "timeout" }
+  | { kind: "engine" }
+  | { kind: "error" };
+
+/**
+ * Run `fn` as one row under a CANCELLING deadline: past `hardMs` of own work (or
+ * ROW_ABS_MS wall-clock) the row context is cancelled, so every further SMTP slot /
+ * crawler call it would make is refused immediately instead of running on as a
+ * zombie that starves the rows behind it.
+ */
+async function runRow(fn: () => Promise<VerifyOneResult>, hardMs: number): Promise<RowRun> {
+  const ctx: RowContext = newRowContext();
+  const startedAt = Date.now();
+  liveRows().set(ctx, startedAt);
+  const work = runInRowContext(ctx, fn);
+  work.catch(() => {}); // a rejection after the deadline is expected — never unhandled
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<"DEADLINE">((resolve) => {
+    timer = setInterval(() => {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed - rowStalledMs(ctx) > hardMs || elapsed > Math.max(ROW_ABS_MS, hardMs)) resolve("DEADLINE");
+    }, 1_000);
+  });
+  try {
+    const raced = await Promise.race([work, deadline]);
+    if (raced === "DEADLINE") {
+      ctx.cancelled = true;
+      if (VERIFY_DEBUG) console.warn(`[verify-emails] row deadline in ${ctx.phase} after ${Math.round((Date.now() - startedAt) / 1000)}s (stalled ${Math.round(rowStalledMs(ctx) / 1000)}s)`);
+      return { kind: "timeout" };
+    }
+    return { kind: "ok", res: raced };
+  } catch (e) {
+    if (e instanceof VerifierUnavailableError) return { kind: "engine" };
+    if (e instanceof RowCancelledError) return { kind: "timeout" };
+    console.error("[verify-emails] row error:", e);
+    return { kind: "error" };
+  } finally {
+    clearInterval(timer);
+    ctx.cancelled = true; // nothing left of this row may keep running after it settles
+    liveRows().delete(ctx);
+  }
+}
+
+const VERIFY_DEBUG = process.env.PEOPLE_VERIFY_DEBUG === "1";
+declare global {
+  // eslint-disable-next-line no-var
+  var __peopleLiveRows: Map<RowContext, number> | undefined;
+}
+function liveRows(): Map<RowContext, number> {
+  if (!globalThis.__peopleLiveRows) globalThis.__peopleLiveRows = new Map();
+  return globalThis.__peopleLiveRows;
+}
+
+/** Live pass diagnostics: rows in flight per layer (with ages), SMTP + row gates. */
+export function verifyDiagnostics() {
+  const now = Date.now();
+  const phases: Record<string, { rows: number; maxAgeS: number; stalledS: number; smtpActive: number; smtpWaiting: number }> = {};
+  for (const [ctx, at] of liveRows()) {
+    const p = (phases[ctx.phase] ??= { rows: 0, maxAgeS: 0, stalledS: 0, smtpActive: 0, smtpWaiting: 0 });
+    p.rows++;
+    p.smtpActive += ctx.active;
+    p.smtpWaiting += ctx.waiting;
+    p.maxAgeS = Math.max(p.maxAgeS, Math.round((now - at) / 1000));
+    p.stalledS += Math.round(rowStalledMs(ctx) / 1000);
+  }
+  const rg = globalThis.__peopleRowGate;
+  return {
+    passes: [...runningPasses()],
+    rows: liveRows().size,
+    phases,
+    smtp: smtpGateStats(),
+    rowGate: { active: rg?.active ?? 0, queued: rg?.queue.length ?? 0, max: GLOBAL_ROW_MAX },
+    serp: serpLimit.stats(),
+    gct: m365GctStats(),
+    thirdParty: thirdPartyStats(),
+  };
+}
+
+/**
+ * Process-wide cap on rows in flight across ALL concurrent passes. Each pass used
+ * to run its own PEOPLE_VERIFY_CONCURRENCY workers, so three jobs verifying at once
+ * meant 3× the rows fighting over the same SMTP slots → every row slowed past its
+ * deadline. With one shared cap, extra jobs share capacity instead of multiplying it.
+ */
+const GLOBAL_ROW_MAX = Math.max(1, Math.min(Number(process.env.PEOPLE_VERIFY_GLOBAL_CONCURRENCY ?? CONCURRENCY), 64));
+declare global {
+  // eslint-disable-next-line no-var
+  var __peopleRowGate: { active: number; queue: Array<() => void> } | undefined;
+}
+async function withGlobalRowSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (!globalThis.__peopleRowGate) globalThis.__peopleRowGate = { active: 0, queue: [] };
+  const g = globalThis.__peopleRowGate;
+  if (g.active >= GLOBAL_ROW_MAX) await new Promise<void>((r) => g.queue.push(r));
+  else g.active++;
+  try {
+    return await fn();
+  } finally {
+    const next = g.queue.shift();
+    if (next) next();
+    else g.active--;
+  }
+}
+
+/** Bounded-concurrency map (no global gate). */
+async function poolEach<T>(list: T[], conc: number, fn: (x: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => { while (next < list.length) await fn(list[next++]); };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(conc, list.length)) }, worker));
+}
 
 /**
  * Public-sources layer: fetch the person's published email candidates from the
@@ -1016,6 +1140,7 @@ async function verifyOneInner(
     // (given.family / family.given), so recall is preserved; the Western Layer 1
     // below still runs as a FALLBACK when the culture set doesn't confirm. The
     // verifier is untouched — only the ORDER we try candidates in changes.
+    setRowPhase("L4-culture-first");
     if (GLOBAL_PATTERN_LAYER && nonWestern) {
       const g = await findViaGlobalPatterns(t, uniqueDomains([t.domain]), recoveredDiffers ? recovered : undefined).catch(() => null);
       if (g?.valid) return { ...g, altName: g.altName ?? altName, companyEmail };
@@ -1023,6 +1148,7 @@ async function verifyOneInner(
 
     // Layer 1 — Western pattern finder on the website domain (primary for Western
     // names; fallback for a non-Western name the culture set didn't confirm).
+    setRowPhase("L1-patterns");
     const outcome = await findPersonEmail({ firstName: ef, lastName: el, domain: t.domain! });
     const res = patchFromFinder(outcome);
     if (res.found) return { ...res, altName }; // confirmed mailbox → done
@@ -1036,6 +1162,7 @@ async function verifyOneInner(
     // SERP per company even on a 6000-row pass. Skipped for a bare name+domain input.
     let altDomain: string | null = null;
     const extraAltDomains: string[] = [];
+    setRowPhase("L2-alt-domain");
     if (ALT_DOMAIN_LAYER && t.company) {
       const alt = await altEmailDomainFor(t.company, t.location, t.domain);
       if (!t.companyEmail && alt?.email) companyEmail = alt.email;
@@ -1060,12 +1187,14 @@ async function verifyOneInner(
     // Layer 2b — the company-email domain hint (see above), when it is neither the
     // website nor the SERP alt-domain. Verified patterns only; no guess from it.
     const hintLive = hintDomain && !extraAltDomains.includes(hintDomain) ? hintDomain : null;
+    setRowPhase("L2b-hint");
     if (hintLive) {
       const hintOutcome = await findPersonEmail({ firstName: ef, lastName: el, domain: hintLive });
       if (hintOutcome.state === "verified") return { ...patchFromFinder(hintOutcome), altName, companyEmail };
     }
     // Layer 2c — mail domains the company's own website publishes (redirect target /
     // printed addresses). Runs for every unconfirmed row; memoized per website.
+    setRowPhase("L2c-site-mail");
     const siteMailDomains = (await liveSiteMailDomainsFor(t.domain).catch(() => [] as string[]))
       .filter((d) => d !== cleanDomain(t.domain!) && d !== hintLive && !extraAltDomains.includes(d));
     for (const dom of siteMailDomains) {
@@ -1086,6 +1215,7 @@ async function verifyOneInner(
     // to the domain set so L4 tries the company's real mail domain. MX-live already,
     // so they're kept even when the website itself is dead-MX.
     let variantDomains: string[] = [];
+    setRowPhase("L2.5-variants");
     if (VARIANT_DOMAIN_LAYER && (t.domain || t.company)) {
       variantDomains = await liveVariantDomainsFor(t.domain, t.company, { country: t.country, companyLinkedin: t.companyLinkedin }).catch(() => []);
     }
@@ -1100,6 +1230,7 @@ async function verifyOneInner(
     // site), so it beats any pattern guess and is surfaced even on a catch-all / M365 /
     // gateway domain SMTP can't confirm. Runs before the pattern sweep; the page fetch is
     // memoized per site (shared with L2c), so colleagues cost nothing extra.
+    setRowPhase("L6-site-emails");
     if (SITE_EMAILS_LAYER && !overBudget()) {
       const keepDoms = uniqueDomains([t.domain, ...extraAltDomains, hintLive, ...siteMailDomains, ...variantDomains]);
       const site = await findViaSiteEmails(t, ef!, el!, keepDoms).catch(() => null);
@@ -1112,6 +1243,7 @@ async function verifyOneInner(
     // profile URL and the slug did NOT already yield a fuller name — the abbreviated-
     // slug case (gohew → "Goh Eng Wei") that bestFullName can't recover. Cheap +
     // targeted (one slug-pinned SERP), so it fits the budget even when SERP is slow.
+    setRowPhase("L3a-linkedin-name");
     if (
       LINKEDIN_NAME_LAYER && t.linkedin && !recoveredDiffers && !altName && !overBudget()
     ) {
@@ -1122,6 +1254,7 @@ async function verifyOneInner(
     // Layer 4 — culture-aware, FRONT-LOADED. Runs on the website + alt-domain, under
     // the Layer-3a-corrected name when one was recovered (so "Goh Eng Wei" is what
     // generates gohengwei@, not the incomplete stored "Goh Wei").
+    setRowPhase("L4-global");
     if (GLOBAL_PATTERN_LAYER && liveDomains.length) {
       const g = await findViaGlobalPatterns(t, liveDomains, altName).catch(() => null);
       if (g?.valid) return { ...g, altName: g.altName ?? altName, companyEmail };
@@ -1130,6 +1263,7 @@ async function verifyOneInner(
     // Public-sources: a DIFFERENT published address (personal/parent domain).
     // Company-scoped scrape, so skip it for a bare name+domain input. Skipped once
     // past the row budget (anti-hang).
+    setRowPhase("public-sources");
     if (PUBLIC_SOURCES_LAYER && t.company && !overBudget()) {
       const pub = await findViaPublicSources(t);
       if (pub?.valid) return { ...pub, altName, companyEmail };
@@ -1140,6 +1274,7 @@ async function verifyOneInner(
     // the name from the URL (!altName), OR when the title is too generic for a
     // reliable reverse lookup (#4: "Product Owner" etc. → let Layer 5 correct the
     // name instead of burning a SERP on namesakes).
+    setRowPhase("L3-name-correction");
     if (
       NAME_CORRECTION_LAYER && t.company && t.title && !recoveredDiffers && !altName && !overBudget() &&
       titleResolvableForReverseLookup(t.title)
@@ -1179,6 +1314,7 @@ async function verifyOneInner(
 
   // Best guess on the real mail domain (alt-domain first) BEFORE re-checking a stored
   // pattern email: that stored value is our own earlier guess, often on the website domain.
+  setRowPhase("best-guess");
   const bgFirst = await bestGuessPreferMailDomain(t, ef, el);
   if (bgFirst) return { ...bgFirst, altName, companyEmail };
 
@@ -1337,23 +1473,32 @@ const L5_WEB_MAX = Math.max(0, Number(process.env.PEOPLE_VERIFY_L5_WEB_MAX ?? 40
 async function fillWithLlmStructure(targets: store.PersonVerifyTarget[], webSearch: boolean): Promise<Map<string, VerifyOneResult>> {
   const out = new Map<string, VerifyOneResult>();
   if (targets.length === 0) return out;
-  let resp: Awaited<ReturnType<typeof analyzeNameEmailStructureViaCrawler>>;
-  try {
-    resp = await analyzeNameEmailStructureViaCrawler(targets.map((t) => ({
-      id: t.personId,
-      name: bestFullName(t.name, t.linkedin),
-      country: t.country,
-      title: t.title,
-      company: t.company,
-      linkedin: t.linkedin,
-      location: t.location,
-      domain: t.domain,
-      companyEmail: t.companyEmail,
-    })), webSearch);
-  } catch {
-    return out;
-  }
-  if (!resp.configured) return out;
+  // The crawler's /llm/name-email-structure accepts at most 60 records per call (a
+  // bigger body is a 400 → the whole L5 batch silently returned nothing), so send
+  // it in chunks; a failed chunk only loses its own rows.
+  const chunks: store.PersonVerifyTarget[][] = [];
+  for (let i = 0; i < targets.length; i += L5_CHUNK) chunks.push(targets.slice(i, i + L5_CHUNK));
+  const results: Awaited<ReturnType<typeof analyzeNameEmailStructureViaCrawler>>["results"] = [];
+  let configured = false;
+  await poolEach(chunks, 2, async (chunk) => {
+    try {
+      const resp = await analyzeNameEmailStructureViaCrawler(chunk.map((t) => ({
+        id: t.personId,
+        name: bestFullName(t.name, t.linkedin),
+        country: t.country,
+        title: t.title,
+        company: t.company,
+        linkedin: t.linkedin,
+        location: t.location,
+        domain: t.domain,
+        companyEmail: t.companyEmail,
+      })), webSearch);
+      if (!resp.configured) return;
+      configured = true;
+      results.push(...resp.results);
+    } catch { /* this chunk gets no L5 hit; the caller best-guesses it */ }
+  });
+  if (!configured) return out;
 
   // Pre-warm the (memoized, once-per-company) variant-domain MX probes for every
   // target in parallel, so the per-result `await liveVariantDomainsFor(...)` inside
@@ -1361,9 +1506,25 @@ async function fillWithLlmStructure(targets: store.PersonVerifyTarget[], webSear
   await Promise.all(targets.map((t) => liveVariantDomainsFor(t.domain, t.company).catch(() => []))).catch(() => {});
 
   const byId = new Map(targets.map((t) => [t.personId, t]));
-  for (const r of resp.results) {
+  // Each result's SMTP sweep (≤4 domains × 14 locals) runs as its own deadline-bound
+  // row, in parallel — it used to be one serial loop over every deferred row, which
+  // is what kept a big pass "verifying" for hours at the very end.
+  await poolEach(results, CONCURRENCY, async (r) => {
     const t = byId.get(r.id);
-    if (!t) continue;
+    if (!t) return;
+    const run = await withGlobalRowSlot(() => runRow(() => llmResultHit(t, r), ROW_HARD_MS));
+    if (run.kind === "ok") out.set(r.id, run.res);
+  });
+  return out;
+}
+
+type NameStructureResult = Awaited<ReturnType<typeof analyzeNameEmailStructureViaCrawler>>["results"][number];
+const L5_CHUNK = 50;
+
+/** SMTP-verify one L5 result's published email / proposed locals (see fillWithLlmStructure). */
+async function llmResultHit(t: store.PersonVerifyTarget, r: NameStructureResult): Promise<VerifyOneResult> {
+  setRowPhase("L5-verify");
+  {
     // A name the LLM corrected is surfaced on the row (like Layer 3), even when
     // no mailbox resolves — so the record no longer shows a name we now doubt.
     // Prefer the LinkedIn-slug-recovered name for DISPLAY (it keeps the person's
@@ -1490,9 +1651,8 @@ async function fillWithLlmStructure(targets: store.PersonVerifyTarget[], webSear
     }
     // Best-guess fallback is applied by the CALLER (verifyCollectedPeople), so it runs
     // even when this LLM call times out / returns empty. Here we only return real hits.
-    out.set(r.id, { ...(hit ?? notFoundPatch("reacher")), altName });
+    return { ...(hit ?? notFoundPatch("reacher")), altName };
   }
-  return out;
 }
 
 export interface SinglePersonVerifyResult {
@@ -1630,44 +1790,32 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
     if (++sinceCommit >= COMMIT_EVERY) { sinceCommit = 0; store.commitVerification(jobId); }
   };
 
-  // Settle an engine-flaky row as a TRANSIENT unknown (never a false Not-found):
-  // status "unknown" is not a real verdict, so it is NOT sealed and the row stays
-  // in the "Not searched" bucket, ready for the next pass. This is what lets a
-  // stray engine error skip ONE row WITHOUT aborting the whole run — the fix for
-  // the "Verification interrupted" abort.
+  // A row whose lookup did not finish (deadline / engine outage / unexpected error)
+  // is parked as a TRANSIENT unknown — not a real verdict, so it is NOT a false
+  // Not-found — and retried in the next round. On the FINAL round it settles
+  // Not found with reason "transient" (retryable via "Retry notfound"), so the pass
+  // never ends with rows silently left in "Not searched".
   const transientUnknown = (): PersonPatch => ({
     emailVerification: { email: "", status: "unknown", score: 0, provider: "reacher", verifiedAt: now() },
   });
-  let engineFailures = 0;
+  let unresolvedFinal = 0;
 
-  const handleRow = async (t: store.PersonVerifyTarget) => {
+  const handleRow = async (t: store.PersonVerifyTarget, hardMs: number, final: boolean, retry: store.PersonVerifyTarget[]) => {
     store.markPersonVerifying(jobId, t.personId, true);
     try {
-      let res: VerifyOneResult | null = null;
-      let engineFailed = false;
-      let timedOut = false;
-      try {
-        // Hard per-row deadline: a single row can never wedge a worker (no-hang
-        // guarantee). verifyOne keeps its own layer timeouts; this is the backstop.
-        const raced = await Promise.race([
-          verifyOne(t, { skipLlm: true }),
-          sleep(ROW_HARD_MS).then(() => "DEADLINE" as const),
-        ]);
-        if (raced === "DEADLINE") timedOut = true;
-        else res = raced;
-      } catch (e) {
-        // A per-row engine failure is TRANSIENT — the backend already retries
-        // internally and reacher is verified healthy under load — so NEVER abort
-        // the whole pass. Mark this row transient-unknown and carry on.
-        if (e instanceof VerifierUnavailableError) engineFailed = true;
-        else res = null; // any other error → treat this one row as Not found
+      const run = await runRow(() => verifyOne(t, { skipLlm: true }), hardMs);
+      if (run.kind !== "ok") {
+        if (final) {
+          unresolvedFinal++;
+          apply(t, notFoundPatch("reacher"), "transient");
+        } else {
+          store.updatePersonResolved(jobId, t.personId, transientUnknown());
+          retry.push(t);
+        }
+        return;
       }
-      if (engineFailed) {
-        store.updatePersonResolved(jobId, t.personId, transientUnknown());
-        engineFailures++;
-      } else if (timedOut || !res) {
-        apply(t, notFoundPatch("reacher"), "transient");
-      } else if (res.needsLlm) {
+      const res = run.res;
+      if (res.needsLlm) {
         if (res.companyEmail) deferredCompanyEmail.set(t.personId, res.companyEmail);
         if (res.altName) deferredAltName.set(t.personId, res.altName);
         // Provisional Not-found NOW so the row leaves "Not searched" immediately
@@ -1683,12 +1831,9 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
     }
   };
 
-  /** Run `list` through `handleRow` with a bounded worker pool. */
-  const runPool = async (list: store.PersonVerifyTarget[], conc: number) => {
-    let next = 0;
-    const worker = async () => { while (next < list.length) await handleRow(list[next++]); };
-    await Promise.all(Array.from({ length: Math.max(1, Math.min(conc, list.length)) }, worker));
-  };
+  /** Run `list` through `handleRow` with a bounded worker pool (shared global row cap). */
+  const runPool = (list: store.PersonVerifyTarget[], conc: number, hardMs: number, final: boolean, retry: store.PersonVerifyTarget[]) =>
+    poolEach(list, conc, (t) => withGlobalRowSlot(() => handleRow(t, hardMs, final, retry)));
 
   // Domain-aware two-round scheduling (perf): the finder LEARNS a domain's winning
   // pattern (+ no-MX fact) from the first person it resolves there; every later
@@ -1707,14 +1852,26 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
     (t) => (t.firstName && t.lastName ? 2 : 0) + (t.emailKind !== "found" ? 1 : 0),
   );
 
-  await runPool(probes, CONCURRENCY); // learn one pattern per domain
-  await runPool(rest, CONCURRENCY); // fast fill — reuses learned patterns
+  let retry: store.PersonVerifyTarget[] = [];
+  const firstFinal = RETRY_ROUNDS === 0;
+  await runPool(probes, CONCURRENCY, ROW_HARD_MS, firstFinal, retry); // learn one pattern per domain
+  await runPool(rest, CONCURRENCY, ROW_HARD_MS, firstFinal, retry); // fast fill — reuses learned patterns
+
+  // Retry rounds for rows that did not finish: fewer rows at once (each gets more of
+  // the SMTP capacity) and a longer deadline, so slow-but-real servers get answered.
+  for (let round = 1; round <= RETRY_ROUNDS && retry.length > 0; round++) {
+    const list = retry;
+    retry = [];
+    console.warn(`[verify-emails] ${jobId}: retry round ${round}/${RETRY_ROUNDS} for ${list.length} unfinished row(s).`);
+    // An engine outage needs a moment to recover; a pure timeout does not.
+    if (!(await pingBackend()).online) await sleep(30_000);
+    const conc = Math.max(2, Math.ceil(CONCURRENCY / 2 ** round));
+    await runPool(list, conc, ROW_HARD_MS * (round + 1), round === RETRY_ROUNDS, retry);
+  }
 
   if (pendingLlm.length > 0) {
-    // L5 never aborts the pass: fillWithLlmStructure already swallows engine/LLM
-    // errors per row (returns Not-found), and this guard catches anything else so
-    // the pass always reaches its clean "done" state (no verifying→idle, which is
-    // what surfaced the "Verification interrupted" toast).
+    // L5 never aborts the pass: fillWithLlmStructure swallows engine/LLM errors per
+    // row, and this guard catches anything else so the pass always reaches "done".
     try {
       store.setVerifyingPersonIds(jobId, pendingLlm.map((t) => t.personId));
       // P2 — knowledge-only for everyone; escalate ONLY the unresolved rows (capped
@@ -1729,35 +1886,34 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
         cap: L5_WEB_MAX,
         notFound: () => notFoundPatch("reacher"),
       });
-      for (const t of pendingLlm) {
+      // Settle every deferred row in parallel (was a serial loop): did L5 find a REAL
+      // address (valid, or a web-found/published email)? If not — including the
+      // common case where the LLM call timed out / returned empty — fall back to a
+      // best guess HERE, deadline-bound, so it ALWAYS applies regardless of the LLM.
+      await poolEach(pendingLlm, CONCURRENCY, async (t) => {
         const hit = llmHits.get(t.personId);
-        // Did L5 find a REAL address? (valid, or a web-found/published email.) If not —
-        // which includes the common case where the LLM call timed out / returned empty
-        // (e.g. a cheap model with no web_search, or a huge batch) — fall back to a
-        // best guess HERE, in the caller, so it ALWAYS applies regardless of the LLM.
         const real = !!hit && (hit.valid || (hit.found && !!hit.patch.email));
-        const r = real ? hit! : ((await bestGuessPreferMailDomain(t, t.firstName, t.lastName)) ?? hit ?? notFoundPatch("reacher"));
-        const ce = deferredCompanyEmail.get(t.personId);
-        const an = deferredAltName.get(t.personId);
+        let r: VerifyOneResult = hit ?? notFoundPatch("reacher");
+        if (!real) {
+          const fallback = r;
+          const bg = await withGlobalRowSlot(() => runRow(async () => (await bestGuessPreferMailDomain(t, t.firstName, t.lastName)) ?? fallback, ROW_HARD_MS));
+          if (bg.kind === "ok") r = bg.res;
+        }
         apply(t, {
           ...r,
-          companyEmail: r.companyEmail ?? ce,
-          altName: r.altName ?? an,
+          companyEmail: r.companyEmail ?? deferredCompanyEmail.get(t.personId),
+          altName: r.altName ?? deferredAltName.get(t.personId),
         }, await notFoundReasonFor(t));
-      }
+      });
     } catch (e) {
       console.error(`[verify-emails] L5 phase error for ${jobId} (continuing):`, e);
-      // Even if the whole L5 phase threw, still surface best guesses so the pass isn't
-      // a wall of Not-found on unverifiable domains.
-      for (const t of pendingLlm) {
-        const bg = await bestGuessPreferMailDomain(t, t.firstName, t.lastName);
-        if (bg) apply(t, { ...bg, companyEmail: deferredCompanyEmail.get(t.personId), altName: deferredAltName.get(t.personId) });
-      }
+      // The provisional Not-found written in handleRow already stands for every
+      // deferred row, so nothing is left unsearched.
     }
   }
 
-  if (engineFailures > 0) {
-    console.warn(`[verify-emails] ${jobId}: ${engineFailures} row(s) hit transient engine errors and stay Not searched (re-run to retry).`);
+  if (unresolvedFinal > 0) {
+    console.warn(`[verify-emails] ${jobId}: ${unresolvedFinal} row(s) still unfinished after ${RETRY_ROUNDS} retry round(s) → settled Not found (transient; "Retry notfound" re-opens them).`);
   }
   store.setVerifyingPersonIds(jobId, []);
   store.commitVerification(jobId);
@@ -1766,4 +1922,49 @@ export async function verifyCollectedPeople(jobId: string, onlyUnverified = true
   store.flushNow(); // durably persist the final state (throttled saves may be pending)
   const provider: "reacher" | "none" = providers.has("reacher") ? "reacher" : "none";
   return { verified, valid, found, provider };
+}
+
+/* ------------------------- pass registry / resume ------------------------ */
+// Passes run in-process (fire-and-forget from the route). Track which jobs have a
+// LIVE pass so a job left "verifying" by a crash/restart is recognised as stale
+// (and resumed) instead of blocking Find & verify forever with "already running".
+declare global {
+  // eslint-disable-next-line no-var
+  var __peoplePassRunning: Set<string> | undefined;
+}
+function runningPasses(): Set<string> {
+  if (!globalThis.__peoplePassRunning) globalThis.__peoplePassRunning = new Set();
+  return globalThis.__peoplePassRunning;
+}
+export function isVerifyPassRunning(jobId: string): boolean {
+  return runningPasses().has(jobId);
+}
+
+/**
+ * Start a Find & verify pass in the background (no-op if one is already live for
+ * this job). The job is marked "verifying" synchronously so the polling UI shows
+ * progress at once; a hard failure drops it back to "idle" so it can be retried.
+ */
+export function startVerifyPass(jobId: string, opts: VerifyPassOptions = {}): boolean {
+  const live = runningPasses();
+  if (live.has(jobId)) return false;
+  live.add(jobId);
+  store.setJobVerifyStatus(jobId, "verifying");
+  void verifyCollectedPeople(jobId, true, opts)
+    .catch((err) => {
+      store.setJobVerifyStatus(jobId, "idle");
+      console.error(`[verify-emails] background pass failed for ${jobId}:`, err);
+    })
+    .finally(() => live.delete(jobId));
+  return true;
+}
+
+/** Resume passes a restart interrupted (the store hands each job id out once). */
+export function resumeInterruptedPasses(): string[] {
+  const resumed: string[] = [];
+  for (const id of store.takeInterruptedVerifyJobs()) {
+    if (store.getPeopleJob(id) && startVerifyPass(id)) resumed.push(id);
+  }
+  if (resumed.length) console.warn(`[verify-emails] resumed interrupted pass(es): ${resumed.join(", ")}`);
+  return resumed;
 }

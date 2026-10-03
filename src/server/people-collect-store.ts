@@ -80,7 +80,13 @@ function load(): PeopleStoreData {
           // A verify pass runs in-process and cannot survive a restart, so any job
           // left "verifying" on load is stale — reset to idle so Find & verify isn't
           // permanently disabled and can resume the remaining "Not searched" rows.
-          if (job.verifyStatus === "verifying") { job.verifyStatus = "idle"; job.verifyingPersonIds = []; }
+          // Remember it so the pass is RESUMED automatically (resumeInterruptedPasses)
+          // instead of the job sitting idle with its "Not searched" rows untouched.
+          if (job.verifyStatus === "verifying") {
+            job.verifyStatus = "idle";
+            job.verifyingPersonIds = [];
+            interruptedVerifyJobs().add(job.id);
+          }
         }
         return data;
       }
@@ -94,6 +100,22 @@ function load(): PeopleStoreData {
 function store(): PeopleStoreData {
   if (!globalThis.__peopleStore) globalThis.__peopleStore = load();
   return globalThis.__peopleStore;
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __peopleInterruptedVerify: Set<string> | undefined;
+}
+function interruptedVerifyJobs(): Set<string> {
+  if (!globalThis.__peopleInterruptedVerify) globalThis.__peopleInterruptedVerify = new Set();
+  return globalThis.__peopleInterruptedVerify;
+}
+/** Jobs whose verify pass was cut off by a restart (handed out once, then cleared). */
+export function takeInterruptedVerifyJobs(): string[] {
+  store(); // make sure the store (and so the interrupted set) is loaded
+  const ids = [...interruptedVerifyJobs()];
+  interruptedVerifyJobs().clear();
+  return ids;
 }
 
 let saveTimer: NodeJS.Timeout | null = null;
@@ -977,12 +999,20 @@ function recompute(jobId: string) {
     if (p.seniority === "vp" || p.seniority === "president") s.vps++;
     if (p.email) s.withEmail++;
     if (p.linkedin) s.withLinkedin++;
-    if (p.emailVerification && p.emailVerification.status !== "not_found") {
-      s.emailsVerified++;
-      if (p.emailVerification.status === "valid") s.emailsValid++;
-    } else if (p.emailVerification?.status === "not_found") {
+    // "Not searched" (people − emailsVerified − emailsNotFound) must count EXACTLY the
+    // rows a Find & verify pass will (re)process, i.e. peopleVerifyTargets / !isRealVerdict.
+    // A transient "unknown" (an engine hiccup — never a real verdict) or a mock result is
+    // NOT a real lookup: such a row still needs searching, so it must fall through to the
+    // "Not searched" complement rather than hide inside emailsVerified. Otherwise an
+    // interrupted pass leaves rows that are pending-but-counted-as-verified, so the stat
+    // under-reports what's left and a click can even say "Already checked".
+    const ev = p.emailVerification;
+    if (ev?.status === "not_found") {
       s.emailsNotFound++;
-    }
+    } else if (isRealVerdict(ev)) {
+      s.emailsVerified++;
+      if (ev?.status === "valid") s.emailsValid++;
+    } // ev == null | "unknown" | mock → neither → counted as "Not searched"
     companiesWith.add(p.companyId ?? p.company);
   }
   s.companiesWithPeople = companiesWith.size;

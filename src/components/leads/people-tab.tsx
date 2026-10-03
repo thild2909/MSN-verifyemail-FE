@@ -93,7 +93,16 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
   const prevVerify = React.useRef<PeopleCollectJob["verifyStatus"] | undefined>(undefined);
   React.useEffect(() => {
     const vs = active?.verifyStatus;
-    if (prevVerify.current === "verifying") {
+    if (prevVerify.current === "verifying" && (vs === "done" || vs === "idle")) {
+      // Polling stops the moment the pass leaves "verifying" (refetchInterval →
+      // false), which can FREEZE a stale mid-pass "Not searched" count on screen:
+      // the pass kept running and settled those rows (→ Not found / verified), so
+      // the server now has nothing left to do and a click returns the confusing
+      // "Already checked" even though the frozen stat still shows people to search.
+      // Force one final refetch so the stats + table reflect the true settled state.
+      qc.invalidateQueries({ queryKey: ["people-jobs"] });
+      qc.invalidateQueries({ queryKey: ["people-job", activeId] });
+      qc.invalidateQueries({ queryKey: ["collect-people", activeId] });
       if (vs === "done" && active?.summary) {
         const { emailsValid, emailsVerified } = active.summary;
         toast({ variant: "success", title: "Find & verify complete", description: `${formatNumber(emailsValid)} deliverable of ${formatNumber(emailsVerified)} verified.` });
@@ -102,7 +111,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
       }
     }
     prevVerify.current = vs;
-  }, [active?.verifyStatus, active?.summary, toast]);
+  }, [active?.verifyStatus, active?.summary, activeId, qc, toast]);
 
   // "Retry failed" — re-crawl the coverage-gap companies (0 people found).
   const retryGaps = useMutation({

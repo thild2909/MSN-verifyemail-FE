@@ -529,13 +529,17 @@ export async function verifyPeopleEmails(id: string, opts: { keep?: boolean } = 
 }
 
 /**
- * "Retry notfound" (People tab): re-run the Find & verify pass over ONLY the
- * misses (people whose lookup settled on Not found), dropping their cached
+ * "Retry notfound" (People tab): re-run the Find & verify pass over ALL the
+ * misses (every person whose lookup settled on Not found), dropping their cached
  * verdicts so the finder searches them afresh. Settled addresses are untouched.
  * Like verifyPeopleEmails, the pass runs in the background.
  */
 export async function retryPeopleNotFound(id: string): Promise<StartVerifyResult> {
-  const { data } = await apiPost<StartVerifyResult>(`/api/v1/leads/people/${id}/verify-emails?notfound=1`, {});
+  // `notfound=all`: re-open EVERY Not found row â€” what the button (labelled with the
+  // full Not-found count) promises. `notfound=1` ("smart") only re-opened the
+  // m365_unconfirmed / transient misses, silently skipping pattern_miss /
+  // unverifiable / catch_all / no_mx rows, so "Retry notfound (266)" retried 66.
+  const { data } = await apiPost<StartVerifyResult>(`/api/v1/leads/people/${id}/verify-emails?notfound=all`, {});
   return data;
 }
 
