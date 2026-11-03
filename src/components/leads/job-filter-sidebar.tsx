@@ -1,4 +1,5 @@
 "use client";
+import { SlidersHorizontal } from "lucide-react";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { FilterSection, TokenList, ChipToggleGroup, type Option } from "./filter-primitives";
@@ -25,12 +26,19 @@ export function JobFilterSidebar({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <span className="flex items-center gap-2 text-sm font-semibold">
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
+        <span className="flex items-center gap-2 text-[13px] font-semibold">
+          <SlidersHorizontal className="size-4 text-muted-foreground" strokeWidth={1.75} />
           Filters
-          {activeCount > 0 && <span className="rounded-full bg-primary/10 px-1.5 text-[11px] font-semibold text-primary">{activeCount}</span>}
+          {activeCount > 0 && (
+            <span className="rounded-md bg-brand/10 px-1.5 py-px text-[11px] font-semibold leading-4 text-brand tabular-nums">{activeCount}</span>
+          )}
         </span>
-        {activeCount > 0 && <button onClick={onClear} className="text-xs font-medium text-primary hover:underline">Clear all</button>}
+        {activeCount > 0 && (
+          <button onClick={onClear} className="rounded-md px-1.5 py-0.5 text-xs font-medium text-brand transition-colors hover:bg-brand/10">
+            Clear all
+          </button>
+        )}
       </div>
 
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
@@ -62,7 +70,7 @@ export function JobFilterSidebar({
 
         <FilterSection title="Salary" count={filters.salaryMin > 0 ? 1 : undefined}>
           <div className="space-y-1.5">
-            <Label className="text-xs">Minimum base (annual)</Label>
+            <Label className="text-[11px] font-medium text-muted-foreground">Minimum base (annual)</Label>
             <Select value={String(filters.salaryMin)} onChange={(e) => onChange({ salaryMin: Number(e.target.value) })}>
               {SALARY_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
             </Select>

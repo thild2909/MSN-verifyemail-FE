@@ -4,7 +4,8 @@ import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { FileText, CheckCircle2, AlertTriangle, Loader2, X, ArrowRight, Download } from "lucide-react";
+import { FileText, CheckCircle2, AlertTriangle, Loader2, X, ArrowRight, Download, FileUp, CopyMinus, MailCheck } from "lucide-react";
+import { IconTile, type Tone } from "@/components/common/kit";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -271,9 +272,9 @@ export function UploadFlow() {
               </div>
             )}
             <div className="grid gap-3 sm:grid-cols-3">
-              <Stat label="Uploaded" value={parsed.totalRows} />
-              <Stat label="Duplicates" value={parsed.duplicates} />
-              <Stat label="Unique emails" value={parsed.uniqueEmails} highlight />
+              <Stat label="Uploaded" value={parsed.totalRows} icon={FileUp} tone="sky" />
+              <Stat label="Duplicates" value={parsed.duplicates} icon={CopyMinus} tone="risky" />
+              <Stat label="Unique emails" value={parsed.uniqueEmails} icon={MailCheck} tone="brand" highlight />
             </div>
             <p className="text-xs text-muted-foreground">
               Email column auto-detected: <span className="font-medium text-foreground">{parsed.emailColumn}</span>
@@ -365,11 +366,14 @@ function downloadExample() {
   URL.revokeObjectURL(url);
 }
 
-function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+function Stat({ label, value, highlight, icon, tone }: { label: string; value: number; highlight?: boolean; icon: React.ElementType; tone: Tone }) {
   return (
-    <div className="rounded-lg border bg-muted/20 p-3 text-center">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-lg font-bold ${highlight ? "text-primary" : ""}`}>{formatNumber(value)}</p>
+    <div className={`flex items-center gap-3 rounded-xl border bg-card p-3 shadow-xs ${highlight ? "border-brand/40" : "border-border"}`}>
+      <IconTile icon={icon} tone={tone} className="rounded-full" />
+      <div className="min-w-0">
+        <p className="truncate text-xs text-muted-foreground">{label}</p>
+        <p className={`text-lg font-semibold tabular-nums ${highlight ? "text-brand" : ""}`}>{formatNumber(value)}</p>
+      </div>
     </div>
   );
 }

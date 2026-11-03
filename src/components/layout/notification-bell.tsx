@@ -71,7 +71,7 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(secs / 86400)}d ago`;
 }
 
-export function NotificationBell() {
+export function NotificationBell({ buttonClassName }: { buttonClassName?: string } = {}) {
   const { data, isLoading } = useQuery({
     queryKey: ["reputation"],
     queryFn: getReputation,
@@ -96,8 +96,14 @@ export function NotificationBell() {
       align="end"
       className="w-[22rem] p-0"
       trigger={
-        <button className="relative rounded-lg p-2 text-muted-foreground hover:bg-muted" aria-label="Notifications">
-          <Bell className="size-5" />
+        <button
+          className={cn(
+            "relative rounded-lg p-2 text-muted-foreground transition-colors hover:bg-surface hover:text-foreground",
+            buttonClassName,
+          )}
+          aria-label="Notifications"
+        >
+          <Bell className="size-5" strokeWidth={1.75} />
           {hasAlerts && (
             <span
               className={cn(

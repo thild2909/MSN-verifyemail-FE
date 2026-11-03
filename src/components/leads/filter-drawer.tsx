@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { X, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,21 +35,30 @@ export function MobileFilterDrawer({
   if (!mounted || !open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 md:hidden">
-      <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={onClose} />
+    <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true" aria-label="Filters">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
       <aside
         className={cn(
-          "absolute inset-y-0 left-0 flex w-[86vw] max-w-xs flex-col overflow-clip border-r bg-card shadow-2xl animate-slide-in-right",
+          "absolute inset-y-0 left-0 flex w-[86vw] max-w-xs flex-col overflow-clip border-r border-border bg-card shadow-pop animate-slide-in-right",
           className,
         )}
       >
-        <div className="flex h-11 shrink-0 items-center justify-between border-b px-4">
-          <span className="text-sm font-semibold">Filters</span>
-          <button onClick={onClose} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close filters">
-            <X className="size-5" />
+        <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 pl-4">
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <span className="flex size-7 items-center justify-center rounded-md bg-brand/10 text-brand">
+              <SlidersHorizontal className="size-3.5" strokeWidth={1.75} />
+            </span>
+            Filters
+          </span>
+          <button
+            onClick={onClose}
+            className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/20"
+            aria-label="Close filters"
+          >
+            <X className="size-4" strokeWidth={1.75} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-clip">{children}</div>
+        <div className="min-h-0 flex-1 overflow-clip bg-card">{children}</div>
       </aside>
     </div>,
     document.body,

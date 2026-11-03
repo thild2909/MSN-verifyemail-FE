@@ -45,27 +45,31 @@ export function LinkedInJobsFilterSidebar({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <span className="flex items-center gap-2 text-sm font-semibold">
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-4">
+        <span className="flex items-center gap-2 text-[13px] font-semibold">
           Filters
-          {activeCount > 0 && <span className="rounded-full bg-primary/10 px-1.5 text-[11px] font-semibold text-primary">{activeCount}</span>}
+          {activeCount > 0 && <span className="rounded-md bg-brand/10 px-1.5 py-px text-[11px] font-semibold leading-4 text-brand tabular-nums">{activeCount}</span>}
         </span>
-        {activeCount > 0 && <button onClick={onClear} className="text-xs font-medium text-primary hover:underline">Clear all</button>}
+        {activeCount > 0 && (
+          <button onClick={onClear} className="rounded-md px-1.5 py-0.5 text-xs font-medium text-brand transition-colors hover:bg-brand/10">Clear all</button>
+        )}
       </div>
 
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <FilterSection title="Qualification" defaultOpen>
           <div className="space-y-3">
-            <label className="group relative flex cursor-pointer items-center gap-2 text-[13px]">
+            <div className="-mx-2 space-y-0.5">
+            <label className={cn("group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors hover:bg-surface", filters.qualifiedOnly && "bg-brand/[0.06] font-medium hover:bg-brand/[0.09]")}>
               <CheckboxIndicator checked={filters.qualifiedOnly} />
               <input type="checkbox" className="sr-only" checked={filters.qualifiedOnly} onChange={(e) => onChange({ qualifiedOnly: e.target.checked })} />
               Qualified only
             </label>
-            <label className="group relative flex cursor-pointer items-center gap-2 text-[13px]">
+            <label className={cn("group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors hover:bg-surface", filters.remoteOnly && "bg-brand/[0.06] font-medium hover:bg-brand/[0.09]")}>
               <CheckboxIndicator checked={filters.remoteOnly} />
               <input type="checkbox" className="sr-only" checked={filters.remoteOnly} onChange={(e) => onChange({ remoteOnly: e.target.checked })} />
               Remote only
             </label>
+            </div>
             <RangeMin value={filters.minScore} onChange={(n) => onChange({ minScore: n })} label="Min fit score" />
           </div>
         </FilterSection>
@@ -80,20 +84,20 @@ export function LinkedInJobsFilterSidebar({
 
         <FilterSection title="Industry" count={industryCount || undefined}>
           <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-0.5">
+            <div className="grid grid-cols-2 gap-0.5 rounded-lg border border-border bg-surface p-0.5">
               {(["include", "exclude"] as const).map((m) => {
                 const n = m === "include" ? filters.industries.length : filters.excludedIndustries.length;
                 return (
                   <button key={m} type="button" onClick={() => setIndustryMode(m)}
-                    className={cn("rounded-md px-2 py-1 text-[11px] font-medium capitalize transition-colors",
-                      industryMode === m ? (m === "exclude" ? "bg-card text-[hsl(var(--invalid))] shadow-sm" : "bg-card text-primary shadow-sm") : "text-muted-foreground hover:text-foreground")}>
+                    className={cn("rounded-md px-2 py-1 text-[11px] font-semibold capitalize transition-colors",
+                      industryMode === m ? (m === "exclude" ? "bg-card text-[hsl(var(--invalid))] shadow-xs" : "bg-card text-brand shadow-xs") : "text-muted-foreground hover:text-foreground")}>
                     {m}{n > 0 ? ` (${n})` : ""}
                   </button>
                 );
               })}
             </div>
             {industryOpts.length === 0
-              ? <p className="px-1 py-1.5 text-xs text-muted-foreground">Run &ldquo;Qualify companies&rdquo; to load industries.</p>
+              ? <p className="rounded-md border border-dashed border-border bg-surface/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">Run &ldquo;Qualify companies&rdquo; to load industries.</p>
               : <CheckboxList
                   key={industryMode}
                   options={industryOpts}
@@ -106,7 +110,7 @@ export function LinkedInJobsFilterSidebar({
 
         <FilterSection title="Employees" count={filters.employeeRanges.length || undefined}>
           {employeeOpts.length === 0
-            ? <p className="px-1 py-1.5 text-xs text-muted-foreground">Run &ldquo;Qualify companies&rdquo; to load company sizes.</p>
+            ? <p className="rounded-md border border-dashed border-border bg-surface/50 px-2.5 py-2 text-[11px] leading-relaxed text-muted-foreground">Run &ldquo;Qualify companies&rdquo; to load company sizes.</p>
             : <CheckboxList options={employeeOpts} selected={filters.employeeRanges} onToggle={(v) => onChange({ employeeRanges: toggle(filters.employeeRanges, v) })} searchable={false} collapseAt={10} />}
         </FilterSection>
 

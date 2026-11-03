@@ -15,7 +15,7 @@ import { formatNumber } from "@/lib/utils";
 export default function DashboardPage() {
   const { data: credits } = useQuery({ queryKey: ["credits"], queryFn: getCredits });
   const { data: lists } = useQuery({ queryKey: ["lists"], queryFn: getLists });
-  const { data: series } = useQuery({ queryKey: ["analytics", 30], queryFn: () => getAnalytics(30) });
+  const { data: series } = useQuery({ queryKey: ["analytics", 30], queryFn: () => getAnalytics(30), select: (r) => r.series });
 
   const verified = series?.reduce((a, p) => a + p.valid + p.invalid + p.risky + p.unknown, 0) ?? 0;
   const valid = series?.reduce((a, p) => a + p.valid, 0) ?? 0;

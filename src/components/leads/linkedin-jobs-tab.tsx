@@ -1,4 +1,6 @@
 "use client";
+import { JobPicker } from "./job-picker";
+import { Linkedin as PickerLinkedInIcon, Radar as RadarGlyph } from "lucide-react";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Radar, Trash2, Loader2, Briefcase, Building2, Ban, Layers, RotateCw, CheckCircle2, Sparkles, Shuffle, MoreHorizontal } from "lucide-react";
@@ -10,6 +12,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
+import { IconTile } from "@/components/common/kit";
 import {
   getLinkedInSearches, getLinkedInSearch, deleteLinkedInSearch, qualifyLinkedInCompanies,
   retryBlockedLinkedInQueries, createPeopleJob,
@@ -112,14 +115,14 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
 
   if (!jobs || jobs.length === 0) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center p-8">
+      <div className="flex min-h-0 flex-1 items-center justify-center p-4 sm:p-8">
         <EmptyState
           icon={Briefcase}
           title="Scrape hiring companies from LinkedIn"
           description="Discover open technical roles from LinkedIn's public job search, normalize and dedupe them, then qualify the hiring companies by size & industry — turning job posts into leads."
           action={
-            <div className="flex items-center gap-2">
-              <Button onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> Scrape LinkedIn jobs</Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button variant="brand" onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> Scrape LinkedIn jobs</Button>
               <Button variant="outline" onClick={() => setProxyOpen(true)}><Shuffle className="size-4" /> Proxy</Button>
             </div>
           }
@@ -132,14 +135,24 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 md:py-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-2.5 sm:px-6">
         <div className="flex w-full items-center gap-2 sm:contents">
-          <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 min-w-0 flex-1 sm:w-64 sm:flex-none">
-            {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
-          </Select>
+          <JobPicker
+            jobs={jobs.map((j) => ({ id: j.id, name: j.name, createdAt: j.createdAt, status: j.status, progress: j.progress, count: { n: j.summary.jobs, unit: "roles" } }))}
+            value={activeId}
+            onChange={setActiveId}
+            icon={PickerLinkedInIcon}
+            label="LinkedIn scrapes"
+            className="min-w-0 flex-1 sm:w-72 sm:flex-none"
+            footer={(close) => (
+              <button type="button" onClick={() => { close(); setCrawlOpen(true); }} className="flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-brand transition-colors hover:bg-brand/10">
+                <RadarGlyph className="size-4" /> New scrape
+              </button>
+            )}
+          />
           {/* Mobile-only compact actions */}
           <div className="flex items-center gap-1.5 sm:hidden">
-            <Button size="icon" className="size-9 shrink-0" onClick={() => setCrawlOpen(true)} aria-label="New scrape"><Radar className="size-4" /></Button>
+            <Button size="icon" variant="brand" className="size-9 shrink-0" onClick={() => setCrawlOpen(true)} aria-label="New scrape"><Radar className="size-4" /></Button>
             <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="size-9 shrink-0" aria-label="Actions"><MoreHorizontal className="size-4" /></Button>}>
               {canQualify && <DropdownItem disabled={qualify.isPending} onClick={() => qualify.mutate(active!.id)}><Sparkles /> Qualify companies</DropdownItem>}
               {active && retryable > 0 && !live && <DropdownItem disabled={retry.isPending} onClick={() => retry.mutate(active.id)}><RotateCw /> Retry blocked ({retryable})</DropdownItem>}
@@ -153,25 +166,42 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
             </DropdownMenu>
           </div>
         </div>
-        {active && <span className="hidden text-xs text-muted-foreground sm:inline">{formatNumber(active.summary.qualified)} qualified · {formatNumber(active.summary.jobs)} roles</span>}
+        {active && (
+          <span className="hidden items-center gap-1.5 rounded-md bg-surface px-2 py-1 text-xs text-muted-foreground sm:inline-flex">
+            {live ? <span className="inline-flex items-center gap-1 rounded bg-brand/10 px-1 text-[10px] font-semibold text-brand"><span className="size-1.5 animate-pulse rounded-full bg-brand" /> Live</span> : <span className="size-1.5 rounded-full bg-[hsl(var(--valid))]" />}
+            <span className="font-semibold tabular-nums text-foreground">{formatNumber(active.summary.qualified)}</span> qualified · <span className="font-semibold tabular-nums text-foreground">{formatNumber(active.summary.jobs)}</span> roles
+          </span>
+        )}
         {/* Desktop inline actions */}
         <div className="ml-auto hidden items-center gap-2 sm:flex">
           {canQualify && (
-            <Button size="sm" variant="outline" onClick={() => qualify.mutate(active!.id)} disabled={qualify.isPending}>
-              {qualify.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Qualify companies
-              <span className="ml-1 rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary tabular-nums">{formatNumber(pending)}</span>
+            <Button size="sm" variant="brand" onClick={() => qualify.mutate(active!.id)} disabled={qualify.isPending} title="Fetch details and scrape company pages for the qualified roles.">
+              {qualify.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} Qualify companies
+              <span className="rounded bg-brand/10 px-1 text-[10px] font-semibold tabular-nums">{formatNumber(pending)}</span>
             </Button>
           )}
-          {enriching && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> Qualifying…</span>}
+          {enriching && <span className="inline-flex items-center gap-1.5 rounded-md bg-brand/10 px-2 py-1 text-xs font-medium text-brand"><Loader2 className="size-3.5 animate-spin" /> Qualifying…</span>}
           {active && retryable > 0 && !live && (
             <Button size="sm" variant="outline" onClick={() => retry.mutate(active.id)} disabled={retry.isPending}>
-              {retry.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />} Retry blocked
-              <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{retryable}</span>
+              {retry.isPending ? <Loader2 className="animate-spin" /> : <RotateCw className="text-[hsl(var(--risky))]" />} Retry blocked
+              <span className="rounded bg-[hsl(var(--risky)/0.14)] px-1 text-[10px] font-semibold tabular-nums text-[hsl(var(--risky))]">{retryable}</span>
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={() => setProxyOpen(true)}><Shuffle className="size-4" /> Proxy</Button>
-          <Button size="sm" onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> New scrape</Button>
-          {active && <button onClick={async () => { if (await confirm({ title: "Delete scrape?", description: `“${active.name}” and its ${formatNumber(active.summary.jobs)} roles will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete scrape">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
+          <Button size="sm" variant="outline" onClick={() => setProxyOpen(true)}><Shuffle className="text-[hsl(199_89%_40%)] dark:text-[hsl(199_90%_65%)]" /> Proxy</Button>
+          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+          <Button size="sm" onClick={() => setCrawlOpen(true)}><Radar /> New scrape</Button>
+          {active && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              onClick={async () => { if (await confirm({ title: "Delete scrape?", description: `“${active.name}” and its ${formatNumber(active.summary.jobs)} roles will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }}
+              aria-label="Delete scrape"
+              title="Delete scrape"
+            >
+              {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -186,7 +216,7 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
           {s.blocked > 0 && <Stat icon={Ban} label="Blocked" value={formatNumber(s.blocked)} tone="risky" />}
           {(live || enriching) && (
             <div className="flex min-w-[160px] flex-1 items-center gap-2">
-              <Progress value={live ? active!.progress : enrichPct} className="flex-1" /><span className="tabular-nums text-muted-foreground">{live ? `${active!.progress}%` : `${formatNumber(s.enriched)}/${formatNumber(s.enriched + pending)} verified`}</span>
+              <Progress value={live ? active!.progress : enrichPct} className="flex-1" /><span className="text-xs font-medium tabular-nums text-muted-foreground">{live ? `${active!.progress}%` : `${formatNumber(s.enriched)}/${formatNumber(s.enriched + pending)} verified`}</span>
             </div>
           )}
         </StatsBar>
@@ -194,7 +224,8 @@ export function LinkedInJobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobI
 
       {/* Per-query coverage */}
       {active?.coverage && active.coverage.length > 0 && (
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin border-b bg-muted/10 px-4 py-2 text-xs [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin border-b border-border bg-surface/40 px-4 py-2 text-[11px] sm:px-6 [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
+          <span className="mr-0.5 font-semibold uppercase tracking-wider text-muted-foreground">Queries</span>
           {active.coverage.map((c) => <CoverageChip key={c.key} c={c} />)}
         </div>
       )}
@@ -222,18 +253,18 @@ function ofTotal(c: LinkedInQueryCoverage) {
 }
 
 const COVERAGE_META: Record<LinkedInQueryCoverage["status"], { className: string; label: (c: LinkedInQueryCoverage) => string; spin?: boolean }> = {
-  pending: { className: "bg-muted text-muted-foreground", label: () => "queued" },
-  collecting: { className: "bg-muted text-muted-foreground", label: (c) => (c.total != null ? `${ofTotal(c)}${c.slices ? ` · slice ${c.slices}` : ""}…` : "scraping…"), spin: true },
-  done: { className: "bg-valid/12 text-[hsl(var(--valid))]", label: (c) => (c.total != null ? ofTotal(c) : `${c.jobsFound} found`) },
-  blocked: { className: "bg-amber-500/12 text-amber-600 dark:text-amber-400", label: (c) => (c.jobsFound ? `${c.jobsFound} · blocked` : "blocked") },
-  failed: { className: "bg-invalid/12 text-[hsl(var(--invalid))]", label: () => "failed" },
+  pending: { className: "bg-card text-muted-foreground ring-1 ring-inset ring-border", label: () => "queued" },
+  collecting: { className: "bg-brand/10 text-brand", label: (c) => (c.total != null ? `${ofTotal(c)}${c.slices ? ` · slice ${c.slices}` : ""}…` : "scraping…"), spin: true },
+  done: { className: "bg-[hsl(var(--valid)/0.12)] text-[hsl(var(--valid))]", label: (c) => (c.total != null ? ofTotal(c) : `${c.jobsFound} found`) },
+  blocked: { className: "bg-[hsl(var(--risky)/0.14)] text-[hsl(var(--risky))]", label: (c) => (c.jobsFound ? `${c.jobsFound} · blocked` : "blocked") },
+  failed: { className: "bg-[hsl(var(--invalid)/0.1)] text-[hsl(var(--invalid))]", label: () => "failed" },
 };
 
 function CoverageChip({ c }: { c: LinkedInQueryCoverage }) {
   const m = COVERAGE_META[c.status];
   return (
     <span
-      className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium", m.className)}
+      className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 font-semibold", m.className)}
       title={c.error ? `${c.key}: ${c.error}` : c.key}
     >
       {m.spin && <Loader2 className="size-3 animate-spin" />}
@@ -244,8 +275,8 @@ function CoverageChip({ c }: { c: LinkedInQueryCoverage }) {
 
 function Stat({ icon: Icon, label, value, tone }: { icon: React.ElementType; label: string; value: string; tone?: "risky" }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <Icon className={cn("size-3.5", tone === "risky" ? "text-[hsl(var(--risky))]" : "text-muted-foreground")} />
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-card py-1 pl-1 pr-2.5 shadow-xs">
+      <IconTile icon={Icon} tone={tone === "risky" ? "risky" : "muted"} size="sm" className="size-6" />
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className={cn("text-sm font-semibold tabular-nums", tone === "risky" && "text-[hsl(var(--risky))]")}>{value}</span>
     </div>

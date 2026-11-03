@@ -372,6 +372,10 @@ export interface AppUser {
   name: string;
   role: UserRole;
   isActive: boolean;
+  /** Profile photo as a small data URL (null = initials). */
+  avatarUrl?: string | null;
+  /** Profile cover image; only on /auth/me (omitted from user lists). */
+  bannerUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -393,19 +397,35 @@ export interface DeviceSession {
 /* Analytics                                                          */
 /* ------------------------------------------------------------------ */
 
-export interface AnalyticsPoint {
-  date: string;
+export interface AnalyticsBuckets {
+  total: number;
   valid: number;
   invalid: number;
   risky: number;
   unknown: number;
-  credits: number;
 }
 
-export interface DomainStat {
+/** One day of verification results (bucketed by result.verifiedAt in the viewer's time zone). */
+export interface AnalyticsPoint extends AnalyticsBuckets {
+  date: string; // YYYY-MM-DD
+  credits: number; // ledger credits spent that day
+}
+
+export interface DomainStat extends AnalyticsBuckets {
   domain: string;
-  total: number;
-  validRate: number;
+  validRate: number; // 0-100
+}
+
+/** GET /api/v1/analytics — computed by BE-service from stored records + credit ledger. */
+export interface AnalyticsReport {
+  range: { days: number; from: string; to: string; tz: string };
+  series: AnalyticsPoint[];
+  totals: AnalyticsBuckets & { creditsSpent: number; creditsAdded: number; listsCreated: number };
+  previous: AnalyticsBuckets & { creditsSpent: number };
+  domains: DomainStat[];
+  /** Records uploaded but not verified yet (all time). */
+  pending: number;
+  lastVerifiedAt: string | null;
 }
 
 /* --------------------- Sending-IP reputation --------------------- */

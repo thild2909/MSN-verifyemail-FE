@@ -1,7 +1,10 @@
 "use client";
+import { ColHead } from "@/components/common/col-head";
+import { ColumnsMenu as SharedColumnsMenu } from "./columns-menu";
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, Inbox, Loader2, Trash2, Download, X, Linkedin, ChevronRight, DollarSign, SlidersHorizontal, Columns3, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Search, Inbox, Loader2, Trash2, Download, X, Linkedin, ChevronRight, DollarSign, SlidersHorizontal, Columns3, ArrowUp, ArrowDown, ArrowUpDown, CheckCircle2, Clock, SearchX, XCircle } from "lucide-react";
+import { Pill, type Tone } from "@/components/common/kit";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,6 +19,8 @@ import { formatNumber, cn } from "@/lib/utils";
 import { Avatar } from "./leads-ui";
 import { CompanyLogo, Sourced, VerificationBadge, LlmBadge, COLLECT_STATUS_META } from "./collect-ui";
 import { PersonDetailDrawer } from "./people-detail-drawer";
+import { StatsBar, StatChip } from "./stats-bar";
+import { Users, MailCheck, MailX, MailQuestion, Mail, Star, Crown, Building2, Globe, Phone } from "lucide-react";
 import { CompanyCollectDrawer } from "./company-collect-drawer";
 import { PeopleFilterPanel } from "./people-filter-panel";
 import { CompanyFilterPanel } from "./company-filter-panel";
@@ -23,7 +28,7 @@ import { MobileFilterDrawer, openFiltersFor } from "./filter-drawer";
 import { queryPeople } from "@/lib/leads/people-query";
 import { queryCompanies } from "@/lib/leads/company-query";
 import { EMPTY_PEOPLE_FILTERS, countPeopleFilters, SENIORITY_LABEL, isUnconfirmedEmail, personHasFunding, type PeopleFilters, type CollectedPerson, type PersonSeniority } from "@/lib/leads/people-types";
-import { EMPTY_COMPANY_FILTERS, countCompanyFilters, type CompanyFilters, type CollectedCompany } from "@/lib/leads/collect-types";
+import { EMPTY_COMPANY_FILTERS, countCompanyFilters, type CompanyFilters, type CollectedCompany, type CollectStatus } from "@/lib/leads/collect-types";
 
 const PAGE_SIZE = 25;
 const linkHref = (v: string) => (/^https?:\/\//i.test(v) ? v : `https://${v}`);
@@ -50,10 +55,10 @@ function SortHeader({ label, field, sortField, sortDir, onSort, align }: {
 }) {
   const active = sortField === field;
   return (
-    <th className={cn("px-3 py-2.5 font-medium", align === "center" && "text-center")}>
-      <button onClick={() => onSort(field)} className="inline-flex items-center gap-1 hover:text-foreground" title={`Sort by ${label}`}>
-        {label}
-        {active ? (sortDir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />) : <ArrowUpDown className="size-3.5 opacity-40" />}
+    <th className={cn("whitespace-nowrap px-3 py-3 font-normal", align === "center" && "text-center")}>
+      <button onClick={() => onSort(field)} className={cn("group/sort inline-flex items-center gap-1 transition-colors hover:text-foreground", active && "text-brand")} title={`Sort by ${label}`}>
+        <ColHead label={label} />
+        {active ? (sortDir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />) : <ArrowUpDown className="size-3.5 opacity-30 transition-opacity group-hover/sort:opacity-70" />}
       </button>
     </th>
   );
@@ -63,7 +68,7 @@ function Pagination({ page, totalPages, setPage }: { page: number; totalPages: n
   return (
     <div className="flex items-center gap-2">
       <Button size="sm" variant="outline" className="h-8" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
-      <span className="tabular-nums">Page {page} / {totalPages}</span>
+      <span className="rounded-md bg-surface px-2 py-1 font-medium tabular-nums text-foreground">Page {page} / {totalPages}</span>
       <Button size="sm" variant="outline" className="h-8" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
     </div>
   );
@@ -75,17 +80,17 @@ function BulkBar({ effectiveCount, total, selectedSize, allMatching, onSelectAll
 }) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
-      <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
+      <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-xl border border-border bg-card/95 p-2 pl-3 shadow-pop backdrop-blur">
         <span className="flex items-center gap-2 pr-1 text-sm font-semibold">
-          <span className="rounded-md bg-primary px-2 py-0.5 text-primary-foreground tabular-nums">{formatNumber(effectiveCount)}</span> selected
+          <span className="rounded-md bg-brand/10 px-2 py-0.5 text-brand tabular-nums">{formatNumber(effectiveCount)}</span> selected
         </span>
         {!allMatching && total > selectedSize && (
-          <button onClick={onSelectAll} className="text-xs font-medium text-primary hover:underline">Select all {formatNumber(total)}</button>
+          <button onClick={onSelectAll} className="text-xs font-medium text-brand hover:underline">Select all {formatNumber(total)}</button>
         )}
         <div className="h-6 w-px bg-border" />
-        <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null}>{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
-        <Button size="sm" variant="destructive" onClick={onRemove} disabled={busy !== null}>{busy === "remove" ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />} Remove</Button>
-        <button onClick={onClear} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
+        <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null}>{busy === "export" ? <Loader2 className="animate-spin" /> : <Download />} Export</Button>
+        <Button size="sm" variant="outline" className="text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onRemove} disabled={busy !== null}>{busy === "remove" ? <Loader2 className="animate-spin" /> : <Trash2 />} Remove</Button>
+        <Button size="icon" variant="ghost" className="size-8 text-muted-foreground" onClick={onClear} aria-label="Clear selection"><X /></Button>
       </div>
     </div>
   );
@@ -176,13 +181,40 @@ function loadCols(): Record<ColKey, boolean> {
   return base;
 }
 
-const SENIORITY_STYLE: Record<PersonSeniority, string> = {
-  founder: "bg-[hsl(var(--valid))]/12 text-[hsl(var(--valid))]",
-  c_level: "bg-primary/12 text-primary",
-  president: "bg-primary/12 text-primary",
-  vp: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
-  other: "bg-muted text-muted-foreground",
+const SENIORITY_TONE: Record<PersonSeniority, Tone> = {
+  founder: "valid",
+  c_level: "brand",
+  president: "violet",
+  vp: "risky",
+  other: "muted",
 };
+
+const STATUS_PILL: Record<CollectStatus, { tone: Tone; icon: React.ElementType }> = {
+  pending: { tone: "muted", icon: Clock },
+  collecting: { tone: "risky", icon: Loader2 },
+  enriched: { tone: "valid", icon: CheckCircle2 },
+  not_found: { tone: "muted", icon: SearchX },
+  failed: { tone: "invalid", icon: XCircle },
+};
+function StatusPill({ status }: { status: CollectStatus }) {
+  const meta = COLLECT_STATUS_META[status] ?? COLLECT_STATUS_META.enriched;
+  const p = STATUS_PILL[status] ?? STATUS_PILL.enriched;
+  const Icon = p.icon;
+  return (
+    <Pill tone={p.tone} className="shrink-0 whitespace-nowrap normal-case">
+      <Icon className={cn("size-3", status === "collecting" && "animate-spin")} strokeWidth={2} />
+      {meta.label}
+    </Pill>
+  );
+}
+
+/** Small "Funded" chip shared by the mobile card and the table. */
+function FundedPill({ title }: { title?: string }) {
+  return <span title={title} className="shrink-0"><Pill tone="valid" className="normal-case"><DollarSign className="size-3" strokeWidth={2} /> Funded</Pill></span>;
+}
+
+/** Empty-cell placeholder, same as the People table. */
+const DASH = <span className="text-muted-foreground/60">—</span>;
 
 function PeopleListView({ listId, listName }: { listId: string; listName?: string }) {
   const { data, isLoading } = useAllItems(listId, "person");
@@ -251,7 +283,7 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
   return (
     <div className="relative flex min-h-0 flex-1 overflow-clip">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r border-border bg-card md:flex">
           <PeopleFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_PEOPLE_FILTERS)} />
         </aside>
       )}
@@ -260,69 +292,86 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
       </MobileFilterDrawer>
 
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b px-1 py-2">
+        <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-2.5 sm:px-6">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, title or company…" className="h-9 pl-9" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, title or company…" type="search" autoComplete="off" data-1p-ignore data-lpignore="true" className="h-9 pl-9" />
           </div>
-          <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
+          <span className="hidden shrink-0 items-center gap-1.5 rounded-md bg-surface px-2 py-1 text-xs text-muted-foreground sm:inline-flex"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
           <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-2">
             <ColumnsMenu defs={COLUMN_DEFS} cols={cols} onToggle={toggleCol} onReset={resetCols} />
-            <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-              <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{filtersActive}</span>}
+            <Button size="sm" variant={showFilters ? "brand" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
+              <SlidersHorizontal /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-md bg-brand/10 px-1.5 py-px text-[10px] font-semibold tabular-nums text-brand sm:ml-1">{filtersActive}</span>}
             </Button>
           </div>
         </div>
 
+
+        {/* Stats — same rail as Find Leads (counts over the whole list) */}
+        <StatsBar summary={`${formatNumber(allPeople.length)} people · ${formatNumber(facets.email.valid)} valid · ${formatNumber(facets.email.not_found)} not found`}>
+          <StatChip icon={Users} tone="brand" label="People" value={formatNumber(allPeople.length)} />
+          <StatChip icon={MailCheck} tone="valid" label="Valid emails" value={`${formatNumber(facets.email.valid)}/${formatNumber(facets.email.has)}`} />
+          <StatChip icon={MailX} tone={facets.email.not_found > 0 ? "invalid" : undefined} label="Not found" value={formatNumber(facets.email.not_found)} />
+          <StatChip icon={MailQuestion} tone={facets.email.not_searched > 0 ? "risky" : undefined} label="Not searched" value={formatNumber(facets.email.not_searched)} />
+          <StatChip icon={Mail} label="Emails" value={formatNumber(facets.email.has)} />
+          <StatChip icon={Star} tone="violet" label="Founders" value={formatNumber(facets.seniority.founder ?? 0)} />
+          <StatChip icon={Crown} label="C-Level" value={formatNumber(facets.seniority.c_level ?? 0)} />
+          <StatChip icon={Users} label="VP / Pres" value={formatNumber((facets.seniority.vp ?? 0) + (facets.seniority.president ?? 0))} />
+          <StatChip icon={Linkedin} tone="sky" label="LinkedIn" value={formatNumber(facets.linkedin.has)} />
+          <StatChip icon={DollarSign} tone={facets.funded.has > 0 ? "valid" : undefined} label="Funded" value={formatNumber(facets.funded.has)} />
+        </StatsBar>
+
         <div className="min-h-0 flex-1">
           {isLoading ? (
-            <div className="space-y-2 p-4">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            <div className="space-y-2 p-4 sm:px-6">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}</div>
           ) : total === 0 ? (
             (filtersActive > 0 || debounced) ? (
-              <EmptyState icon={Search} title="No people match your filters" description="Try removing some filters or the search." action={<Button variant="outline" onClick={() => { setFilters(EMPTY_PEOPLE_FILTERS); setSearch(""); }}><X className="size-4" /> Clear filters</Button>} className="m-6" />
+              <EmptyState icon={Search} title="No people match your filters" description="Try removing some filters or the search." action={<Button variant="outline" onClick={() => { setFilters(EMPTY_PEOPLE_FILTERS); setSearch(""); }}><X /> Clear filters</Button>} className="m-6" />
             ) : (
               <EmptyState icon={Inbox} title="No people in this list" description="Add people from Find Leads." className="m-6" />
             )
           ) : (
             <>
             {/* Mobile: people cards */}
-            <div className="scrollbar-thin h-full space-y-2 overflow-auto p-3 md:hidden">
+            <div className="scrollbar-thin h-full space-y-2 overflow-auto bg-background p-3 md:hidden">
               {rows.map((p) => {
                 const id = dbIdOf(p);
                 const selected = sel.rowChecked(id);
                 return (
-                  <div key={id} onClick={() => setDrawer(p)} className={cn("rounded-xl border p-3 transition-colors active:bg-muted/40", selected && "border-primary/40 bg-primary/[0.04]")}>
+                  <div key={id} onClick={() => setDrawer(p)} className={cn("rounded-xl border border-border bg-card p-3 shadow-xs transition-colors active:bg-accent", selected && "border-brand/40 bg-brand/[0.05]")}>
                     <div className="flex items-start gap-2.5">
                       <div className="pt-0.5" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => sel.toggleRow(id)} /></div>
                       <Avatar name={p.name || "?"} seed={p.id} />
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span className="min-w-0 truncate font-medium">{p.name || "—"}</span>
-                          {personHasFunding(p) && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[hsl(var(--valid))]/10 px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]"><DollarSign className="size-3" /> Funded</span>}
-                          {p.llmVerification && <LlmBadge v={p.llmVerification} />}
-                        </div>
+                        <p className="truncate text-sm font-semibold leading-snug">{p.name || "—"}</p>
                         {p.title?.value && <p className="truncate text-xs text-muted-foreground">{p.title.value}</p>}
                       </div>
-                      <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                      <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
                     </div>
-                    <div className="mt-2 space-y-1.5 pl-[26px] text-xs">
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-[26px]">
+                      <Pill tone={SENIORITY_TONE[p.seniority]} className="normal-case">{SENIORITY_LABEL[p.seniority]}</Pill>
+                      {personHasFunding(p) && <FundedPill />}
+                      {p.llmVerification && <LlmBadge v={p.llmVerification} />}
+                    </div>
+                    <div className="mt-2.5 space-y-2 border-t border-border pl-[26px] pt-2.5 text-xs">
                       <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                         <CompanyLogo domain={p.companyDomain} text={p.companyLogoText || (p.company || "").slice(0, 2).toUpperCase()} className="size-5 shrink-0 text-[9px]" />
-                        <span className="min-w-0 truncate">{p.company || "—"}</span>
-                        <span className={cn("ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", SENIORITY_STYLE[p.seniority])}>{SENIORITY_LABEL[p.seniority]}</span>
+                        <span className="min-w-0 truncate font-medium text-foreground">{p.company || "—"}</span>
                       </div>
                       <div onClick={(e) => e.stopPropagation()}>
                         {p.emailVerification ? (
-                          isUnconfirmedEmail(p) ? <span className="text-muted-foreground">Not found</span>
-                            : <div className="flex flex-wrap items-center gap-1.5"><span className="break-all">{String(p.email?.value ?? p.emailVerification.email)}</span><VerificationBadge ev={p.emailVerification} /></div>
+                          isUnconfirmedEmail(p) ? <Pill tone="muted" className="normal-case">Not found</Pill>
+                            : <div className="flex flex-wrap items-center gap-1.5"><span className="break-all font-medium">{String(p.email?.value ?? p.emailVerification.email)}</span><VerificationBadge ev={p.emailVerification} /></div>
                         ) : p.email ? (
-                          <div className="flex flex-wrap items-center gap-1.5"><span className="break-all">{String(p.email.value)}</span><span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not verified</span></div>
+                          <div className="flex flex-wrap items-center gap-1.5"><span className="break-all font-medium">{String(p.email.value)}</span><Pill tone="muted" className="normal-case">Not verified</Pill></div>
                         ) : null}
                       </div>
-                      <div className="flex items-center gap-3 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
-                        {p.linkedin && <a href={linkHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="hover:text-primary" aria-label="LinkedIn"><Linkedin className="size-4" /></a>}
-                        {p.location && <span className="min-w-0 truncate">{p.location}</span>}
-                      </div>
+                      {(p.linkedin || p.location) && (
+                        <div className="flex items-center gap-3 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                          {p.linkedin && <a href={linkHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="inline-flex size-6 items-center justify-center rounded-md bg-surface transition-colors hover:text-brand" aria-label="LinkedIn"><Linkedin className="size-3.5" strokeWidth={1.75} /></a>}
+                          {p.location && <span className="min-w-0 truncate">{p.location}</span>}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -330,11 +379,11 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
             </div>
 
             {/* Desktop: table */}
-            <div className="scrollbar-thin hidden h-full overflow-auto md:block">
+            <div className="scrollbar-thin hidden h-full overflow-auto bg-card md:block">
               <table className="w-full border-collapse text-[13px]">
-                <thead className="sticky top-0 z-10 bg-card">
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="w-10 px-3 py-2.5"><Check checked={sel.allMatching || sel.allPageSelected} indeterminate={sel.someSelected && !sel.allMatching && !sel.allPageSelected} onChange={sel.toggleHeader} /></th>
+                <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/85">
+                  <tr className="border-b border-border text-left text-[13px] font-normal text-muted-foreground">
+                    <th className="w-10 py-3 pl-4 pr-2 sm:pl-6"><Check checked={sel.allMatching || sel.allPageSelected} indeterminate={sel.someSelected && !sel.allMatching && !sel.allPageSelected} onChange={sel.toggleHeader} /></th>
                     <SortHeader label="Name" field="name" sortField={sortField} sortDir={sortDir} onSort={onSort} />
                     {show("title") && <SortHeader label="Title" field="title" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
                     {show("email") && <SortHeader label="Email" field="email" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
@@ -346,7 +395,7 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
                     {show("companyEmail") && <SortHeader label="Company email" field="companyEmail" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
                     {show("linkedin") && <SortHeader label="LinkedIn" field="linkedin" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
                     {show("location") && <SortHeader label="Location" field="location" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
-                    <th className="w-8" />
+                    <th className="w-8 pr-4 sm:pr-6" />
                   </tr>
                 </thead>
                 <tbody>
@@ -354,43 +403,86 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
                     const id = dbIdOf(p);
                     const selected = sel.rowChecked(id);
                     return (
-                      <tr key={id} onClick={() => setDrawer(p)} className={cn("cursor-pointer border-b hover:bg-muted/30", selected && "bg-primary/[0.04]")}>
-                        <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => sel.toggleRow(id)} /></td>
-                        <td className="min-w-[160px] max-w-[240px] px-3 py-2 align-top">
-                          <div className="flex min-w-0 items-center gap-2.5">
+                      <tr key={id} onClick={() => setDrawer(p)} className={cn("group cursor-pointer border-b border-border transition-colors hover:bg-surface/60", selected && "bg-brand/[0.05] hover:bg-brand/[0.07]")}>
+                        <td className="py-2.5 pl-4 pr-2 align-top sm:pl-6" onClick={(e) => e.stopPropagation()}><div className="pt-1.5"><Check checked={selected} onChange={() => sel.toggleRow(id)} /></div></td>
+                        <td className="min-w-[160px] max-w-[240px] px-3 py-2.5 align-top">
+                          <div className="flex min-w-0 items-start gap-2.5">
                             <Avatar name={p.name || "?"} seed={p.id} />
-                            <span className="min-w-0 truncate font-medium">{p.name || "—"}</span>
-                            {personHasFunding(p) && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[hsl(var(--valid))]/10 px-2 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]" title={`Company funding: ${p.companyFunding}`}><DollarSign className="size-3" /> Funded</span>}
-                            {p.llmVerification && <LlmBadge v={p.llmVerification} />}
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate pt-0.5 font-semibold leading-snug text-foreground transition-colors group-hover:text-brand">{p.name || "—"}</p>
+                              {(personHasFunding(p) || p.llmVerification) && (
+                                <div className="mt-1 flex flex-wrap items-center gap-1">
+                                  {personHasFunding(p) && <FundedPill title={`Company funding: ${p.companyFunding}`} />}
+                                  {p.llmVerification && <LlmBadge v={p.llmVerification} />}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </td>
-                        {show("title") && <td className="min-w-[200px] max-w-[420px] px-3 py-2 align-top text-muted-foreground"><span className="whitespace-normal break-words">{p.title?.value ?? "—"}</span></td>}
+                        {show("title") && (
+                          <td className="min-w-[200px] max-w-[420px] px-3 py-2.5 align-top text-muted-foreground">
+                            {p.title?.value ? <span className="whitespace-normal break-words">{p.title.value}</span> : DASH}
+                          </td>
+                        )}
                         {show("email") && (
-                          <td className="min-w-[220px] max-w-[360px] px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>
+                          <td className="min-w-[220px] max-w-[360px] px-3 py-2.5 align-top" onClick={(e) => e.stopPropagation()}>
                             {p.emailVerification ? (
-                              isUnconfirmedEmail(p) ? <span className="text-xs text-muted-foreground">Not found</span>
-                                : <div className="flex flex-col gap-1"><span className="break-all text-xs">{String(p.email?.value ?? p.emailVerification.email)}</span><div><VerificationBadge ev={p.emailVerification} /></div></div>
+                              isUnconfirmedEmail(p) ? (
+                                <Pill tone="muted" className="normal-case">Not found</Pill>
+                              ) : (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="break-all text-xs font-medium text-foreground">{String(p.email?.value ?? p.emailVerification.email)}</span>
+                                  <VerificationBadge ev={p.emailVerification} />
+                                </div>
+                              )
                             ) : p.email ? (
-                              <div className="flex flex-col gap-1"><span className="break-all text-xs">{String(p.email.value)}</span><span className="w-fit rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not verified</span></div>
-                            ) : <span className="text-xs text-muted-foreground">—</span>}
+                              <div className="flex flex-col items-start gap-1">
+                                <span className="break-all text-xs font-medium text-foreground">{String(p.email.value)}</span>
+                                <Pill tone="muted" className="normal-case">Not verified</Pill>
+                              </div>
+                            ) : DASH}
                           </td>
                         )}
                         {show("company") && (
-                          <td className="min-w-[200px] max-w-[380px] px-3 py-2 align-top">
+                          <td className="min-w-[200px] max-w-[380px] px-3 py-2.5 align-top">
                             <div className="flex min-w-0 items-start gap-2">
                               <CompanyLogo domain={p.companyDomain} text={p.companyLogoText || (p.company || "").slice(0, 2).toUpperCase()} className="mt-0.5 size-6 text-[10px]" />
-                              <span className="whitespace-normal break-words">{p.company || "—"}</span>
+                              {p.company ? <span className="whitespace-normal break-words pt-0.5 font-medium text-foreground">{p.company}</span> : <span className="pt-0.5">{DASH}</span>}
                             </div>
                           </td>
                         )}
-                        {show("companyEmployees") && <td className="whitespace-nowrap px-3 py-2 text-center align-top text-muted-foreground">{p.companyEmployees || <span className="text-xs">—</span>}</td>}
-                        {show("companyIndustry") && <td className="min-w-[140px] max-w-[240px] px-3 py-2 align-top text-muted-foreground"><span className="whitespace-normal break-words">{p.companyIndustry || "—"}</span></td>}
-                        {show("seniority") && <td className="px-3 py-2 align-top"><span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", SENIORITY_STYLE[p.seniority])}>{SENIORITY_LABEL[p.seniority]}</span></td>}
-                        {show("companyPhone") && <td className="whitespace-nowrap px-3 py-2 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>{p.companyPhone ? <a href={`tel:${p.companyPhone}`} className="hover:text-primary">{p.companyPhone}</a> : <span className="text-xs">—</span>}</td>}
-                        {show("companyEmail") && <td className="max-w-[220px] px-3 py-2 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>{p.companyEmail ? <a href={`mailto:${p.companyEmail}`} className="line-clamp-1 hover:text-primary">{p.companyEmail}</a> : <span className="text-xs">—</span>}</td>}
-                        {show("linkedin") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>{p.linkedin ? <a href={linkHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary" aria-label="View LinkedIn"><Linkedin className="size-4" /></a> : <span className="text-xs text-muted-foreground">—</span>}</td>}
-                        {show("location") && <td className="whitespace-nowrap px-3 py-2 align-top text-muted-foreground">{p.location ?? "—"}</td>}
-                        <td className="px-2 py-2 text-right align-top"><ChevronRight className="size-4 text-muted-foreground" /></td>
+                        {show("companyEmployees") && (
+                          <td className="whitespace-nowrap px-3 py-2.5 text-center align-top tabular-nums text-muted-foreground">{p.companyEmployees || DASH}</td>
+                        )}
+                        {show("companyIndustry") && (
+                          <td className="min-w-[140px] max-w-[240px] px-3 py-2.5 align-top text-muted-foreground">
+                            {p.companyIndustry ? <span className="whitespace-normal break-words">{p.companyIndustry}</span> : DASH}
+                          </td>
+                        )}
+                        {show("seniority") && (
+                          <td className="px-3 py-2.5 align-top"><Pill tone={SENIORITY_TONE[p.seniority]} className="normal-case">{SENIORITY_LABEL[p.seniority]}</Pill></td>
+                        )}
+                        {show("companyPhone") && (
+                          <td className="whitespace-nowrap px-3 py-2.5 align-top tabular-nums text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                            {p.companyPhone ? <a href={`tel:${p.companyPhone}`} className="transition-colors hover:text-brand">{p.companyPhone}</a> : DASH}
+                          </td>
+                        )}
+                        {show("companyEmail") && (
+                          <td className="max-w-[220px] px-3 py-2.5 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                            {p.companyEmail ? <a href={`mailto:${p.companyEmail}`} className="line-clamp-1 transition-colors hover:text-brand">{p.companyEmail}</a> : DASH}
+                          </td>
+                        )}
+                        {show("linkedin") && (
+                          <td className="px-3 py-2.5 align-top" onClick={(e) => e.stopPropagation()}>
+                            {p.linkedin ? (
+                              <a href={linkHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand/10 hover:text-brand" aria-label="View LinkedIn"><Linkedin className="size-4" strokeWidth={1.75} /></a>
+                            ) : DASH}
+                          </td>
+                        )}
+                        {show("location") && (
+                          <td className="whitespace-nowrap px-3 py-2.5 align-top text-muted-foreground">{p.location || DASH}</td>
+                        )}
+                        <td className="py-2.5 pl-2 pr-4 text-right align-top sm:pr-6"><ChevronRight className="mt-1 size-4 text-muted-foreground/60 transition-colors group-hover:text-brand" strokeWidth={1.75} /></td>
                       </tr>
                     );
                   })}
@@ -402,8 +494,8 @@ function PeopleListView({ listId, listName }: { listId: string; listName?: strin
         </div>
 
         {total > 0 && (
-          <div className="flex items-center justify-between border-t px-1 py-2 text-sm text-muted-foreground">
-            <span>{formatNumber(total)} people</span>
+          <div className="flex items-center justify-between gap-2 border-t border-border bg-card px-4 py-2.5 text-xs text-muted-foreground sm:px-6">
+            <span><span className="font-semibold tabular-nums text-foreground">{formatNumber(total)}</span> people</span>
             <Pagination page={page} totalPages={totalPages} setPage={setPage} />
           </div>
         )}
@@ -423,42 +515,7 @@ function ColumnsMenu<K extends string>({ defs, cols, onToggle, onReset }: {
   onToggle: (k: K) => void;
   onReset: () => void;
 }) {
-  const [open, setOpen] = React.useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey); };
-  }, [open]);
-  const shown = defs.filter((c) => cols[c.key]).length;
-  return (
-    <div ref={ref} className="relative inline-block text-left">
-      <Button size="sm" variant="outline" className="h-9" onClick={() => setOpen((o) => !o)}>
-        <Columns3 className="size-4" /> <span className="hidden sm:inline">Columns</span>
-        <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground tabular-nums sm:ml-1">{shown}</span>
-      </Button>
-      {open && (
-        <div className="absolute right-0 z-40 mt-1 w-56 animate-fade-in rounded-lg border bg-popover p-1.5 shadow-lg">
-          <div className="flex items-center justify-between px-2 py-1.5">
-            <span className="text-xs font-semibold text-muted-foreground">Show columns</span>
-            <button onClick={onReset} className="text-[11px] font-medium text-primary hover:underline">Reset</button>
-          </div>
-          <div className="max-h-72 overflow-y-auto">
-            {defs.map((c) => (
-              <label key={c.key} className="group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
-                <CheckboxIndicator checked={cols[c.key]} />
-                <input type="checkbox" className="sr-only" checked={cols[c.key]} onChange={() => onToggle(c.key)} />
-                <span className="flex-1">{c.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <SharedColumnsMenu defs={defs} cols={cols} onToggle={onToggle} onReset={onReset} />;
 }
 
 /* ------------------------- Company column config ------------------------- */
@@ -559,7 +616,7 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
   return (
     <div className="relative flex min-h-0 flex-1 overflow-clip">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r border-border bg-card md:flex">
           <CompanyFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_COMPANY_FILTERS)} />
         </aside>
       )}
@@ -568,57 +625,78 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
       </MobileFilterDrawer>
 
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b px-1 py-2">
+        <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-2.5 sm:px-6">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search company or location…" className="h-9 pl-9" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search company or location…" type="search" autoComplete="off" data-1p-ignore data-lpignore="true" className="h-9 pl-9" />
           </div>
-          <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> companies</span>
+          <span className="hidden shrink-0 items-center gap-1.5 rounded-md bg-surface px-2 py-1 text-xs text-muted-foreground sm:inline-flex"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> companies</span>
           <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-2">
             <ColumnsMenu defs={COMPANY_COLUMN_DEFS} cols={cols} onToggle={toggleCol} onReset={resetCols} />
-            <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-              <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{filtersActive}</span>}
+            <Button size="sm" variant={showFilters ? "brand" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
+              <SlidersHorizontal /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-md bg-brand/10 px-1.5 py-px text-[10px] font-semibold tabular-nums text-brand sm:ml-1">{filtersActive}</span>}
             </Button>
           </div>
         </div>
 
+
+        {/* Stats — same rail as Find Leads (counts over the whole list) */}
+        <StatsBar summary={`${formatNumber(allCompanies.length)} companies · ${formatNumber(facets.status.enriched ?? 0)} enriched`}>
+          <StatChip icon={Building2} tone="brand" label="Companies" value={formatNumber(allCompanies.length)} />
+          <StatChip icon={CheckCircle2} tone="valid" label="Enriched" value={formatNumber(facets.status.enriched ?? 0)} />
+          <StatChip icon={XCircle} tone={(facets.status.failed ?? 0) + (facets.status.not_found ?? 0) > 0 ? "invalid" : undefined} label="Not found / failed" value={formatNumber((facets.status.failed ?? 0) + (facets.status.not_found ?? 0))} />
+          <StatChip icon={Globe} tone="sky" label="Website" value={formatNumber(facets.has.website)} />
+          <StatChip icon={MailCheck} tone="valid" label="Valid emails" value={`${formatNumber(facets.email.valid)}/${formatNumber(facets.has.email)}`} />
+          <StatChip icon={Phone} label="Phone" value={formatNumber(facets.has.phone)} />
+          <StatChip icon={Linkedin} tone="sky" label="LinkedIn" value={formatNumber(facets.has.linkedin)} />
+        </StatsBar>
+
         <div className="min-h-0 flex-1">
           {isLoading ? (
-            <div className="space-y-2 p-4">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            <div className="space-y-2 p-4 sm:px-6">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}</div>
           ) : total === 0 ? (
             (filtersActive > 0 || debounced) ? (
-              <EmptyState icon={Search} title="No companies match your filters" description="Try removing some filters or the search." action={<Button variant="outline" onClick={() => { setFilters(EMPTY_COMPANY_FILTERS); setSearch(""); }}><X className="size-4" /> Clear filters</Button>} className="m-6" />
+              <EmptyState icon={Search} title="No companies match your filters" description="Try removing some filters or the search." action={<Button variant="outline" onClick={() => { setFilters(EMPTY_COMPANY_FILTERS); setSearch(""); }}><X /> Clear filters</Button>} className="m-6" />
             ) : (
               <EmptyState icon={Inbox} title="No companies in this list" description="Add companies from Find Leads." className="m-6" />
             )
           ) : (
             <>
             {/* Mobile: company cards */}
-            <div className="scrollbar-thin h-full space-y-2 overflow-auto p-3 md:hidden">
+            <div className="scrollbar-thin h-full space-y-2 overflow-auto bg-background p-3 md:hidden">
               {rows.map((c) => {
                 const id = dbIdOf(c);
                 const selected = sel.rowChecked(id);
-                const st = COLLECT_STATUS_META[c.status] ?? COLLECT_STATUS_META.enriched;
                 return (
-                  <div key={id} onClick={() => setDrawer(c)} className={cn("rounded-xl border p-3 transition-colors active:bg-muted/40", selected && "border-primary/40 bg-primary/[0.04]")}>
+                  <div key={id} onClick={() => setDrawer(c)} className={cn("rounded-xl border border-border bg-card p-3 shadow-xs transition-colors active:bg-accent", selected && "border-brand/40 bg-brand/[0.05]")}>
                     <div className="flex items-start gap-2.5">
                       <div className="pt-0.5" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => sel.toggleRow(id)} /></div>
-                      <CompanyLogo domain={c.domainGuess} text={c.logoText || (c.inputName || "").slice(0, 2).toUpperCase()} className="size-9 shrink-0 text-[11px]" />
+                      <CompanyLogo domain={c.domainGuess} text={c.logoText || (c.inputName || "").slice(0, 2).toUpperCase()} className="size-8 shrink-0 rounded-lg text-[11px]" />
                       <div className="min-w-0 flex-1">
-                        <p className="flex items-center gap-1.5 truncate font-medium">{c.inputName}{c.llmVerification && <LlmBadge v={c.llmVerification} />}</p>
+                        <p className="truncate text-sm font-semibold leading-snug">{c.inputName}</p>
                         <p className="truncate text-xs text-muted-foreground">{c.inputLocation}{c.domainGuess ? ` · ${c.domainGuess}` : ""}</p>
                       </div>
-                      {show("status") && <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", st.className)}>{st.label}</span>}
+                      <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
                     </div>
-                    <div className="mt-2 space-y-1 pl-[26px] text-xs" onClick={(e) => e.stopPropagation()}>
-                      {show("email") && (c.contactEmail?.value != null || c.emailVerification) && <div className="flex min-w-0 items-center gap-1.5"><Sourced field={c.contactEmail} />{c.emailVerification && <VerificationBadge ev={c.emailVerification} />}</div>}
+                    {(show("status") || c.llmVerification) && (
+                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-[26px]">
+                        {show("status") && <StatusPill status={c.status} />}
+                        {c.llmVerification && <LlmBadge v={c.llmVerification} />}
+                      </div>
+                    )}
+                    <div className="mt-2.5 space-y-2 border-t border-border pl-[26px] pt-2.5 text-xs" onClick={(e) => e.stopPropagation()}>
+                      {show("email") && (c.contactEmail?.value != null || c.emailVerification) && (
+                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">{c.contactEmail ? <span className="break-all font-medium"><Sourced field={c.contactEmail} /></span> : DASH}{c.emailVerification && <VerificationBadge ev={c.emailVerification} />}</div>
+                      )}
                       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-muted-foreground">
                         {show("employees") && c.employees?.value != null && <span>Emp <Sourced field={c.employees} /></span>}
                         {show("industry") && c.industry?.value != null && <span className="min-w-0"><Sourced field={c.industry} /></span>}
                         {show("website") && c.website?.value != null && <span className="min-w-0"><Sourced field={c.website} /></span>}
-                        {show("linkedin") && c.linkedin?.value != null && <span className="min-w-0"><Sourced field={c.linkedin} /></span>}
                         {show("location") && (c.address?.value != null || c.inputLocation) && <span className="min-w-0">{c.address?.value ?? c.inputLocation}</span>}
                       </div>
+                      {show("linkedin") && c.linkedin?.value != null && (
+                        <a href={linkHref(String(c.linkedin.value))} target="_blank" rel="noreferrer" className="inline-flex size-6 items-center justify-center rounded-md bg-surface text-muted-foreground transition-colors hover:text-brand" aria-label="LinkedIn"><Linkedin className="size-3.5" strokeWidth={1.75} /></a>
+                      )}
                     </div>
                   </div>
                 );
@@ -626,51 +704,72 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
             </div>
 
             {/* Desktop: table */}
-            <div className="scrollbar-thin hidden h-full overflow-auto md:block">
+            <div className="scrollbar-thin hidden h-full overflow-auto bg-card md:block">
               <table className="w-full border-collapse text-[13px]">
-                <thead className="sticky top-0 z-10 bg-card">
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="w-10 px-3 py-2.5"><Check checked={sel.allMatching || sel.allPageSelected} indeterminate={sel.someSelected && !sel.allMatching && !sel.allPageSelected} onChange={sel.toggleHeader} /></th>
-                    {show("company") && <th className="px-3 py-2.5 font-medium">Company</th>}
-                    {show("employees") && <th className="px-3 py-2.5 font-medium">Employees</th>}
-                    {show("industry") && <th className="px-3 py-2.5 font-medium">Industry</th>}
-                    {show("website") && <th className="px-3 py-2.5 font-medium">Website</th>}
-                    {show("email") && <th className="px-3 py-2.5 font-medium">Email</th>}
-                    {show("phone") && <th className="px-3 py-2.5 font-medium">Phone</th>}
-                    {show("linkedin") && <th className="px-3 py-2.5 font-medium">LinkedIn</th>}
-                    {show("location") && <th className="px-3 py-2.5 font-medium">Location</th>}
-                    {show("status") && <th className="px-3 py-2.5 font-medium">Status</th>}
-                    <th className="w-8" />
+                <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/85">
+                  <tr className="border-b border-border text-left text-[13px] font-normal text-muted-foreground">
+                    <th className="w-10 py-3 pl-4 pr-2 sm:pl-6"><Check checked={sel.allMatching || sel.allPageSelected} indeterminate={sel.someSelected && !sel.allMatching && !sel.allPageSelected} onChange={sel.toggleHeader} /></th>
+                    {show("company") && <th className="whitespace-nowrap px-3 py-3"><ColHead label="Company" /></th>}
+                    {show("employees") && <th className="whitespace-nowrap px-3 py-3 text-center"><ColHead label="Employees" align="center" /></th>}
+                    {show("industry") && <th className="whitespace-nowrap px-3 py-3"><ColHead label="Industry" /></th>}
+                    {show("website") && <th className="whitespace-nowrap px-3 py-3"><ColHead label="Website" /></th>}
+                    {show("email") && <th className="whitespace-nowrap px-3 py-3"><ColHead label="Email" /></th>}
+                    {show("phone") && <th className="whitespace-nowrap px-3 py-3"><ColHead label="Phone" /></th>}
+                    {show("linkedin") && <th className="whitespace-nowrap px-3 py-3"><ColHead label="LinkedIn" /></th>}
+                    {show("location") && <th className="whitespace-nowrap px-3 py-3"><ColHead label="Location" /></th>}
+                    {show("status") && <th className="whitespace-nowrap px-3 py-3"><ColHead label="Status" /></th>}
+                    <th className="w-8 pr-4 sm:pr-6" />
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((c) => {
                     const id = dbIdOf(c);
                     const selected = sel.rowChecked(id);
-                    const st = COLLECT_STATUS_META[c.status] ?? COLLECT_STATUS_META.enriched;
                     return (
-                      <tr key={id} onClick={() => setDrawer(c)} className={cn("cursor-pointer border-b hover:bg-muted/30", selected && "bg-primary/[0.04]")}>
-                        <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => sel.toggleRow(id)} /></td>
+                      <tr key={id} onClick={() => setDrawer(c)} className={cn("group cursor-pointer border-b border-border transition-colors hover:bg-surface/60", selected && "bg-brand/[0.05] hover:bg-brand/[0.07]")}>
+                        <td className="py-2.5 pl-4 pr-2 align-top sm:pl-6" onClick={(e) => e.stopPropagation()}><div className="pt-1.5"><Check checked={selected} onChange={() => sel.toggleRow(id)} /></div></td>
                         {show("company") && (
-                          <td className="px-3 py-2 align-top">
-                            <div className="flex items-center gap-2.5">
-                              <CompanyLogo domain={c.domainGuess} text={c.logoText || (c.inputName || "").slice(0, 2).toUpperCase()} className="size-8 text-[11px]" />
-                              <div className="min-w-0">
-                                <p className="flex items-center gap-1.5 truncate font-medium">{c.inputName}{c.llmVerification && <LlmBadge v={c.llmVerification} />}</p>
+                          <td className="min-w-[200px] max-w-[300px] px-3 py-2.5 align-top">
+                            <div className="flex min-w-0 items-start gap-2.5">
+                              <CompanyLogo domain={c.domainGuess} text={c.logoText || (c.inputName || "").slice(0, 2).toUpperCase()} className="size-8 rounded-lg text-[11px]" />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate pt-0.5 font-semibold leading-snug text-foreground transition-colors group-hover:text-brand">{c.inputName}</p>
                                 <p className="truncate text-xs text-muted-foreground">{c.inputLocation}{c.domainGuess ? ` · ${c.domainGuess}` : ""}{c.resolution && c.resolution.confidence > 0 ? ` · ${c.resolution.confidence}% match` : ""}</p>
+                                {c.llmVerification && (
+                                  <div className="mt-1 flex flex-wrap items-center gap-1"><LlmBadge v={c.llmVerification} /></div>
+                                )}
                               </div>
                             </div>
                           </td>
                         )}
-                        {show("employees") && <td className="px-3 py-2 align-top"><Sourced field={c.employees} showConfidence /></td>}
-                        {show("industry") && <td className="px-3 py-2 align-top"><Sourced field={c.industry} /></td>}
-                        {show("website") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.website} /></td>}
-                        {show("email") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><div className="flex items-center gap-1.5"><Sourced field={c.contactEmail} />{c.emailVerification && <VerificationBadge ev={c.emailVerification} />}</div></td>}
-                        {show("phone") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.phone} /></td>}
-                        {show("linkedin") && <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Sourced field={c.linkedin} /></td>}
-                        {show("location") && <td className="px-3 py-2 align-top">{c.address ? <Sourced field={c.address} /> : <span className="text-xs text-muted-foreground">{c.inputLocation || "—"}</span>}</td>}
-                        {show("status") && <td className="px-3 py-2 align-top"><span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", st.className)}>{st.label}</span></td>}
-                        <td className="px-2 py-2 text-right align-top"><ChevronRight className="size-4 text-muted-foreground" /></td>
+                        {show("employees") && <td className="whitespace-nowrap px-3 py-2.5 text-center align-top tabular-nums text-muted-foreground">{c.employees ? <Sourced field={c.employees} showConfidence /> : DASH}</td>}
+                        {show("industry") && <td className="min-w-[140px] max-w-[240px] px-3 py-2.5 align-top text-muted-foreground">{c.industry ? <span className="whitespace-normal break-words"><Sourced field={c.industry} /></span> : DASH}</td>}
+                        {show("website") && <td className="max-w-[220px] px-3 py-2.5 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>{c.website ? <span className="line-clamp-1"><Sourced field={c.website} /></span> : DASH}</td>}
+                        {show("email") && (
+                          <td className="min-w-[220px] max-w-[360px] px-3 py-2.5 align-top" onClick={(e) => e.stopPropagation()}>
+                            {c.contactEmail || c.emailVerification ? (
+                              <div className="flex flex-col items-start gap-1">
+                                {c.contactEmail ? <span className="break-all text-xs font-medium text-foreground"><Sourced field={c.contactEmail} /></span> : DASH}
+                                {c.emailVerification && <VerificationBadge ev={c.emailVerification} />}
+                              </div>
+                            ) : DASH}
+                          </td>
+                        )}
+                        {show("phone") && <td className="whitespace-nowrap px-3 py-2.5 align-top tabular-nums text-muted-foreground" onClick={(e) => e.stopPropagation()}>{c.phone ? <Sourced field={c.phone} /> : DASH}</td>}
+                        {show("linkedin") && (
+                          <td className="px-3 py-2.5 align-top" onClick={(e) => e.stopPropagation()}>
+                            {c.linkedin?.value ? (
+                              <a href={linkHref(String(c.linkedin.value))} target="_blank" rel="noreferrer" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand/10 hover:text-brand" aria-label="View LinkedIn"><Linkedin className="size-4" strokeWidth={1.75} /></a>
+                            ) : DASH}
+                          </td>
+                        )}
+                        {show("location") && (
+                          <td className="min-w-[140px] max-w-[260px] px-3 py-2.5 align-top text-muted-foreground">
+                            {c.address ? <span className="whitespace-normal break-words"><Sourced field={c.address} /></span> : c.inputLocation ? <span className="whitespace-normal break-words">{c.inputLocation}</span> : DASH}
+                          </td>
+                        )}
+                        {show("status") && <td className="px-3 py-2.5 align-top"><StatusPill status={c.status} /></td>}
+                        <td className="py-2.5 pl-2 pr-4 text-right align-top sm:pr-6"><ChevronRight className="mt-1 size-4 text-muted-foreground/60 transition-colors group-hover:text-brand" strokeWidth={1.75} /></td>
                       </tr>
                     );
                   })}
@@ -682,8 +781,8 @@ function CompanyListView({ listId, listName }: { listId: string; listName?: stri
         </div>
 
         {total > 0 && (
-          <div className="flex items-center justify-between border-t px-1 py-2 text-sm text-muted-foreground">
-            <span>{formatNumber(total)} companies</span>
+          <div className="flex items-center justify-between gap-2 border-t border-border bg-card px-4 py-2.5 text-xs text-muted-foreground sm:px-6">
+            <span><span className="font-semibold tabular-nums text-foreground">{formatNumber(total)}</span> companies</span>
             <Pagination page={page} totalPages={totalPages} setPage={setPage} />
           </div>
         )}

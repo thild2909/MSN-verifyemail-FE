@@ -14,11 +14,10 @@
  * exists.
  */
 import type {
-  AnalyticsPoint,
+  AnalyticsReport,
   ApiKey,
   CreditBalance,
   CreditTransaction,
-  DomainStat,
   BulkFinderResponse,
   AppUser,
   DeviceSession,
@@ -116,9 +115,28 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Parse a response body as JSON without throwing on an empty / non-JSON body
+ * (e.g. a 500 from a crashed route or a proxy error page), so callers surface a
+ * readable message instead of "Unexpected end of JSON input".
+ */
+async function readJson(res: Response): Promise<any> {
+  const text = await res.text().catch(() => "");
+  if (text) {
+    try {
+      return JSON.parse(text);
+    } catch {}
+  }
+  const message =
+    res.status >= 500
+      ? `Server error (${res.status}). The backend may be unavailable — please try again shortly.`
+      : `Unexpected response (${res.status}).`;
+  return { success: false, error: { code: `HTTP_${res.status}`, message } };
+}
+
 async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(path, { cache: "no-store" });
-  const json = await res.json();
+  const json = await readJson(res);
   if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Request failed", res.status, json.error);
   return json.data as T;
 }
@@ -129,7 +147,7 @@ async function apiPost<T>(path: string, body: unknown): Promise<{ data: T; raw: 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const json = await res.json();
+  const json = await readJson(res);
   if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Request failed", res.status, json.error);
   return { data: json.data as T, raw: json };
 }
@@ -1002,6 +1020,37 @@ export async function getMe(): Promise<AppUser | null> {
   return json.success ? (json.data as AppUser) : null;
 }
 
+export interface WorkspaceInfo { name: string; updatedAt: string | null }
+
+/** The workspace's display name (shown in the top bar / profile). */
+export async function getWorkspace(): Promise<WorkspaceInfo> {
+  return apiGet<WorkspaceInfo>("/api/v1/workspace");
+}
+
+/** Rename the workspace (admins only). */
+export async function updateWorkspace(name: string): Promise<WorkspaceInfo> {
+  const res = await fetch("/api/v1/workspace", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  const json = await readJson(res);
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Could not rename workspace", res.status, json.error);
+  return json.data as WorkspaceInfo;
+}
+
+/** Update the signed-in user's own profile. Pass `null` for an image to remove it. */
+export async function updateMe(patch: { name?: string; avatarUrl?: string | null; bannerUrl?: string | null }): Promise<AppUser> {
+  const res = await fetch("/api/v1/auth/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const json = await readJson(res);
+  if (!json.success) throw new ApiError(json.error?.code ?? "ERROR", json.error?.message ?? "Could not update profile", res.status, json.error);
+  return json.data as AppUser;
+}
+
 export async function login(email: string, password: string): Promise<AppUser> {
   const { data } = await apiPost<AppUser>("/api/v1/auth/login", { email, password });
   return data;
@@ -1020,6 +1069,8 @@ export interface CreateUserInput {
   name: string;
   role: UserRole;
   password: string;
+  /** Optional profile photo (client-resized data URL). */
+  avatarUrl?: string | null;
 }
 
 export async function createUser(input: CreateUserInput): Promise<AppUser> {
@@ -1032,6 +1083,8 @@ export interface UpdateUserInput {
   role?: UserRole;
   isActive?: boolean;
   password?: string;
+  /** New photo (data URL) or null to remove it. */
+  avatarUrl?: string | null;
 }
 
 export async function updateUser(id: string, input: UpdateUserInput): Promise<AppUser> {
@@ -1073,11 +1126,15 @@ export async function revokeOtherSessions(): Promise<number> {
 
 /* ----------------------------- Analytics --------------------------- */
 
-export async function getAnalytics(_days: number): Promise<AnalyticsPoint[]> {
-  // No analytics backend yet — empty series, never fabricated trend data.
-  return [];
-}
-
-export async function getDomainStats(): Promise<DomainStat[]> {
-  return [];
+/**
+ * Verification analytics for the last `days` (7 | 30 | 90), computed server-side
+ * from the stored verification results and the credit ledger. Days are bucketed
+ * in the viewer's own time zone.
+ */
+export async function getAnalytics(days: number): Promise<AnalyticsReport> {
+  let tz = "UTC";
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {}
+  return apiGet<AnalyticsReport>(`/api/v1/analytics?days=${days}&tz=${encodeURIComponent(tz)}`);
 }

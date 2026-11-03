@@ -33,7 +33,7 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
     // modal from `sm` up. p-0 on mobile lets the sheet span the full width.
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
       <div
-        className="absolute inset-0 bg-black/50 animate-fade-in"
+        className="absolute inset-0 bg-black/40 backdrop-blur-[2px] animate-fade-in"
         onClick={() => onOpenChange(false)}
       />
       <div
@@ -42,7 +42,7 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
         className={cn(
           "relative z-10 flex max-h-[92dvh] w-full max-w-lg flex-col overflow-y-auto border bg-card p-4 shadow-xl",
           "animate-slide-up rounded-t-2xl pb-[calc(1rem+env(safe-area-inset-bottom))]",
-          "sm:max-h-[90vh] sm:animate-fade-in sm:rounded-xl sm:p-6 sm:pb-6",
+          "sm:max-h-[90vh] sm:animate-fade-in sm:rounded-2xl sm:p-6 sm:pb-6 sm:shadow-pop",
           className,
         )}
       >

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "./status-badge";
+import { colHeadMeta } from "@/components/common/col-head";
 import { DetailDrawer } from "./detail-drawer";
 import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
 import { getListRecords, deepScanRecord, listExportUrl } from "@/lib/api/client";
@@ -88,22 +89,30 @@ export function ResultsTable({ listId, live = false }: { listId: string; live?: 
 
       {/* Filter pills — a horizontal, swipeable rail on mobile (saves vertical
           space vs. wrapping to 3 rows); wraps normally from sm up. */}
-      <div className="-mx-4 flex gap-1.5 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
-        {FILTERS.map((f) => (
-          <button
-            key={f}
-            onClick={() => {
-              setStatus(f);
-              setPage(1);
-            }}
-            className={cn(
-              "shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition-colors",
-              status === f ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70",
-            )}
-          >
-            {FILTER_LABELS[f]}
-          </button>
-        ))}
+      <div className="-mx-4 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:px-0">
+        <div className="inline-flex gap-0.5 rounded-lg border border-border bg-surface p-0.5">
+          {FILTERS.map((f) => {
+            const meta = colHeadMeta(FILTER_LABELS[f]);
+            const Glyph = meta?.icon;
+            const on = status === f;
+            return (
+              <button
+                key={f}
+                onClick={() => {
+                  setStatus(f);
+                  setPage(1);
+                }}
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-[13px] font-medium transition-colors",
+                  on ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {Glyph && f !== "all" && <Glyph className={cn("size-3.5", meta?.tone)} strokeWidth={1.9} />}
+                {FILTER_LABELS[f]}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Mobile: result cards (tap to open detail) */}

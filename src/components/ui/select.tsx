@@ -180,7 +180,7 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           onClick={() => (open ? setOpen(false) : openMenu())}
           onKeyDown={onKeyDown}
           className={cn(
-            "flex h-10 w-full items-center appearance-none rounded-lg border border-input bg-card px-3 pr-9 py-2 text-left text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50",
+            "flex h-9 w-full items-center appearance-none rounded-lg border border-input bg-card px-3 pr-9 py-2 text-left text-sm shadow-xs transition-colors focus-visible:border-brand/60 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/15 disabled:cursor-not-allowed disabled:opacity-50",
             className,
           )}
         >
@@ -194,7 +194,7 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
             role="listbox"
             aria-activedescendant={`opt-${activeIndex}`}
             style={{ position: "fixed", left: coords.left, top: coords.top, bottom: coords.bottom, width: coords.width, maxHeight: coords.maxHeight }}
-            className="z-[100] animate-fade-in overflow-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg scrollbar-thin"
+            className="z-[100] animate-fade-in overflow-auto rounded-xl border bg-popover p-1 text-popover-foreground shadow-pop scrollbar-thin"
           >
             {options.length === 0 ? (
               <div className="px-2.5 py-2 text-sm text-muted-foreground">No options</div>

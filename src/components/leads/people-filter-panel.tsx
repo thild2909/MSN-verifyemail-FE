@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { SlidersHorizontal } from "lucide-react";
+import { IconTile } from "@/components/common/kit";
 import { FilterSection, CheckboxList, TokenList, RangeMin, type Option } from "./filter-primitives";
 import { EMPLOYEE_BUCKETS } from "@/lib/leads/collect-types";
 import { SENIORITY_LABEL, countPeopleFilters, type PeopleFilters, type PeopleFacets } from "@/lib/leads/people-types";
@@ -49,11 +50,15 @@ export function PeopleFilterPanel({ filters, facets, onChange, onClear }: {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <span className="flex items-center gap-2 text-sm font-semibold"><SlidersHorizontal className="size-4" /> Filters{active > 0 && <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary">{active}</span>}</span>
-        {active > 0 && <button onClick={onClear} className="text-xs font-medium text-primary hover:underline">Clear</button>}
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-4">
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <IconTile icon={SlidersHorizontal} tone={active > 0 ? "brand" : "muted"} size="sm" />
+          Filters
+          {active > 0 && <span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-brand">{active}</span>}
+        </span>
+        {active > 0 && <button onClick={onClear} className="rounded-md px-1.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/10">Clear</button>}
       </div>
-      <div className="scrollbar-thin flex-1 overflow-y-auto">
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto bg-card">
         <FilterSection title="Email Status" defaultOpen count={filters.email.length} onClear={() => onChange({ ...filters, email: [] })}>
           <CheckboxList options={emailOpts} selected={filters.email} onToggle={(v) => onChange({ ...filters, email: toggle(filters.email, v) })} />
         </FilterSection>

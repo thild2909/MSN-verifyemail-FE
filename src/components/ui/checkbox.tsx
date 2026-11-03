@@ -17,10 +17,12 @@ const glyphSize: Record<CheckboxSize, string> = {
 const boxBase =
   "flex shrink-0 items-center justify-center rounded-[5px] border transition-[background-color,border-color,box-shadow,transform] duration-150 ease-out";
 
+// Brand fill when on (a slightly deeper step in dark mode so the white check
+// keeps its contrast); a quiet inset box when off.
 function boxState(active: boolean) {
   return active
-    ? "border-primary bg-primary text-primary-foreground shadow-[0_1px_2px_rgba(15,23,42,0.12)]"
-    : "border-input bg-card";
+    ? "border-brand bg-brand text-white shadow-xs dark:border-primary dark:bg-primary"
+    : "border-input bg-card shadow-[inset_0_1px_1px_hsl(var(--shadow-color)/0.04)]";
 }
 
 /** The check / indeterminate glyph. Always mounted so it can animate in and out. */
@@ -99,8 +101,8 @@ export function Checkbox({
         boxBase,
         sizeClasses[size],
         boxState(active),
-        !active && !disabled && "hover:border-primary/60 hover:bg-primary/[0.04]",
-        "cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-95",
+        !active && !disabled && "hover:border-brand/60 hover:bg-brand/[0.05]",
+        "cursor-pointer outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 active:scale-95",
         disabled && "cursor-not-allowed opacity-50 active:scale-100",
         className,
       )}
@@ -133,7 +135,7 @@ export function CheckboxIndicator({
         boxBase,
         sizeClasses[size],
         boxState(active),
-        !active && "group-hover:border-primary/50",
+        !active && "group-hover:border-brand/50 group-hover:bg-brand/[0.04]",
         className,
       )}
     >

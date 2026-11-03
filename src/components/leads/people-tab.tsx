@@ -1,4 +1,6 @@
 "use client";
+import { JobPicker } from "./job-picker";
+import { Users as PickerPeopleIcon, Upload as UploadGlyph } from "lucide-react";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Users, Trash2, Loader2, Crown, Building2, Mail, Linkedin, MailCheck, MailX, MailQuestion, UserSearch, Star, Upload, Sparkles, RotateCw, ExternalLink, MoreHorizontal } from "lucide-react";
@@ -10,6 +12,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
+import { TONES, type Tone } from "@/components/common/kit";
 import { getPeopleJobs, getPeopleJob, deletePeopleJob, verifyPeopleEmails, retryPeopleNotFound, llmVerifyPeople, retryPeopleGaps, ApiError } from "@/lib/api/client";
 import { CollectedPeopleTable } from "./collected-people-table";
 import { PersonDetailDrawer } from "./people-detail-drawer";
@@ -177,7 +180,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
           icon={UserSearch}
           title="Find decision-makers"
           description="Import a CSV with First Name, Last Name and Company Name. We add each person's LinkedIn and a verified email. You can also use “Find people” on the Companies tab."
-          action={<Button onClick={() => setImportOpen(true)}><Upload className="size-4" /> Import people</Button>}
+          action={<Button onClick={() => setImportOpen(true)}><Upload /> Import people</Button>}
         />
         {importModal}
       </div>
@@ -187,25 +190,35 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 md:py-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-2.5 sm:px-6">
         {/* Mobile keeps the selector + compact actions on one line (a “⋯” menu
             holds the rest) so the card list keeps the vertical space; sm+ shows
             the full inline toolbar. */}
         <div className="flex w-full items-center gap-2 sm:contents">
-          <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 min-w-0 flex-1 sm:w-64 sm:flex-none">
-            {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
-          </Select>
+          <JobPicker
+            jobs={jobs.map((j) => ({ id: j.id, name: j.name, createdAt: j.createdAt, status: j.status, progress: j.progress, count: { n: j.summary.people, unit: "people" } }))}
+            value={activeId}
+            onChange={setActiveId}
+            icon={PickerPeopleIcon}
+            label="People searches"
+            className="min-w-0 flex-1 sm:w-72 sm:flex-none"
+            footer={(close) => (
+              <button type="button" onClick={() => { close(); setImportOpen(true); }} className="flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-brand transition-colors hover:bg-brand/10">
+                <UploadGlyph className="size-4" /> Import people
+              </button>
+            )}
+          />
           {/* Mobile-only compact actions */}
           <div className="flex items-center gap-1.5 sm:hidden">
             <Button size="icon" className="size-9 shrink-0" onClick={() => setImportOpen(true)} aria-label="Import people">
-              {importOpen ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+              {importOpen ? <Loader2 className="animate-spin" /> : <Upload />}
             </Button>
-            <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="size-9 shrink-0" aria-label="Actions"><MoreHorizontal className="size-4" /></Button>}>
+            <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="size-9 shrink-0" aria-label="Actions"><MoreHorizontal /></Button>}>
               {active && (
                 <DropdownItem disabled={verifying || active.summary.people === 0} onClick={() => verify.mutate(active.id)}><MailCheck /> Find &amp; verify</DropdownItem>
               )}
               {active && notFound > 0 && (
-                <DropdownItem disabled={verifying || retryNotFound.isPending} onClick={() => retryNotFound.mutate(active.id)}><MailX /> Retry notfound ({formatNumber(notFound)})</DropdownItem>
+                <DropdownItem disabled={verifying || retryNotFound.isPending} onClick={() => retryNotFound.mutate(active.id)}><MailX /> Retry not found ({formatNumber(notFound)})</DropdownItem>
               )}
               {active?.mode === "discover" && hasCoverageGaps && (
                 <DropdownItem disabled={retryGaps.isPending || active.status === "collecting"} onClick={() => retryGaps.mutate(active.id)}><RotateCw /> Retry failed</DropdownItem>
@@ -225,40 +238,52 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
             </DropdownMenu>
           </div>
         </div>
-        {active && <span className="hidden text-xs text-muted-foreground sm:inline">{formatNumber(active.summary.people)} people · {formatNumber(active.totalCompanies)} {active.mode === "enrich" ? "rows" : "companies"}</span>}
+        {active && (
+          <span className="hidden items-center gap-1.5 rounded-md bg-surface px-2 py-1 text-xs text-muted-foreground sm:inline-flex">
+            {live && <span className="size-1.5 rounded-full bg-brand animate-pulse" aria-hidden />}
+            <span className="font-semibold tabular-nums text-foreground">{formatNumber(active.summary.people)}</span> people
+            <span className="text-border">·</span>
+            <span className="font-semibold tabular-nums text-foreground">{formatNumber(active.totalCompanies)}</span> {active.mode === "enrich" ? "rows" : "companies"}
+          </span>
+        )}
         {active?.apolloUrl && (
-          <a href={active.apolloUrl} target="_blank" rel="noreferrer" title={active.apolloUrl} className="hidden max-w-[280px] items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-primary/15 sm:inline-flex">
-            <ExternalLink className="size-3 shrink-0" /> <span className="truncate">{active.apolloUrl.replace(/^https?:\/\//i, "")}</span>
+          <a href={active.apolloUrl} target="_blank" rel="noreferrer" title={active.apolloUrl} className="hidden max-w-[280px] items-center gap-1.5 rounded-md bg-brand/10 px-2 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15 sm:inline-flex">
+            <ExternalLink className="size-3 shrink-0" strokeWidth={1.75} /> <span className="truncate">Apollo list</span><span className="text-brand/60">·</span><span className="max-w-[9rem] truncate font-normal text-brand/80">{(() => { try { return new URL(active.apolloUrl!).hostname.replace(/^www\./, ""); } catch { return "link"; } })()}</span>
           </a>
         )}
         {/* Desktop inline actions */}
         <div className="ml-auto hidden items-center gap-2 sm:flex">
           {active && (
-            <Button size="sm" variant="outline" onClick={() => verify.mutate(active.id)} disabled={verifying || active.summary.people === 0} title="Find & verify emails that have not been checked yet. Results (including Not found) are saved so the same person is not searched twice.">
-              {verifying ? <Loader2 className="size-4 animate-spin" /> : <MailCheck className="size-4" />}
+            <Button size="sm" variant="brand" onClick={() => verify.mutate(active.id)} disabled={verifying || active.summary.people === 0} title="Find & verify emails that have not been checked yet. Results (including Not found) are saved so the same person is not searched twice.">
+              {verifying ? <Loader2 className="animate-spin" /> : <MailCheck />}
               {verifying ? "Finding…" : "Find & verify"}
+              {!verifying && notSearched > 0 && (
+                <span className="rounded bg-brand/10 px-1 text-[10px] font-semibold tabular-nums">{formatNumber(notSearched)}</span>
+              )}
             </Button>
           )}
           {active && notFound > 0 && (
             <Button size="sm" variant="outline" onClick={() => retryNotFound.mutate(active.id)} disabled={verifying || retryNotFound.isPending} title={`Re-run Find & verify over the ${formatNumber(notFound)} “Not found” ${notFound === 1 ? "person" : "people"} (looked up before, came back empty), searching each one afresh. People who already have an email are left untouched.`}>
-              {retryNotFound.isPending ? <Loader2 className="size-4 animate-spin" /> : <MailX className="size-4" />}
-              Retry notfound ({formatNumber(notFound)})
+              {retryNotFound.isPending ? <Loader2 className="animate-spin" /> : <MailX className="text-[hsl(var(--invalid))]" />}
+              Retry not found
+              <span className="rounded bg-[hsl(var(--invalid)/0.1)] px-1 text-[10px] font-semibold tabular-nums text-[hsl(var(--invalid))]">{formatNumber(notFound)}</span>
             </Button>
           )}
           {active?.mode === "discover" && hasCoverageGaps && (
             <Button size="sm" variant="outline" onClick={() => retryGaps.mutate(active.id)} disabled={retryGaps.isPending || active.status === "collecting"} title="Re-crawl the coverage-gap companies (0 people found) with a fresh search pass.">
-              {retryGaps.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />}
+              {retryGaps.isPending ? <Loader2 className="animate-spin" /> : <RotateCw />}
               Retry failed
             </Button>
           )}
           {active && (active.summary.people > 0 || hasCoverageGaps) && (
             <Button size="sm" variant="outline" onClick={() => llmVerify.mutate(active.id)} disabled={llmVerify.isPending} title={hasCoverageGaps ? "Cross-check people and fill coverage-gap companies with AI-proposed executives (each re-verified on the live web)." : "AI cross-check the found people."}>
-              {llmVerify.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              {llmVerify.isPending ? <Loader2 className="animate-spin" /> : <Sparkles className="text-[hsl(280_62%_55%)] dark:text-[hsl(280_80%_76%)]" />}
               {llmVerify.isPending ? "Reviewing…" : "AI verify"}
             </Button>
           )}
-          <Button size="sm" onClick={() => setImportOpen(true)}><Upload className="size-4" /> Import people</Button>
-          {active && <button onClick={async () => { if (await confirm({ title: "Delete people search?", description: `“${active.name}” and its ${formatNumber(active.summary.people)} people will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete people search">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
+          <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+          <Button size="sm" onClick={() => setImportOpen(true)}><Upload /> Import people</Button>
+          {active && <Button size="icon" variant="ghost" onClick={async () => { if (await confirm({ title: "Delete people search?", description: `“${active.name}” and its ${formatNumber(active.summary.people)} people will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }} className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Delete people search" title="Delete people search">{remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}</Button>}
         </div>
       </div>
 
@@ -269,7 +294,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
           verifying={verifying}
           summary={
             verifying
-              ? <span className="inline-flex items-center gap-1.5 font-medium text-[hsl(var(--risky))]"><Loader2 className="size-3.5 animate-spin" /> Verifying emails…</span>
+              ? <span className="inline-flex items-center gap-1.5 font-medium text-brand"><span className="size-1.5 rounded-full bg-brand animate-pulse" aria-hidden /> Verifying emails…</span>
               : `${formatNumber(s.people)} people · ${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)} Valid emails · ${formatNumber(notFound)} Not found`
           }
         >
@@ -278,23 +303,23 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
               // Verifying: just the indicator — no flex-1/min-width so it hugs its
               // text instead of stretching and leaving a big empty gap on mobile.
               ? <div className="flex items-center gap-2 md:basis-full">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--risky))]"><Loader2 className="size-3.5 animate-spin" /> Verifying emails…</span>
+                  <span className="inline-flex items-center gap-1.5 rounded-md bg-brand/10 px-2 py-1 text-xs font-medium text-brand"><Loader2 className="size-3.5 animate-spin" /> Verifying emails…</span>
                 </div>
               // Crawling: the progress bar needs to fill the row.
               : <div className="flex min-w-[160px] flex-1 items-center gap-2 md:basis-full">
-                  <Progress value={active.progress} className="flex-1" /><span className="tabular-nums text-muted-foreground">{active.progress}%</span>
+                  <span className="size-1.5 shrink-0 rounded-full bg-brand animate-pulse" aria-hidden /><Progress value={active.progress} className="flex-1" /><span className="text-xs font-semibold tabular-nums text-brand">{active.progress}%</span>
                 </div>
           )}
-          <Stat icon={Users} label="People" value={formatNumber(s.people)} />
-          <Stat icon={MailCheck} label="Valid emails" value={`${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)}`} />
-          <Stat icon={MailX} label="Not found" value={formatNumber(notFound)} />
-          <Stat icon={MailQuestion} label="Not searched" value={formatNumber(notSearched)} />
+          <Stat icon={Users} tone="brand" label="People" value={formatNumber(s.people)} />
+          <Stat icon={MailCheck} tone="valid" label="Valid emails" value={`${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)}`} />
+          <Stat icon={MailX} tone={notFound > 0 ? "invalid" : undefined} label="Not found" value={formatNumber(notFound)} />
+          <Stat icon={MailQuestion} tone={notSearched > 0 ? "risky" : undefined} label="Not searched" value={formatNumber(notSearched)} />
           <Stat icon={Building2} label={seedLabel} value={active.mode === "enrich" ? `${formatNumber(s.rowsWithPeople ?? s.people)}/${formatNumber(s.companies)}` : `${formatNumber(s.companiesWithPeople)}/${formatNumber(s.companies)}`} />
           <Stat icon={Mail} label="Emails" value={formatNumber(s.withEmail)} />
-          <Stat icon={Star} label="Founders" value={formatNumber(s.founders)} />
+          <Stat icon={Star} tone="violet" label="Founders" value={formatNumber(s.founders)} />
           <Stat icon={Crown} label="C-Level" value={formatNumber(s.cLevel)} />
           <Stat icon={Users} label="VP / Pres" value={formatNumber(s.vps)} />
-          <Stat icon={Linkedin} label="LinkedIn" value={formatNumber(s.withLinkedin)} />
+          <Stat icon={Linkedin} tone="sky" label="LinkedIn" value={formatNumber(s.withLinkedin)} />
         </StatsBar>
       )}
 
@@ -311,12 +336,12 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
         const shown = gaps.slice(0, MAX);
         const extra = gaps.length - shown.length;
         return (
-          <div className="flex max-h-24 flex-wrap items-center gap-1.5 overflow-y-auto scrollbar-thin border-b bg-muted/10 px-4 py-2 text-xs [&>*]:shrink-0">
-            <span className="mr-1 font-medium text-muted-foreground">Coverage gaps ({formatNumber(gaps.length)}):</span>
+          <div className="flex max-h-24 flex-wrap items-center gap-1.5 overflow-y-auto scrollbar-thin border-b border-border bg-surface px-4 py-2 text-xs sm:px-6 [&>*]:shrink-0">
+            <span className="mr-1 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><Building2 className="size-3.5 text-[hsl(var(--risky))]" strokeWidth={1.75} /> Coverage gaps <span className="rounded-md bg-card px-1.5 py-0.5 tabular-nums text-foreground shadow-xs">{formatNumber(gaps.length)}</span></span>
             {shown.map((c, i) => (
               <span key={i} title="No decision-makers found on LinkedIn search or the company about/team pages."
-                className="inline-flex items-center gap-1 rounded-full bg-amber-500/12 px-2 py-0.5 font-medium text-amber-600 dark:text-amber-400">
-                {c.company.length > 26 ? c.company.slice(0, 26) + "…" : c.company} · 0 found
+                className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold", TONES.risky)}>
+                {c.company.length > 26 ? c.company.slice(0, 26) + "…" : c.company} <span className="font-medium opacity-70">· 0 found</span>
               </span>
             ))}
             {extra > 0 && <span className="font-medium text-muted-foreground">+{formatNumber(extra)} more</span>}
@@ -343,10 +368,10 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
   );
 }
 
-function Stat({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+function Stat({ icon: Icon, label, value, tone }: { icon: React.ElementType; label: string; value: string; tone?: Tone }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <Icon className={cn("size-3.5 text-muted-foreground")} />
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-card py-1 pl-1 pr-2.5 shadow-xs">
+      <Icon className={cn("box-content size-3.5 rounded-md p-1.5", tone ? TONES[tone] : "bg-surface text-muted-foreground")} strokeWidth={1.75} />
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-sm font-semibold tabular-nums">{value}</span>
     </div>

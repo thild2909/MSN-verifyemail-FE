@@ -4,8 +4,14 @@ import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/d
 
 function TriggerButton({ icon: Icon, label, subtle }: { icon?: React.ElementType; label: string; subtle?: boolean }) {
   return (
-    <button className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium hover:bg-muted ${subtle ? "border-input bg-card" : "border-primary/30 bg-primary/5 text-primary"}`}>
-      {Icon && <Icon className="size-4" />} {label} <ChevronDown className="size-4 opacity-70" />
+    <button
+      className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium shadow-xs transition-colors ${
+        subtle
+          ? "border-border bg-card text-foreground hover:bg-surface"
+          : "border-brand/35 bg-card text-brand hover:border-brand/60 hover:bg-brand/5"
+      }`}
+    >
+      {Icon && <Icon className="size-4" strokeWidth={1.75} />} {label} <ChevronDown className="size-3.5 text-muted-foreground" />
     </button>
   );
 }

@@ -1,6 +1,8 @@
 "use client";
 import * as React from "react";
+import { SlidersHorizontal } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { IconTile } from "@/components/common/kit";
 import {
   FilterSection, TokenList, CheckboxList, ChipToggleGroup, type Option,
 } from "./filter-primitives";
@@ -25,17 +27,18 @@ export function PeopleFilterSidebar({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-3">
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-4">
         <span className="flex items-center gap-2 text-sm font-semibold">
+          <IconTile icon={SlidersHorizontal} tone={activeCount > 0 ? "brand" : "muted"} size="sm" />
           Filters
-          {activeCount > 0 && <span className="rounded-full bg-primary/10 px-1.5 text-[11px] font-semibold text-primary">{activeCount}</span>}
+          {activeCount > 0 && <span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-brand">{activeCount}</span>}
         </span>
         {activeCount > 0 && (
-          <button onClick={onClear} className="text-xs font-medium text-primary hover:underline">Clear all</button>
+          <button onClick={onClear} className="rounded-md px-1.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/10">Clear all</button>
         )}
       </div>
 
-      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto bg-card">
         <FilterSection title="Lists">
           <p className="text-xs text-muted-foreground">Saved lists appear here. Save leads to build one.</p>
         </FilterSection>
@@ -127,12 +130,12 @@ export function PeopleFilterSidebar({
         </FilterSection>
 
         <FilterSection title="Availability">
-          <div className="space-y-3">
-            <label className="flex items-center justify-between text-[13px]">
+          <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+            <label className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-[13px] transition-colors hover:bg-surface/60">
               Email available
               <Switch checked={filters.emailAvailable} onCheckedChange={(v) => onChange({ emailAvailable: v })} />
             </label>
-            <label className="flex items-center justify-between text-[13px]">
+            <label className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-[13px] transition-colors hover:bg-surface/60">
               LinkedIn available
               <Switch checked={filters.linkedinAvailable} onCheckedChange={(v) => onChange({ linkedinAvailable: v })} />
             </label>

@@ -31,6 +31,12 @@ export async function POST(req: Request) {
   });
 
   if (!res.ok || !res.json.data) {
+    if (res.status === 503) {
+      return NextResponse.json(
+        { success: false, error: { code: "BE_UNAVAILABLE", message: "Sign-in service is unavailable. Please make sure the backend is running and try again." } },
+        { status: 503 },
+      );
+    }
     const message = res.status === 401 ? "Invalid email or password." : "Could not sign in. Please try again.";
     return NextResponse.json({ success: false, error: { code: "UNAUTHORIZED", message } }, { status: res.status === 401 ? 401 : 502 });
   }

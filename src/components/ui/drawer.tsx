@@ -31,7 +31,7 @@ export function Drawer({ open, onOpenChange, children, className }: DrawerProps)
 
   return createPortal(
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/40 animate-fade-in" onClick={() => onOpenChange(false)} />
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px] animate-fade-in" onClick={() => onOpenChange(false)} />
       <div
         role="dialog"
         aria-modal="true"

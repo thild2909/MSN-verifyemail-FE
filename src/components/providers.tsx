@@ -3,6 +3,7 @@ import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@/components/ui/toast";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ThemeProvider } from "@/components/theme/theme-provider";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = React.useState(
@@ -19,10 +20,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <QueryClientProvider client={client}>
-      <ToastProvider>
-        <ConfirmProvider>{children}</ConfirmProvider>
-      </ToastProvider>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </ToastProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }

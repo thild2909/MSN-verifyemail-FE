@@ -1,7 +1,8 @@
 "use client";
+import { ColHead } from "@/components/common/col-head";
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, MapPin, Briefcase, Search, SlidersHorizontal, ChevronDown, Users, Download, X, Loader2, ListPlus, Plus } from "lucide-react";
+import { ExternalLink, Briefcase, Search, SlidersHorizontal, ChevronDown, Users, Download, X, Loader2, ListPlus, Plus } from "lucide-react";
 import { cn, formatNumber } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,8 @@ import { toCsv, downloadCsv } from "@/lib/leads/csv";
 import { JOB_SOURCE_LABEL, type CollectedJob, type JobSource } from "@/lib/leads/job-collect-types";
 import type { PeopleSeedInput } from "@/lib/leads/people-types";
 import type { JobFilters } from "@/lib/leads/types";
-import { CompanyLogo } from "./leads-ui";
+import { Pill, IconTile, type Tone } from "@/components/common/kit";
+import { CompanyLogo } from "./collect-ui";
 import { JobFilterSidebar } from "./job-filter-sidebar";
 import { MobileFilterDrawer, openFiltersFor } from "./filter-drawer";
 
@@ -30,26 +32,40 @@ export interface FindPeopleFromJobsPayload {
   count: number;
 }
 
-/** Per-source colour so the Source column is scannable at a glance. */
-const SOURCE_CLASS: Record<JobSource, string> = {
-  seek: "bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300",
-  indeed: "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300",
-  reed: "bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300",
-  dice: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300",
-  ctgoodjobs: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
-  foundit: "bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300",
-  glassdoor: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300",
-  mycareersfuture: "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300",
-  wellfound: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300",
+/** Per-source tone so the Source column is scannable at a glance. */
+const SOURCE_TONE: Record<JobSource, Tone> = {
+  seek: "sky",
+  indeed: "brand",
+  reed: "invalid",
+  dice: "risky",
+  ctgoodjobs: "invalid",
+  foundit: "risky",
+  glassdoor: "valid",
+  mycareersfuture: "sky",
+  wellfound: "violet",
 };
 
 export function SourceBadge({ source }: { source: JobSource }) {
   return (
-    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold", SOURCE_CLASS[source] ?? "bg-muted text-muted-foreground")}>
+    <Pill tone={SOURCE_TONE[source] ?? "muted"} dot className="normal-case">
       {JOB_SOURCE_LABEL[source] ?? source}
+    </Pill>
+  );
+}
+
+/** Leading tile for a role row: same shape/tint as a company-logo fallback. */
+function JobTile() {
+  return (
+    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand ring-1 ring-inset ring-brand/15">
+      <Briefcase className="size-4" strokeWidth={1.75} />
     </span>
   );
 }
+
+/** Secondary chip (work mode / employment type), like the People table alt-name chip. */
+const CHIP = "inline-flex shrink-0 items-center rounded-md bg-surface px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground";
+/** Empty-cell placeholder, same as the People table. */
+const DASH = <span className="text-muted-foreground/60">—</span>;
 
 /** Small square checkbox matching the People / Companies tables. */
 function postedLabel(j: CollectedJob): string {
@@ -231,7 +247,7 @@ export function CollectedJobsTable({
   return (
     <div className="flex min-h-0 flex-1">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r border-border bg-card md:flex">
           <JobFilterSidebar filters={filters} onChange={onChangeFilters} activeCount={activeFilterCount} onClear={onClearFilters} />
         </aside>
       )}
@@ -241,109 +257,131 @@ export function CollectedJobsTable({
 
       <div className="relative flex min-w-0 flex-1 flex-col">
         {/* Toolbar */}
-        <div className="flex items-center gap-2 border-b px-4 py-2">
+        <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-2.5 sm:px-6">
           <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search role, company or location…" className="h-9 pl-9" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" strokeWidth={1.75} />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search role, company or location…" type="search" autoComplete="off" data-1p-ignore data-lpignore="true" className="h-9 pl-9" />
           </div>
-          <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> roles</span>
-          <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9 shrink-0 sm:ml-auto" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-            <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{activeFilterCount > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{activeFilterCount}</span>}
+          <span className="hidden items-center gap-1.5 whitespace-nowrap text-[13px] text-muted-foreground sm:inline-flex">
+            {live && <span className="size-1.5 rounded-full bg-brand animate-pulse" aria-hidden />}
+            <span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> roles
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className={cn("h-9 shrink-0 sm:ml-auto", showFilters && "md:border-brand/35 md:bg-brand/5 md:text-brand md:hover:bg-brand/10")}
+            onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}
+          >
+            <SlidersHorizontal /> <span className="hidden sm:inline">Filters</span>
+            {activeFilterCount > 0 && <span className="rounded-md bg-brand/10 px-1.5 py-px text-[10px] font-semibold leading-4 text-brand tabular-nums">{activeFilterCount}</span>}
           </Button>
         </div>
 
         {/* Body */}
         <div className="min-h-0 flex-1">
           {isLoading && !data ? (
-            <div className="space-y-2 p-4">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            <div className="space-y-2 p-4 sm:px-6">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}</div>
           ) : total === 0 ? (
             <EmptyState
               icon={Briefcase}
               title={live ? "Crawling job boards…" : "No roles found"}
               description={live ? "Roles will appear here as each source returns." : "The sources returned no matching roles, or were blocked. Try clearing the filter."}
-              className="m-6"
+              className="m-4 sm:m-6"
             />
           ) : (
             <>
-            <div className={cn("scrollbar-thin h-full space-y-2 overflow-auto p-3 transition-opacity md:hidden", isPlaceholderData && "opacity-60")}>
+            <div className={cn("scrollbar-thin h-full space-y-2 overflow-auto bg-background p-3 transition-opacity md:hidden", isPlaceholderData && "opacity-60")}>
               {rows.map((j) => {
                 const selected = rowChecked(j.id);
                 return (
-                  <div key={j.id} className={cn("rounded-xl border p-3", selected && "border-primary/40 bg-primary/[0.04]")}>
+                  <div key={j.id} className={cn("rounded-xl border border-border bg-card p-3 shadow-xs transition-colors", selected && "border-brand/40 bg-brand/[0.05]")}>
                     <div className="flex items-start gap-2.5">
                       <div className="pt-0.5" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(j.id)} /></div>
+                      <JobTile />
                       <div className="min-w-0 flex-1">
-                        <a href={j.url || undefined} target="_blank" rel="noreferrer" className="line-clamp-2 font-medium hover:text-primary hover:underline">{j.title}</a>
-                        <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <CompanyLogo text={j.companyLogoText} seed={j.company} />
-                          <span className="min-w-0 truncate">{j.company}</span>
-                        </div>
+                        <a href={j.url || undefined} target="_blank" rel="noreferrer" className="line-clamp-2 text-sm font-semibold leading-snug text-foreground transition-colors hover:text-brand">{j.title}</a>
+                        {j.location && <p className="truncate text-xs text-muted-foreground">{j.location}</p>}
                       </div>
-                      <SourceBadge source={j.source} />
                     </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 pl-[26px] text-xs text-muted-foreground">
-                      {j.location && <span className="inline-flex items-center gap-1"><MapPin className="size-3 opacity-60" />{j.location}</span>}
-                      {j.salary && <span>{j.salary}</span>}
-                      <span>{postedLabel(j)}</span>
-                      {j.workMode && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{j.workMode}</span>}
-                      {j.employmentType && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{j.employmentType}</span>}
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-[26px]">
+                      <SourceBadge source={j.source} />
+                      {j.workMode && <span className={CHIP}>{j.workMode}</span>}
+                      {j.employmentType && <span className={CHIP}>{j.employmentType}</span>}
+                    </div>
+                    <div className="mt-2.5 space-y-2 border-t border-border pl-[26px] pt-2.5 text-xs">
+                      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                        <CompanyLogo text={j.companyLogoText} className="size-5 shrink-0 text-[9px]" />
+                        <span className="min-w-0 truncate font-medium text-foreground">{j.company}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                        {j.salary && <span className="tabular-nums">{j.salary}</span>}
+                        <span className="tabular-nums">{postedLabel(j)}</span>
+                      </div>
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            <div className={cn("scrollbar-thin hidden h-full overflow-auto transition-opacity md:block", isPlaceholderData && "opacity-60")}>
+            <div className={cn("scrollbar-thin hidden h-full overflow-auto bg-card transition-opacity md:block", isPlaceholderData && "opacity-60")}>
               <table className="w-full border-collapse text-[13px]">
-                <thead className="sticky top-0 z-10 bg-card">
-                  <tr className="border-b text-left font-medium text-muted-foreground">
-                    <th className="w-10 px-3 py-2.5">
+                <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/85">
+                  <tr className="border-b border-border text-left text-[13px] font-normal text-muted-foreground">
+                    <th className="w-10 py-3 pl-4 pr-2 sm:pl-6">
                       <div className="flex items-center gap-1">
                         <Check checked={allMatching || allPageSelected} indeterminate={someSelected && !allMatching && !allPageSelected} onChange={toggleHeader} />
-                        <DropdownMenu align="start" trigger={<button className="rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label="Selection options"><ChevronDown className="size-3.5" /></button>}>
+                        <DropdownMenu align="start" trigger={<button className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-card hover:text-foreground" aria-label="Selection options"><ChevronDown className="size-3.5" /></button>}>
                           <DropdownItem onClick={selectThisPage}>Select this page ({pageIds.length})</DropdownItem>
                           <DropdownItem onClick={selectAll}>Select all {formatNumber(total)}</DropdownItem>
                           {someSelected && <><DropdownSeparator /><DropdownItem onClick={clearSelection}>Clear selection</DropdownItem></>}
                         </DropdownMenu>
                       </div>
                     </th>
-                    <th className="px-3 py-2.5">Job</th>
-                    <th className="px-3 py-2.5">Company</th>
-                    <th className="px-3 py-2.5">Location</th>
-                    <th className="px-3 py-2.5">Source</th>
-                    <th className="px-3 py-2.5">Salary</th>
-                    <th className="px-3 py-2.5">Posted</th>
-                    <th className="w-10" />
+                    <th className="px-3 py-3"><ColHead label="Job" /></th>
+                    <th className="px-3 py-3"><ColHead label="Company" /></th>
+                    <th className="px-3 py-3"><ColHead label="Location" /></th>
+                    <th className="px-3 py-3"><ColHead label="Source" /></th>
+                    <th className="px-3 py-3"><ColHead label="Salary" /></th>
+                    <th className="px-3 py-3"><ColHead label="Posted" /></th>
+                    <th className="w-10 pr-4 sm:pr-6" />
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((j) => {
                     const selected = rowChecked(j.id);
                     return (
-                      <tr key={j.id} className={cn("group border-b transition-colors hover:bg-muted/40", selected && "bg-primary/[0.04]")}>
-                        <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                          <Check checked={selected} onChange={() => toggleRow(j.id)} />
+                      <tr key={j.id} className={cn("group border-b border-border transition-colors hover:bg-surface/60", selected && "bg-brand/[0.05] hover:bg-brand/[0.07]")}>
+                        <td className="py-2.5 pl-4 pr-2 align-top sm:pl-6" onClick={(e) => e.stopPropagation()}>
+                          <div className="pt-1.5"><Check checked={selected} onChange={() => toggleRow(j.id)} /></div>
                         </td>
-                        <td className="px-3 py-2">
-                          <a href={j.url || undefined} target="_blank" rel="noreferrer" className="text-left font-medium hover:text-primary hover:underline">{j.title}</a>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                            {j.workMode && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{j.workMode}</span>}
-                            {j.employmentType && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{j.employmentType}</span>}
+                        <td className="min-w-[220px] max-w-[360px] px-3 py-2.5 align-top">
+                          <div className="flex min-w-0 items-start gap-2.5">
+                            <JobTile />
+                            <div className="min-w-0 flex-1">
+                              <a href={j.url || undefined} target="_blank" rel="noreferrer" title={j.title} className="block truncate pt-0.5 font-semibold leading-snug text-foreground transition-colors group-hover:text-brand">{j.title}</a>
+                              {(j.workMode || j.employmentType) && (
+                                <div className="mt-1 flex flex-wrap items-center gap-1">
+                                  {j.workMode && <span className={CHIP}>{j.workMode}</span>}
+                                  {j.employmentType && <span className={CHIP}>{j.employmentType}</span>}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </td>
-                        <td className="px-3 py-2">
-                          <div className="flex items-center gap-2"><CompanyLogo text={j.companyLogoText} seed={j.company} /><span className="line-clamp-1">{j.company}</span></div>
+                        <td className="min-w-[180px] max-w-[320px] px-3 py-2.5 align-top">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <CompanyLogo text={j.companyLogoText} className="mt-0.5 size-6 text-[10px]" />
+                            <span className="whitespace-normal break-words pt-0.5 font-medium text-foreground">{j.company}</span>
+                          </div>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                          {j.location ? <span className="inline-flex items-center gap-1"><MapPin className="size-3 opacity-60" />{j.location}</span> : "—"}
-                        </td>
-                        <td className="px-3 py-2"><SourceBadge source={j.source} /></td>
-                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{j.salary ?? "—"}</td>
-                        <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{postedLabel(j)}</td>
-                        <td className="px-2 py-2">
+                        <td className="whitespace-nowrap px-3 py-2.5 align-top text-muted-foreground">{j.location || DASH}</td>
+                        <td className="px-3 py-2.5 align-top"><SourceBadge source={j.source} /></td>
+                        <td className="whitespace-nowrap px-3 py-2.5 align-top tabular-nums text-muted-foreground">{j.salary ?? DASH}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 align-top tabular-nums text-muted-foreground">{j.posted || j.postedDaysAgo != null ? postedLabel(j) : DASH}</td>
+                        <td className="py-2.5 pl-2 pr-4 text-right align-top sm:pr-6">
                           {j.url && (
-                            <a href={j.url} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100" aria-label="Open role">
-                              <ExternalLink className="size-4" />
+                            <a href={j.url} target="_blank" rel="noreferrer" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-brand/10 hover:text-brand group-hover:text-brand" aria-label="Open role">
+                              <ExternalLink className="size-4" strokeWidth={1.75} />
                             </a>
                           )}
                         </td>
@@ -359,12 +397,12 @@ export function CollectedJobsTable({
 
         {/* Pagination */}
         {total > 0 && (
-          <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-muted-foreground">
-            <span>{formatNumber(total)} roles</span>
+          <div className="flex items-center justify-between border-t border-border bg-card px-4 py-2.5 text-[13px] text-muted-foreground sm:px-6">
+            <span><span className="font-medium tabular-nums text-foreground">{formatNumber(total)}</span> roles</span>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" className="h-8" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
-              <span className="tabular-nums">Page {page} / {totalPages}</span>
-              <Button size="sm" variant="outline" className="h-8" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+              <span className="tabular-nums">Page <span className="font-medium text-foreground">{page}</span> / {totalPages}</span>
+              <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
             </div>
           </div>
         )}
@@ -372,26 +410,26 @@ export function CollectedJobsTable({
         {/* Floating selection bar — same treatment as the Companies tab. */}
         {someSelected && (
           <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
-            <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
-              <span className="flex items-center gap-2 pr-1 text-sm font-semibold">
-                <span className="rounded-md bg-primary px-2 py-0.5 text-primary-foreground tabular-nums">{formatNumber(effectiveCount)}</span> selected
+            <div className="pointer-events-auto flex max-w-full animate-fade-in flex-wrap items-center justify-center gap-1.5 rounded-xl border border-border bg-card p-1.5 pl-3 shadow-pop">
+              <span className="flex items-center gap-2 pr-1 text-[13px] font-medium">
+                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-primary px-1.5 text-xs font-semibold text-primary-foreground tabular-nums">{formatNumber(effectiveCount)}</span> selected
               </span>
               {!allMatching && total > selectedIds.size && (
-                <button onClick={selectAll} className="text-xs font-medium text-primary hover:underline">Select all {formatNumber(total)}</button>
+                <button onClick={selectAll} className="rounded-md px-1.5 py-0.5 text-xs font-medium text-brand transition-colors hover:bg-brand/10">Select all {formatNumber(total)}</button>
               )}
-              <div className="h-6 w-px bg-border" />
+              <div className="mx-0.5 h-5 w-px bg-border" />
               {onFindPeople && (
-                <Button size="sm" onClick={findPeople} disabled={findingPeople || busy !== null}>{findingPeople || busy === "people" ? <Loader2 className="size-4 animate-spin" /> : <Users className="size-4" />} Find people</Button>
+                <Button size="sm" onClick={findPeople} disabled={findingPeople || busy !== null}>{findingPeople || busy === "people" ? <Loader2 className="animate-spin" /> : <Users />} Find people</Button>
               )}
-              <DropdownMenu up align="end" trigger={<Button size="sm" variant="outline" disabled={busy !== null}>{busy === "list" ? <Loader2 className="size-4 animate-spin" /> : <ListPlus className="size-4" />} Add to list <ChevronDown className="size-3.5" /></Button>}>
+              <DropdownMenu up align="end" trigger={<Button size="sm" variant="outline" disabled={busy !== null}>{busy === "list" ? <Loader2 className="animate-spin" /> : <ListPlus />} Add to list <ChevronDown className="size-3.5" /></Button>}>
                 {lists.map((l) => (
-                  <DropdownItem key={l.id} onClick={() => addSelectedToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs text-muted-foreground">{l.summary.total}</span></DropdownItem>
+                  <DropdownItem key={l.id} onClick={() => addSelectedToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs tabular-nums text-muted-foreground">{l.summary.total}</span></DropdownItem>
                 ))}
                 {lists.length > 0 && <DropdownSeparator />}
                 <DropdownItem onClick={() => { setNewListName(""); setNewListOpen(true); }}><Plus /> New list</DropdownItem>
               </DropdownMenu>
-              <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null}>{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
-              <button onClick={clearSelection} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
+              <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null}>{busy === "export" ? <Loader2 className="animate-spin" /> : <Download />} Export</Button>
+              <button onClick={clearSelection} className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface hover:text-foreground" aria-label="Clear selection"><X className="size-4" /></button>
             </div>
           </div>
         )}
@@ -399,13 +437,14 @@ export function CollectedJobsTable({
         {/* New list dialog — name it, then add the selected employers as companies. */}
         <Dialog open={newListOpen} onOpenChange={(o) => { if (!o) { setNewListOpen(false); setNewListName(""); } }}>
           <DialogHeader>
+            <IconTile icon={ListPlus} tone="brand" className="mb-3" />
             <DialogTitle>New list</DialogTitle>
             <DialogDescription>Name the list, then add the employers from the {formatNumber(effectiveCount)} selected {effectiveCount === 1 ? "role" : "roles"} as companies.</DialogDescription>
           </DialogHeader>
           <Input autoFocus value={newListName} onChange={(e) => setNewListName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newListName.trim()) createAndAdd(); }} placeholder="List name" />
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewListOpen(false)}>Cancel</Button>
-            <Button disabled={!newListName.trim() || busy === "list"} onClick={createAndAdd}>{busy === "list" ? <Loader2 className="size-4 animate-spin" /> : null} Create &amp; add</Button>
+            <Button disabled={!newListName.trim() || busy === "list"} onClick={createAndAdd}>{busy === "list" ? <Loader2 className="animate-spin" /> : null} Create &amp; add</Button>
           </DialogFooter>
         </Dialog>
       </div>

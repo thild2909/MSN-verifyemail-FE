@@ -1,4 +1,6 @@
 "use client";
+import { JobPicker } from "./job-picker";
+import { Briefcase as PickerJobsIcon, Radar as RadarGlyph } from "lucide-react";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Radar, Trash2, Loader2, Briefcase, Building2, Ban, Layers, RotateCw, MoreHorizontal } from "lucide-react";
@@ -124,14 +126,15 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
 
   if (!jobs || jobs.length === 0) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center p-8">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-background p-4 sm:p-8">
         <EmptyState
+          className="w-full max-w-xl"
           icon={Briefcase}
           title="Track hiring signals from the job boards"
           description="Pick your filters and search the job boards (Seek, Indeed, Reed, Dice, Glassdoor, Wellfound and more) for matching open roles. Every role shows the source it came from."
           action={
             <div className="flex items-center gap-2">
-              <Button onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> Crawl job boards</Button>
+              <Button onClick={() => setCrawlOpen(true)}><Radar /> Crawl job boards</Button>
             </div>
           }
         />
@@ -143,33 +146,61 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 md:py-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-2.5 sm:px-6">
         <div className="flex w-full items-center gap-2 sm:contents">
-          <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 min-w-0 flex-1 sm:w-64 sm:flex-none">
-            {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
-          </Select>
+          <JobPicker
+            jobs={jobs.map((j) => ({ id: j.id, name: j.name, createdAt: j.createdAt, status: j.status, progress: j.progress, count: { n: j.summary.jobs, unit: "roles" } }))}
+            value={activeId}
+            onChange={setActiveId}
+            icon={PickerJobsIcon}
+            label="Job board crawls"
+            className="min-w-0 flex-1 sm:w-72 sm:flex-none"
+            footer={(close) => (
+              <button type="button" onClick={() => { close(); setCrawlOpen(true); }} className="flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-brand transition-colors hover:bg-brand/10">
+                <RadarGlyph className="size-4" /> New crawl
+              </button>
+            )}
+          />
           {/* Mobile-only compact actions */}
           <div className="flex items-center gap-1.5 sm:hidden">
-            <Button size="icon" className="size-9 shrink-0" onClick={() => setCrawlOpen(true)} aria-label="New crawl"><Radar className="size-4" /></Button>
+            <Button size="icon" className="shrink-0" onClick={() => setCrawlOpen(true)} aria-label="New crawl"><Radar /></Button>
             {active && (
-              <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="size-9 shrink-0" aria-label="Actions"><MoreHorizontal className="size-4" /></Button>}>
+              <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="shrink-0" aria-label="Actions"><MoreHorizontal /></Button>}>
                 {retryable > 0 && !live && <DropdownItem disabled={retry.isPending} onClick={() => retry.mutate(active.id)}><RotateCw /> Retry blocked ({retryable})</DropdownItem>}
                 <DropdownItem destructive onClick={async () => { if (await confirm({ title: "Delete crawl?", description: `“${active.name}” and its ${formatNumber(active.summary.jobs)} roles will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }}><Trash2 /> Delete crawl</DropdownItem>
               </DropdownMenu>
             )}
           </div>
         </div>
-        {active && <span className="hidden text-xs text-muted-foreground sm:inline">{formatNumber(active.summary.jobs)} roles · {active.sources.map((x) => JOB_SOURCE_LABEL[x]).join(", ")}</span>}
+        {active && (
+          <span className="hidden min-w-0 max-w-md items-center gap-1.5 rounded-md bg-surface px-2 py-1 text-xs text-muted-foreground sm:inline-flex">
+            {live && <span className="inline-flex items-center gap-1 rounded bg-brand/10 px-1 text-[10px] font-semibold text-brand"><span className="size-1.5 animate-pulse rounded-full bg-brand" /> Live</span>}
+            <span className="font-semibold tabular-nums text-foreground">{formatNumber(active.summary.jobs)}</span> roles
+            <span className="text-border">·</span>
+            <span className="truncate">{active.sources.map((x) => JOB_SOURCE_LABEL[x]).join(", ")}</span>
+          </span>
+        )}
         {/* Desktop inline actions */}
         <div className="ml-auto hidden items-center gap-2 sm:flex">
           {active && retryable > 0 && !live && (
             <Button size="sm" variant="outline" onClick={() => retry.mutate(active.id)} disabled={retry.isPending}>
-              {retry.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />} Retry blocked
-              <span className="ml-1 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{retryable}</span>
+              {retry.isPending ? <Loader2 className="animate-spin" /> : <RotateCw className="text-[hsl(var(--risky))]" />} Retry blocked
+              <span className="rounded bg-[hsl(var(--risky)/0.14)] px-1 text-[10px] font-semibold tabular-nums text-[hsl(var(--risky))]">{retryable}</span>
             </Button>
           )}
-          <Button size="sm" onClick={() => setCrawlOpen(true)}><Radar className="size-4" /> New crawl</Button>
-          {active && <button onClick={async () => { if (await confirm({ title: "Delete crawl?", description: `“${active.name}” and its ${formatNumber(active.summary.jobs)} roles will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete crawl">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
+          {active && retryable > 0 && !live && <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />}
+          <Button size="sm" onClick={() => setCrawlOpen(true)}><Radar /> New crawl</Button>
+          {active && (
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={async () => { if (await confirm({ title: "Delete crawl?", description: `“${active.name}” and its ${formatNumber(active.summary.jobs)} roles will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }}
+              className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              aria-label="Delete crawl"
+            >
+              {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -183,7 +214,7 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
           {s.blocked > 0 && <Stat icon={Ban} label="Blocked" value={formatNumber(s.blocked)} tone="risky" />}
           {live && (
             <div className="flex min-w-[160px] flex-1 items-center gap-2">
-              <Progress value={active.progress} className="flex-1" /><span className="tabular-nums text-muted-foreground">{active.progress}%</span>
+              <Progress value={active.progress} className="h-1.5 flex-1" indicatorClassName="bg-brand" /><span className="text-xs font-medium tabular-nums text-brand">{active.progress}%</span>
             </div>
           )}
         </StatsBar>
@@ -191,7 +222,8 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
 
       {/* Per-source coverage */}
       {active?.coverage && active.coverage.length > 0 && (
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin border-b bg-muted/10 px-4 py-2 text-xs [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin border-b border-border bg-surface/50 px-4 py-2 text-xs sm:px-6 [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
+          <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Coverage</span>
           {active.coverage.map((c) => <CoverageChip key={c.source} c={c} />)}
         </div>
       )}
@@ -218,27 +250,31 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
 }
 
 const COVERAGE_META: Record<JobSourceCoverage["status"], { className: string; label: (c: JobSourceCoverage) => string; spin?: boolean }> = {
-  pending: { className: "bg-muted text-muted-foreground", label: () => "queued" },
-  collecting: { className: "bg-muted text-muted-foreground", label: () => "crawling…", spin: true },
-  done: { className: "bg-valid/12 text-[hsl(var(--valid))]", label: (c) => `${c.jobsFound} found` },
-  blocked: { className: "bg-amber-500/12 text-amber-600 dark:text-amber-400", label: (c) => (c.jobsFound ? `${c.jobsFound} · blocked` : "blocked") },
-  failed: { className: "bg-invalid/12 text-[hsl(var(--invalid))]", label: () => "failed" },
+  pending: { className: "border-border bg-card text-muted-foreground", label: () => "queued" },
+  collecting: { className: "border-brand/25 bg-brand/[0.06] text-brand", label: () => "crawling…", spin: true },
+  done: { className: "border-[hsl(var(--valid)/0.25)] bg-[hsl(var(--valid)/0.1)] text-[hsl(var(--valid))]", label: (c) => `${c.jobsFound} found` },
+  blocked: { className: "border-[hsl(var(--risky)/0.3)] bg-[hsl(var(--risky)/0.12)] text-[hsl(var(--risky))]", label: (c) => (c.jobsFound ? `${c.jobsFound} · blocked` : "blocked") },
+  failed: { className: "border-[hsl(var(--invalid)/0.25)] bg-[hsl(var(--invalid)/0.1)] text-[hsl(var(--invalid))]", label: () => "failed" },
 };
 
 function CoverageChip({ c }: { c: JobSourceCoverage }) {
   const m = COVERAGE_META[c.status];
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium", m.className)}>
-      {m.spin && <Loader2 className="size-3 animate-spin" />}
-      {JOB_SOURCE_LABEL[c.source]} · {m.label(c)}
+    <span className={cn("inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] font-medium", m.className)}>
+      {m.spin ? <Loader2 className="size-3 animate-spin" /> : <span className="size-1.5 rounded-full bg-current" />}
+      <span className="font-semibold">{JOB_SOURCE_LABEL[c.source]}</span>
+      <span className="opacity-80">· {m.label(c)}</span>
     </span>
   );
 }
 
 function Stat({ icon: Icon, label, value, tone }: { icon: React.ElementType; label: string; value: string; tone?: "risky" }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <Icon className={cn("size-3.5", tone === "risky" ? "text-[hsl(var(--risky))]" : "text-muted-foreground")} />
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-card py-1 pl-1 pr-2.5 shadow-xs">
+      <Icon
+        className={cn("box-content size-3.5 rounded-md p-1.5", tone === "risky" ? "bg-[hsl(var(--risky)/0.14)] text-[hsl(var(--risky))]" : "bg-surface text-muted-foreground")}
+        strokeWidth={1.75}
+      />
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className={cn("text-sm font-semibold tabular-nums", tone === "risky" && "text-[hsl(var(--risky))]")}>{value}</span>
     </div>

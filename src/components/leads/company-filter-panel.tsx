@@ -1,6 +1,7 @@
 "use client";
 import * as React from "react";
 import { SlidersHorizontal } from "lucide-react";
+import { IconTile } from "@/components/common/kit";
 import { FilterSection, CheckboxList, TokenList, type Option } from "./filter-primitives";
 import {
   EMPLOYEE_BUCKETS, countCompanyFilters,
@@ -44,9 +45,18 @@ export function CompanyFilterPanel({ filters, facets, onChange, onClear }: {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <span className="flex items-center gap-2 text-sm font-semibold"><SlidersHorizontal className="size-4" /> Filters{active > 0 && <span className="rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary">{active}</span>}</span>
-        {active > 0 && <button onClick={onClear} className="text-xs font-medium text-primary hover:underline">Clear</button>}
+      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
+        <span className="flex min-w-0 items-center gap-2.5">
+          <IconTile icon={SlidersHorizontal} tone="brand" size="sm" />
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5 text-sm font-semibold leading-tight">
+              Filters
+              {active > 0 && <span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-brand">{active}</span>}
+            </span>
+            <span className="block text-[11px] text-muted-foreground">{active > 0 ? `${active} active` : "Narrow companies"}</span>
+          </span>
+        </span>
+        {active > 0 && <button onClick={onClear} className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/10">Clear</button>}
       </div>
       <div className="scrollbar-thin flex-1 overflow-y-auto">
         <FilterSection title="Company" defaultOpen count={filters.company.length} onClear={() => onChange({ ...filters, company: [] })}>

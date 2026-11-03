@@ -4,7 +4,8 @@
  */
 import * as React from "react";
 import { BadgeCheck, Circle, Flame } from "lucide-react";
-import { cn, seededRandom } from "@/lib/utils";
+import { cn } from "@/lib/utils";
+import { TONES, avatarTone } from "@/components/common/kit";
 import type {
   Department, EmailStatus, EmploymentType, HiringSignal, JobSeniority,
   PeopleSeniority, QualificationTier, WorkMode,
@@ -36,26 +37,33 @@ export const EMPLOYMENT_LABEL: Record<EmploymentType, string> = {
 
 /* ------------------------------- avatar/logo ----------------------------- */
 
-const AVATAR_TONES = [
-  "bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700",
-  "bg-amber-100 text-amber-700", "bg-sky-100 text-sky-700",
-  "bg-rose-100 text-rose-700", "bg-violet-100 text-violet-700",
-];
+/** Soft, theme-safe tint stable per seed (kit `avatarTone`). */
+const toneFor = (seed: string) => TONES[avatarTone(seed)];
 
 export function Avatar({ name, seed, className }: { name: string; seed?: string; className?: string }) {
-  const tone = AVATAR_TONES[Math.floor(seededRandom(seed ?? name) * AVATAR_TONES.length)];
   const init = name.split(" ").map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
   return (
-    <span className={cn("flex size-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", tone, className)}>
+    <span
+      className={cn(
+        "flex size-8 shrink-0 select-none items-center justify-center rounded-full text-[11px] font-semibold tracking-wide",
+        toneFor(seed ?? name),
+        className,
+      )}
+    >
       {init}
     </span>
   );
 }
 
 export function CompanyLogo({ text, seed, className }: { text: string; seed?: string; className?: string }) {
-  const tone = AVATAR_TONES[Math.floor(seededRandom(seed ?? text) * AVATAR_TONES.length)];
   return (
-    <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-md text-[10px] font-bold", tone, className)}>
+    <span
+      className={cn(
+        "flex size-6 shrink-0 select-none items-center justify-center rounded-md text-[10px] font-bold ring-1 ring-inset ring-border/60",
+        toneFor(seed ?? text),
+        className,
+      )}
+    >
       {text}
     </span>
   );
@@ -63,61 +71,64 @@ export function CompanyLogo({ text, seed, className }: { text: string; seed?: st
 
 /* --------------------------------- chips --------------------------------- */
 
+const CHIP = "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold";
+
 export function EmailStatusChip({ status }: { status: EmailStatus }) {
   if (status === "verified") {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-[hsl(var(--valid))]">
-        <BadgeCheck className="size-3.5" /> Verified
+      <span className={cn(CHIP, TONES.valid)}>
+        <BadgeCheck className="size-3" strokeWidth={2} /> Verified
       </span>
     );
   }
   if (status === "unverified") {
     return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
-        <Circle className="size-3" /> Unverified
+      <span className={cn(CHIP, TONES.muted)}>
+        <Circle className="size-2.5" strokeWidth={2.25} /> Unverified
       </span>
     );
   }
-  return <span className="text-xs text-muted-foreground">Unavailable</span>;
+  return <span className="text-[11px] font-medium text-muted-foreground/80">Unavailable</span>;
 }
 
 const TIER_CLASS: Record<QualificationTier, string> = {
-  Excellent: "bg-valid/12 text-[hsl(var(--valid))]",
-  Good: "bg-primary/10 text-primary",
-  Fair: "bg-risky/12 text-[hsl(var(--risky))]",
+  Excellent: TONES.valid,
+  Good: TONES.brand,
+  Fair: TONES.risky,
 };
 
 export function QualificationPill({ tier, score }: { tier: QualificationTier; score: number }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold", TIER_CLASS[tier])}>
-      {tier} <span className="tabular-nums opacity-80">{score}</span>
+    <span className={cn(CHIP, "gap-1.5", TIER_CLASS[tier])}>
+      {tier} <span className="tabular-nums opacity-75">{score}</span>
     </span>
   );
 }
 
 const SIGNAL_META: Record<HiringSignal, { label: string; className: string }> = {
-  strong: { label: "Strong hiring signal", className: "text-[hsl(var(--invalid))]" },
-  medium: { label: "Hiring signal", className: "text-[hsl(var(--risky))]" },
-  weak: { label: "Low activity", className: "text-muted-foreground" },
+  strong: { label: "Strong hiring signal", className: TONES.invalid },
+  medium: { label: "Hiring signal", className: TONES.risky },
+  weak: { label: "Low activity", className: TONES.muted },
 };
 
 export function HiringSignalChip({ signal }: { signal: HiringSignal }) {
   const m = SIGNAL_META[signal];
   return (
-    <span className={cn("inline-flex items-center gap-1 text-xs font-medium", m.className)}>
-      <Flame className={cn("size-3.5", signal === "weak" && "opacity-50")} /> {m.label}
+    <span className={cn(CHIP, m.className)}>
+      <Flame className={cn("size-3", signal === "weak" && "opacity-50")} strokeWidth={2} /> {m.label}
     </span>
   );
 }
 
 export function ScoreBar({ value, label }: { value: number; label?: string }) {
-  const tone = value >= 85 ? "bg-[hsl(var(--valid))]" : value >= 60 ? "bg-primary" : "bg-[hsl(var(--risky))]";
+  const tone = value >= 85 ? "bg-[hsl(var(--valid))]" : value >= 60 ? "bg-brand" : "bg-[hsl(var(--risky))]";
+  const pct = Math.max(0, Math.min(100, value));
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full", tone)} style={{ width: `${value}%` }} />
+      <div className="h-1.5 min-w-10 flex-1 overflow-hidden rounded-full bg-border">
+        <div className={cn("h-full rounded-full transition-[width] duration-300", tone)} style={{ width: `${pct}%` }} />
       </div>
-      <span className="w-9 shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">{label ?? `${value}%`}</span>
+      <span className="w-9 shrink-0 text-right text-[11px] font-semibold tabular-nums text-foreground/80">{label ?? `${value}%`}</span>
     </div>
   );
 }

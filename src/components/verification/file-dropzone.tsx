@@ -1,10 +1,13 @@
 "use client";
 import * as React from "react";
-import { UploadCloud, FileText } from "lucide-react";
+import { UploadCloud, FileSpreadsheet, FileText, FileType } from "lucide-react";
 import { cn, formatNumber } from "@/lib/utils";
 import { UPLOAD_LIMITS } from "@/lib/credit-config";
 
-export function FileDropzone({ onFile }: { onFile: (file: File) => void }) {
+const FORMAT_ICON: Record<string, React.ElementType> = { CSV: FileSpreadsheet, XLSX: FileSpreadsheet, TXT: FileText };
+
+/** Drag-and-drop / click-to-browse file target (shared by Verification and Lead imports). */
+export function FileDropzone({ onFile, compact }: { onFile: (file: File) => void; compact?: boolean }) {
   const [dragging, setDragging] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -14,23 +17,18 @@ export function FileDropzone({ onFile }: { onFile: (file: File) => void }) {
 
   return (
     <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragging(true);
-      }}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragging(false);
-        handleFiles(e.dataTransfer.files);
-      }}
+      onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}
       onClick={() => inputRef.current?.click()}
       role="button"
       tabIndex={0}
+      aria-label="Upload a file"
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && inputRef.current?.click()}
       className={cn(
-        "flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-12 text-center transition-colors",
-        dragging ? "border-primary bg-primary/5" : "border-border bg-muted/20 hover:border-primary/50 hover:bg-muted/40",
+        "group relative flex cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed text-center outline-none transition-all focus-visible:ring-[3px] focus-visible:ring-ring/20",
+        compact ? "px-5 py-7" : "px-6 py-10",
+        dragging ? "border-brand bg-brand/[0.06]" : "border-border bg-surface/40 hover:border-brand/50 hover:bg-brand/[0.03]",
       )}
     >
       <input
@@ -40,21 +38,29 @@ export function FileDropzone({ onFile }: { onFile: (file: File) => void }) {
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
       />
-      <div className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-        <UploadCloud className="size-7" />
-      </div>
-      <p className="text-base font-semibold">Drag &amp; drop a file here</p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        or <span className="font-medium text-primary">browse files</span>
+      <span
+        className={cn(
+          "mb-3 flex size-12 items-center justify-center rounded-xl border border-border bg-card text-brand shadow-xs transition-transform",
+          dragging ? "-translate-y-0.5 scale-105" : "group-hover:-translate-y-0.5",
+        )}
+      >
+        <UploadCloud className="size-6" strokeWidth={1.75} />
+      </span>
+      <p className="text-[15px] font-semibold">{dragging ? "Drop to upload" : "Drop your file here"}</p>
+      <p className="mt-0.5 text-sm text-muted-foreground">
+        or <span className="font-medium text-brand underline-offset-2 group-hover:underline">browse your computer</span>
       </p>
-      <div className="mt-5 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-        {UPLOAD_LIMITS.supportedFormats.map((f) => (
-          <span key={f} className="inline-flex items-center gap-1 rounded-md bg-card px-2 py-1 shadow-sm">
-            <FileText className="size-3" />
-            {f}
-          </span>
-        ))}
-        <span>· up to {UPLOAD_LIMITS.maxFileSizeMb}MB · {formatNumber(UPLOAD_LIMITS.maxRows)} rows</span>
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
+        {UPLOAD_LIMITS.supportedFormats.map((f) => {
+          const Icon = FORMAT_ICON[f] ?? FileType;
+          return (
+            <span key={f} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 font-medium">
+              <Icon className="size-3 text-[hsl(var(--valid))]" strokeWidth={1.9} />
+              {f}
+            </span>
+          );
+        })}
+        <span className="ml-1">Up to {UPLOAD_LIMITS.maxFileSizeMb} MB · {formatNumber(UPLOAD_LIMITS.maxRows)} rows</span>
       </div>
     </div>
   );

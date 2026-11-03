@@ -1,4 +1,6 @@
 "use client";
+import { JobPicker } from "./job-picker";
+import { Building2 as PickerCompanyIcon, Upload as UploadGlyph } from "lucide-react";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -144,7 +146,7 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
           description="Upload a CSV with Company Name and Location. We find each company's website, email, phone, LinkedIn, socials and key details."
           action={
             <div className="flex items-center gap-2">
-              <Button onClick={() => setImportOpen(true)}><Upload className="size-4" /> Import companies</Button>
+              <Button onClick={() => setImportOpen(true)}><Upload /> Import companies</Button>
             </div>
           }
         />
@@ -158,15 +160,25 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Tab toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 md:py-2.5">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-4 py-2.5 sm:px-6">
         <div className="flex w-full items-center gap-2 sm:contents">
-          <Select value={activeId ?? ""} onChange={(e) => setActiveId(e.target.value)} className="h-9 min-w-0 flex-1 sm:w-56 sm:flex-none">
-            {jobs.map((j) => <option key={j.id} value={j.id}>{j.name} · {formatDate(j.createdAt)}</option>)}
-          </Select>
+          <JobPicker
+            jobs={jobs.map((j) => ({ id: j.id, name: j.name, createdAt: j.createdAt, status: j.status, progress: j.progress, count: { n: j.total, unit: "companies" } }))}
+            value={activeId}
+            onChange={setActiveId}
+            icon={PickerCompanyIcon}
+            label="Company imports"
+            className="min-w-0 flex-1 sm:w-72 sm:flex-none"
+            footer={(close) => (
+              <button type="button" onClick={() => { close(); setImportOpen(true); }} className="flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-brand transition-colors hover:bg-brand/10">
+                <UploadGlyph className="size-4" /> Import companies
+              </button>
+            )}
+          />
           {/* Mobile-only compact actions */}
           <div className="flex items-center gap-1.5 sm:hidden">
-            <Button size="icon" className="size-9 shrink-0" onClick={() => setImportOpen(true)} aria-label="Import companies"><Upload className="size-4" /></Button>
-            <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="size-9 shrink-0" aria-label="Actions"><MoreHorizontal className="size-4" /></Button>}>
+            <Button size="icon" className="shrink-0" onClick={() => setImportOpen(true)} aria-label="Import companies"><Upload /></Button>
+            <DropdownMenu align="end" trigger={<Button size="icon" variant="outline" className="shrink-0" aria-label="Actions"><MoreHorizontal /></Button>}>
               {active && <DropdownItem disabled={verifying} onClick={() => verify.mutate(active.id)}><MailCheck /> Verify emails</DropdownItem>}
               {active && <DropdownItem disabled={llmVerify.isPending} onClick={() => llmVerify.mutate(active.id)}><Sparkles /> AI verify</DropdownItem>}
               {active && <DropdownItem disabled={retryFailed.isPending || active.status === "collecting"} onClick={() => retryFailed.mutate(active.id)}><RotateCw /> Retry failed</DropdownItem>}
@@ -179,50 +191,69 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
             </DropdownMenu>
           </div>
         </div>
-        {active && <span className="hidden text-xs text-muted-foreground sm:inline">{formatNumber(active.total)} companies</span>}
+        {active && (
+          <span className="hidden items-center gap-1.5 rounded-md bg-surface px-2 py-1 text-xs text-muted-foreground sm:inline-flex">
+            {live && <span className="inline-flex items-center gap-1 rounded bg-brand/10 px-1 text-[10px] font-semibold text-brand"><span className="size-1.5 animate-pulse rounded-full bg-brand" /> Live</span>}
+            <span className="font-semibold tabular-nums text-foreground">{formatNumber(active.total)}</span> companies
+          </span>
+        )}
         {/* Desktop inline actions */}
         <div className="ml-auto hidden items-center gap-2 sm:flex">
           {active && (
-            <Button size="sm" variant="outline" onClick={() => verify.mutate(active.id)} disabled={verifying}>
-              {verifying ? <Loader2 className="size-4 animate-spin" /> : <MailCheck className="size-4" />}
-              {verifying ? "Verifying…" : "Verify emails"}
-            </Button>
+            <>
+              <Button size="sm" variant="brand" onClick={() => verify.mutate(active.id)} disabled={verifying} title="Find and verify contact emails for the companies in this collection.">
+                {verifying ? <Loader2 className="animate-spin" /> : <MailCheck />}
+                {verifying ? "Verifying…" : "Verify emails"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => retryFailed.mutate(active.id)} disabled={retryFailed.isPending || active.status === "collecting"} title="Re-run the companies that failed to resolve.">
+                {retryFailed.isPending ? <Loader2 className="animate-spin" /> : <RotateCw className="text-[hsl(var(--risky))]" />}
+                Retry failed
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => llmVerify.mutate(active.id)} disabled={llmVerify.isPending} title="AI cross-check the collected company data.">
+                {llmVerify.isPending ? <Loader2 className="animate-spin" /> : <Sparkles className="text-[hsl(280_62%_55%)] dark:text-[hsl(280_80%_76%)]" />}
+                {llmVerify.isPending ? "Reviewing…" : "AI verify"}
+              </Button>
+              <span className="mx-0.5 h-5 w-px bg-border" aria-hidden />
+            </>
           )}
+          <Button size="sm" onClick={() => setImportOpen(true)}><Upload /> Import companies</Button>
           {active && (
-            <Button size="sm" variant="outline" onClick={() => llmVerify.mutate(active.id)} disabled={llmVerify.isPending}>
-              {llmVerify.isPending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-              {llmVerify.isPending ? "Reviewing…" : "AI verify"}
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              onClick={async () => { if (await confirm({ title: "Delete collection?", description: `“${active.name}” and its ${formatNumber(active.total)} companies will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }}
+              aria-label="Delete collection"
+              title="Delete collection"
+            >
+              {remove.isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
             </Button>
           )}
-          <Button size="sm" onClick={() => setImportOpen(true)}><Upload className="size-4" /> Import</Button>
-          {active && (
-            <Button size="sm" variant="outline" onClick={() => retryFailed.mutate(active.id)} disabled={retryFailed.isPending || active.status === "collecting"}>
-              {retryFailed.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCw className="size-4" />}
-              Retry failed
-            </Button>
-          )}
-          {active && <button onClick={async () => { if (await confirm({ title: "Delete collection?", description: `“${active.name}” and its ${formatNumber(active.total)} companies will be permanently removed. This can’t be undone.` })) remove.mutate(active.id); }} className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-[hsl(var(--invalid))]" aria-label="Delete collection">{remove.isPending ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}</button>}
         </div>
       </div>
 
       {/* Stats */}
       {s && (
         <StatsBar live={!!live} summary={`${formatNumber(s.enriched)}/${formatNumber(s.total)} enriched · ${formatNumber(s.withEmail)} emails`}>
-          <Stat icon={Building2} label="Enriched" value={`${formatNumber(s.enriched)}/${formatNumber(s.total)}`} />
-          <Stat icon={Search} label="Resolved" value={formatNumber(s.resolved)} />
+          <Stat icon={Building2} label="Enriched" value={`${formatNumber(s.enriched)}/${formatNumber(s.total)}`} tone="valid" />
+          <Stat icon={Search} label="Resolved" value={formatNumber(s.resolved)} tone="brand" />
           <Stat icon={Globe} label="Website" value={formatNumber(s.withWebsite)} />
           <Stat icon={Mail} label="Email" value={formatNumber(s.withEmail)} />
           <Stat icon={Phone} label="Phone" value={formatNumber(s.withPhone)} />
           <Stat icon={Linkedin} label="LinkedIn" value={formatNumber(s.withLinkedin)} />
           <Stat icon={Landmark} label="Legal entity" value={formatNumber(s.withLegalEntity)} />
-          <Stat icon={MailCheck} label="Valid emails" value={`${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)}`} />
+          <Stat icon={MailCheck} label="Valid emails" value={`${formatNumber(s.emailsValid)}/${formatNumber(s.emailsVerified)}`} tone="valid" />
           <Stat icon={Database} label="Cache hits" value={formatNumber(s.cacheHits)} />
           <Stat icon={AlertTriangle} label="Rate-limited" value={formatNumber(s.rateLimited)} tone="risky" />
           {live && (
             <div className="flex min-w-[160px] flex-1 items-center gap-2">
               {active.verifyStatus === "verifying"
-                ? <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--risky))]"><Loader2 className="size-3.5 animate-spin" /> Verifying emails…</span>
-                : <><Progress value={active.progress} className="flex-1" /><span className="tabular-nums text-muted-foreground">{active.progress}%</span></>}
+                ? <span className="inline-flex items-center gap-1.5 rounded-md bg-brand/10 px-2 py-1 text-xs font-medium text-brand"><span className="size-1.5 rounded-full bg-brand animate-pulse" /> Verifying emails…</span>
+                : <>
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-brand"><span className="size-1.5 rounded-full bg-brand animate-pulse" /> Collecting</span>
+                    <Progress value={active.progress} className="flex-1" />
+                    <span className="text-xs font-semibold tabular-nums text-foreground">{active.progress}%</span>
+                  </>}
             </div>
           )}
         </StatsBar>
@@ -245,10 +276,19 @@ export function CompaniesTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: 
   );
 }
 
-function Stat({ icon: Icon, label, value, tone }: { icon: React.ElementType; label: string; value: string; tone?: "risky" }) {
+const STAT_TONE = {
+  muted: "bg-surface text-muted-foreground",
+  brand: "bg-brand/10 text-brand",
+  valid: "bg-[hsl(var(--valid)/0.12)] text-[hsl(var(--valid))]",
+  risky: "bg-[hsl(var(--risky)/0.14)] text-[hsl(var(--risky))]",
+} as const;
+
+function Stat({ icon: Icon, label, value, tone = "muted" }: { icon: React.ElementType; label: string; value: string; tone?: keyof typeof STAT_TONE }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <Icon className={cn("size-3.5", tone === "risky" ? "text-[hsl(var(--risky))]" : "text-muted-foreground")} />
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-card py-1 pl-1 pr-2.5 shadow-xs">
+      <span className={cn("flex size-6 items-center justify-center rounded-md", STAT_TONE[tone])}>
+        <Icon className="size-3.5" strokeWidth={1.75} />
+      </span>
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className={cn("text-sm font-semibold tabular-nums", tone === "risky" && "text-[hsl(var(--risky))]")}>{value}</span>
     </div>

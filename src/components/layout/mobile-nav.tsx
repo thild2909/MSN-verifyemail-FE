@@ -56,14 +56,14 @@ export function MobileNavProvider({ children }: { children: React.ReactNode }) {
         isOpen &&
         createPortal(
           <div className="fixed inset-0 z-50 lg:hidden">
-            <div className="absolute inset-0 bg-black/50 animate-fade-in" onClick={() => setIsOpen(false)} />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] animate-fade-in" onClick={() => setIsOpen(false)} />
             <div className="absolute inset-y-0 left-0 flex w-[82%] max-w-xs animate-slide-in-left">
               <div className="min-w-0 flex-1 overflow-hidden shadow-2xl">
                 <SidebarContent onNavigate={() => setIsOpen(false)} />
               </div>
               <button
                 onClick={() => setIsOpen(false)}
-                className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 text-white backdrop-blur transition-colors hover:bg-white/20"
+                className="absolute right-3 top-3.5 rounded-lg border border-border bg-card p-1.5 text-muted-foreground shadow-xs transition-colors hover:text-foreground"
                 aria-label="Close menu"
               >
                 <X className="size-5" />
@@ -117,10 +117,10 @@ export function MobileTabBar() {
               href={t.href}
               className={cn(
                 "flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors",
-                active ? "text-primary" : "text-muted-foreground",
+                active ? "text-brand" : "text-muted-foreground",
               )}
             >
-              <Icon className={cn("size-[22px]", active && "stroke-[2.25]")} />
+              <Icon className="size-[22px]" strokeWidth={active ? 2.1 : 1.75} />
               <span>{t.label}</span>
             </Link>
           );
@@ -129,7 +129,7 @@ export function MobileTabBar() {
           onClick={open}
           className={cn(
             "flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition-colors",
-            isOpen ? "text-primary" : "text-muted-foreground",
+            isOpen ? "text-brand" : "text-muted-foreground",
           )}
           aria-label="More"
         >

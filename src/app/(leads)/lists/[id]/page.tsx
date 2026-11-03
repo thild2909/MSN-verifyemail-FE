@@ -3,16 +3,16 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Users, Building2, ListChecks, Bookmark, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Users, Building2, ListChecks, Bookmark, Pencil, Trash2 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { IconTile, Pill } from "@/components/common/kit";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { SavedListItemsTable } from "@/components/leads/saved-list-items-table";
 import { useToast } from "@/components/ui/toast";
 import { getLeadLists, renameLeadList, deleteLeadList } from "@/lib/api/client";
-import { formatNumber, cn } from "@/lib/utils";
+import { formatNumber, formatDate, cn } from "@/lib/utils";
 
 export default function SavedListDetailPage() {
   const params = useParams<{ id: string }>();
@@ -66,28 +66,43 @@ export default function SavedListDetailPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Header */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-3">
-        <Link href="/lists" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ChevronLeft className="size-4" /> Lists
-        </Link>
-        <div className="flex min-w-0 items-center gap-2">
-          {list.isSaved ? <Bookmark className="size-5 shrink-0 text-primary" /> : <ListChecks className="size-5 shrink-0 text-primary" />}
-          <h1 className="min-w-0 truncate text-lg font-bold tracking-tight">{list.name}</h1>
-          {list.isSaved && <Badge variant="secondary">Default</Badge>}
+      <div className="bg-card px-4 pt-4 sm:px-6 sm:pt-5">
+        <div className="flex flex-wrap items-start gap-3">
+          <Link
+            href="/lists"
+            aria-label="Back to lists"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-xs transition-colors hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" />
+          </Link>
+          <IconTile icon={list.isSaved ? Bookmark : ListChecks} tone="brand" className="hidden sm:flex" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="min-w-0 break-words text-xl font-semibold tracking-tight">{list.name}</h1>
+              {list.isSaved && <Pill tone="brand">Default</Pill>}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span><span className="font-semibold tabular-nums text-foreground">{formatNumber(list.summary.total)}</span> leads</span>
+              <span className="inline-flex items-center gap-1"><Users className="size-3.5" /> {formatNumber(list.summary.people)} people</span>
+              <span className="inline-flex items-center gap-1"><Building2 className="size-3.5" /> {formatNumber(list.summary.companies)} companies</span>
+              <span>Updated {formatDate(list.updatedAt)}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setRenameName(list.name); setRenameOpen(true); }}><Pencil /> Rename</Button>
+            {!list.isSaved && (
+              <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+                <Trash2 /> Delete
+              </Button>
+            )}
+          </div>
         </div>
-        <span className="hidden text-sm text-muted-foreground sm:inline">
-          {formatNumber(list.summary.total)} leads · {formatNumber(list.summary.people)} people · {formatNumber(list.summary.companies)} companies
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => { setRenameName(list.name); setRenameOpen(true); }}><Pencil className="size-4" /> Rename</Button>
-          {!list.isSaved && <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)} className="text-destructive hover:text-destructive"><Trash2 className="size-4" /> Delete</Button>}
-        </div>
-      </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 border-b px-4 py-2">
-        <TabBtn active={tab === "person"} onClick={() => setTab("person")} icon={Users} label="People leads" count={list.summary.people} />
-        <TabBtn active={tab === "company"} onClick={() => setTab("company")} icon={Building2} label="Company leads" count={list.summary.companies} />
+        {/* Tabs */}
+        <div role="tablist" className="mt-4 flex items-center gap-1 overflow-x-auto border-b border-border no-scrollbar">
+          <TabBtn active={tab === "person"} onClick={() => setTab("person")} icon={Users} label="People leads" count={list.summary.people} />
+          <TabBtn active={tab === "company"} onClick={() => setTab("company")} icon={Building2} label="Company leads" count={list.summary.companies} />
+        </div>
       </div>
 
       {/* Table fills the rest of the screen */}
@@ -124,11 +139,16 @@ export default function SavedListDetailPage() {
 function TabBtn({ active, onClick, icon: Icon, label, count }: { active: boolean; onClick: () => void; icon: React.ElementType; label: string; count: number }) {
   return (
     <button
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
-      className={cn("inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors", active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground")}
+      className={cn(
+        "-mb-px inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+        active ? "border-brand bg-brand/[0.04] text-brand" : "border-transparent text-foreground/75 hover:text-foreground",
+      )}
     >
-      <Icon className="size-4" /> {label}
-      <span className={cn("rounded-full px-1.5 text-[11px] font-semibold tabular-nums", active ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>{formatNumber(count)}</span>
+      <Icon className="size-4" strokeWidth={1.75} /> {label}
+      <span className={cn("rounded px-1.5 text-[11px] font-semibold tabular-nums", active ? "bg-brand/10 text-brand" : "bg-surface text-muted-foreground")}>{formatNumber(count)}</span>
     </button>
   );
 }

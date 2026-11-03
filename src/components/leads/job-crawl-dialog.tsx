@@ -5,7 +5,7 @@ import { Loader2, Radar, Check } from "lucide-react";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { IconTile, Field } from "@/components/common/kit";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import { createJobSearch } from "@/lib/api/client";
@@ -67,24 +67,25 @@ export function JobCrawlDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange} className="max-w-2xl">
       <DialogHeader>
-        <DialogTitle className="flex items-center gap-2"><Radar className="size-5 text-primary" /> Crawl job boards</DialogTitle>
+        <IconTile icon={Radar} tone="brand" className="mb-3" />
+        <DialogTitle>Crawl job boards</DialogTitle>
         <DialogDescription>Search open roles across multiple boards through your proxy pool. Every role is tagged with its source.</DialogDescription>
       </DialogHeader>
 
-      <div className="space-y-4 py-1">
+      <div className="space-y-5 py-1">
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Keywords</Label>
+          <Field label="Keywords">
             <Input value={keywords} onChange={(e) => setKeywords(e.target.value)} placeholder="software engineer" />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Location <span className="text-muted-foreground">(optional)</span></Label>
+          </Field>
+          <Field label={<>Location <span className="font-normal text-muted-foreground">(optional)</span></>}>
             <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Sydney / London / Remote" />
-          </div>
+          </Field>
         </div>
 
-        <div className="space-y-1.5">
-          <Label className="text-xs">Sources</Label>
+        <Field
+          label="Sources"
+          aside={<span className="text-[11px] font-medium tabular-nums text-muted-foreground">{sources.length} / {JOB_SOURCES.length} selected</span>}
+        >
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {JOB_SOURCES.map((s) => {
               const on = sources.includes(s);
@@ -93,29 +94,45 @@ export function JobCrawlDialog({
                   key={s}
                   type="button"
                   onClick={() => toggle(s)}
-                  className={cn("flex min-w-0 flex-col items-start gap-0.5 rounded-lg border p-2.5 text-left transition-colors", on ? "border-primary bg-primary/5" : "border-input hover:bg-muted")}
+                  aria-pressed={on}
+                  className={cn(
+                    "flex min-w-0 flex-col items-start gap-0.5 rounded-xl border bg-card p-3 text-left transition-[border-color,box-shadow,background-color]",
+                    on ? "border-brand ring-[3px] ring-brand/15" : "border-border hover:bg-surface",
+                  )}
                 >
-                  <span className="flex w-full min-w-0 items-center justify-between gap-1 text-sm font-medium">
+                  <span className="flex w-full min-w-0 items-center justify-between gap-1 text-[13px] font-medium">
                     <span className="truncate">{JOB_SOURCE_LABEL[s]}</span>
-                    {on && <Check className="size-3.5 shrink-0 text-primary" />}
+                    <span
+                      className={cn(
+                        "flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                        on ? "border-primary bg-primary text-primary-foreground" : "border-input",
+                      )}
+                    >
+                      {on && <Check className="size-2.5" strokeWidth={3} />}
+                    </span>
                   </span>
                   <span className="w-full truncate text-[11px] text-muted-foreground">{JOB_SOURCE_REGION[s]}</span>
                 </button>
               );
             })}
           </div>
-        </div>
+        </Field>
 
-        <div className="space-y-1.5">
-          <Label className="text-xs">Pages per source <span className="text-muted-foreground">({maxPages} × ~20 roles)</span></Label>
-          <input type="range" min={1} max={10} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value))} className="w-full accent-[hsl(var(--primary))]" />
-        </div>
+        <Field
+          label="Pages per source"
+          aside={<span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-brand">{maxPages} × ~20 roles</span>}
+        >
+          <div className="rounded-lg border border-border bg-surface/50 px-3 py-2.5">
+            <input type="range" min={1} max={10} value={maxPages} onChange={(e) => setMaxPages(Number(e.target.value))} className="w-full accent-[hsl(var(--brand))]" />
+            <div className="mt-1 flex justify-between text-[10px] font-medium tabular-nums text-muted-foreground"><span>1</span><span>10</span></div>
+          </div>
+        </Field>
       </div>
 
       <DialogFooter>
         <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
         <Button disabled={!canSubmit || create.isPending} onClick={() => create.mutate()}>
-          {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />} Start crawl
+          {create.isPending ? <Loader2 className="animate-spin" /> : <Radar />} Start crawl
         </Button>
       </DialogFooter>
     </Dialog>

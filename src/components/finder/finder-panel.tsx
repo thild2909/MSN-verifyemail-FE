@@ -1,11 +1,11 @@
 "use client";
 import * as React from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Search, Loader2, Building2, User, Download, CheckCircle2, Copy } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Search, Loader2, Building2, User, Download, CheckCircle2, Copy, Globe, Sparkles, ShieldCheck } from "lucide-react";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { SectionCard, Field, IconTile } from "@/components/common/kit";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusBadge } from "@/components/verification/status-badge";
@@ -159,23 +159,31 @@ export function FinderPanel() {
   };
 
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className="grid gap-5 lg:grid-cols-3">
       {/* Search form */}
-      <Card className="lg:col-span-1">
-        <CardContent className="p-5">
-          <div className="mb-4 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
-            <button
-              onClick={() => setMode("person")}
-              className={cn("flex items-center justify-center gap-1.5 rounded-md py-2 text-sm font-medium transition-colors", mode === "person" ? "bg-card shadow-sm" : "text-muted-foreground")}
-            >
-              <User className="size-4" /> By person
-            </button>
-            <button
-              onClick={() => setMode("domain")}
-              className={cn("flex items-center justify-center gap-1.5 rounded-md py-2 text-sm font-medium transition-colors", mode === "domain" ? "bg-card shadow-sm" : "text-muted-foreground")}
-            >
-              <Building2 className="size-4" /> By domain
-            </button>
+      <div className="space-y-4 lg:col-span-1">
+        <SectionCard
+          icon={mode === "person" ? User : Building2}
+          title={mode === "person" ? "Find a person's email" : "Find emails on a domain"}
+          description={mode === "person" ? "Name + company domain → best verified address." : "Discover public business contacts for a company."}
+        >
+          <div className="mb-4 grid grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-0.5">
+            {([
+              { m: "person" as Mode, icon: User, label: "By person" },
+              { m: "domain" as Mode, icon: Building2, label: "By domain" },
+            ]).map((t) => (
+              <button
+                key={t.m}
+                type="button"
+                onClick={() => setMode(t.m)}
+                className={cn(
+                  "flex items-center justify-center gap-1.5 rounded-md py-1.5 text-sm font-medium transition-colors",
+                  mode === t.m ? "bg-card text-brand shadow-xs" : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <t.icon className="size-4" strokeWidth={1.75} /> {t.label}
+              </button>
+            ))}
           </div>
 
           <form
@@ -183,36 +191,54 @@ export function FinderPanel() {
               e.preventDefault();
               if (canSearch) search.mutate();
             }}
-            className="space-y-3"
+            className="space-y-3.5"
+            autoComplete="off"
           >
             {mode === "person" ? (
               <>
-                <div className="space-y-1.5">
-                  <Label>Full name</Label>
-                  <Input value={person.fullName} onChange={(e) => setPerson({ ...person, fullName: e.target.value })} placeholder="John Smith" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Company / domain</Label>
-                  <Input value={person.domain} onChange={(e) => setPerson({ ...person, domain: e.target.value })} placeholder="example.com" />
-                </div>
+                <Field label="Full name" htmlFor="finder-name">
+                  <Input id="finder-name" name="finder-name" autoComplete="off" data-1p-ignore data-lpignore="true" value={person.fullName} onChange={(e) => setPerson({ ...person, fullName: e.target.value })} placeholder="John Smith" />
+                </Field>
+                <Field label="Company / domain" htmlFor="finder-domain">
+                  <div className="relative">
+                    <Globe className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input id="finder-domain" name="finder-domain" autoComplete="off" data-1p-ignore data-lpignore="true" className="pl-9" value={person.domain} onChange={(e) => setPerson({ ...person, domain: e.target.value })} placeholder="example.com" />
+                  </div>
+                </Field>
               </>
             ) : (
-              <div className="space-y-1.5">
-                <Label>Company domain</Label>
-                <Input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="acme.com" />
-                <p className="text-xs text-muted-foreground">
-                  Discovers publicly available business contacts. Private data is never scraped.
-                </p>
-              </div>
+              <Field label="Company domain" htmlFor="finder-only-domain" hint="Discovers publicly available business contacts. Private data is never scraped.">
+                <div className="relative">
+                  <Globe className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input id="finder-only-domain" name="finder-only-domain" autoComplete="off" data-1p-ignore data-lpignore="true" className="pl-9" value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="acme.com" />
+                </div>
+              </Field>
             )}
 
             <Button type="submit" className="w-full" disabled={!canSearch || search.isPending}>
-              {search.isPending ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+              {search.isPending ? <Loader2 className="animate-spin" /> : <Search />}
               {mode === "person" ? "Find email" : "Find emails"}
             </Button>
           </form>
-        </CardContent>
-      </Card>
+        </SectionCard>
+
+        {/* How it works */}
+        <div className="rounded-xl border border-border bg-card p-4 shadow-card">
+          <p className="text-[13px] font-semibold">How it works</p>
+          <ol className="mt-3 space-y-2.5">
+            {[
+              { icon: Sparkles, text: "Builds likely address patterns for the name and domain" },
+              { icon: ShieldCheck, text: "Verifies candidates against the mail server, stopping at the first deliverable one" },
+              { icon: CheckCircle2, text: "Returns the best match with a confidence score" },
+            ].map((s, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-xs text-muted-foreground">
+                <IconTile icon={s.icon} tone={(["violet", "sky", "valid"] as const)[i]} size="sm" />
+                <span className="pt-1.5">{s.text}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
 
       {/* Results */}
       <div className="lg:col-span-2">
@@ -221,23 +247,24 @@ export function FinderPanel() {
             icon={Search}
             title="Find professional emails"
             description="Enter a person's name and company domain, or just a domain, to discover possible business email addresses."
+            className="h-full min-h-[22rem]"
           />
         ) : (
-          <Card>
-            <CardContent className="p-0">
-              <div className="flex items-center justify-between p-4">
-                <p className="flex items-center gap-2 text-sm font-medium">
+          <Card className="overflow-hidden">
+            <div className="p-0">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3.5 sm:px-5">
+                <div className="flex min-w-0 items-center gap-3">
+                  <IconTile icon={search.isPending ? Spinner : mode === "person" ? User : Building2} tone="brand" className={cn(search.isPending && "[&_svg]:animate-spin")} />
+                  <p className="text-[15px] font-semibold">
                   {search.isPending ? (
-                    <>
-                      <Spinner className="size-3.5 animate-spin text-primary" />
-                      {mode === "person" ? "Finding the best email…" : "Finding & verifying contacts…"}
-                    </>
+                    mode === "person" ? "Finding the best email…" : "Finding & verifying contacts…"
                   ) : mode === "person" ? (
                     finderState === "not_found" || finderState === "no_mx" ? "Result" : "Best match"
                   ) : (
                     `${results.length} contact${results.length === 1 ? "" : "s"}`
                   )}
-                </p>
+                  </p>
+                </div>
                 {results.length > 0 && !search.isPending &&
                   !(mode === "person" && (finderState === "not_found" || finderState === "no_mx")) && (
                     <Button variant="outline" size="sm" onClick={exportCsv}>
@@ -264,7 +291,7 @@ export function FinderPanel() {
               ) : (
               <>
               {mode === "person" && finderState && !search.isPending && (
-                <div className={cn("mx-4 mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm", STATE_UI[finderState].className)}>
+                <div className={cn("mx-4 mt-3 mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-sm sm:mx-5", STATE_UI[finderState].className)}>
                   {React.createElement(STATE_UI[finderState].icon, { className: "size-4 shrink-0" })}
                   {STATE_UI[finderState].label}
                 </div>
@@ -380,7 +407,7 @@ export function FinderPanel() {
               </div>
               </>
               )}
-            </CardContent>
+            </div>
           </Card>
         )}
       </div>

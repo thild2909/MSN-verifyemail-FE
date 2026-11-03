@@ -1,4 +1,6 @@
 "use client";
+import { ColHead } from "@/components/common/col-head";
+import { ColumnsMenu as SharedColumnsMenu } from "./columns-menu";
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Inbox, Loader2, ChevronRight, Linkedin, ChevronDown, ListPlus, Download, X, Plus, SlidersHorizontal, MailCheck, DollarSign, Columns3, ArrowUp, ArrowDown, ArrowUpDown, Sparkles, Filter } from "lucide-react";
@@ -15,6 +17,7 @@ import { addToListToast } from "@/lib/leads/lead-snapshot";
 import { toCsv, downloadCsv } from "@/lib/leads/csv";
 import { peopleExportTable } from "@/lib/leads/people-export";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { TONES, IconTile, Field, Pill, type Tone } from "@/components/common/kit";
 import { Avatar } from "./leads-ui";
 import { CompanyLogo, VerificationBadge, LlmBadge } from "./collect-ui";
 import { PeopleFilterPanel } from "./people-filter-panel";
@@ -58,24 +61,26 @@ function loadCols(): Record<ColKey, boolean> {
   return base;
 }
 
-const SENIORITY_STYLE: Record<PersonSeniority, string> = {
-  founder: "bg-[hsl(var(--valid))]/12 text-[hsl(var(--valid))]",
-  c_level: "bg-primary/12 text-primary",
-  president: "bg-primary/12 text-primary",
-  vp: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
-  other: "bg-muted text-muted-foreground",
+const SENIORITY_TONE: Record<PersonSeniority, Tone> = {
+  founder: "valid",
+  c_level: "brand",
+  president: "violet",
+  vp: "risky",
+  other: "muted",
 };
 
-// AI Support tags — colour → pill + row-accent classes (literal so Tailwind keeps them).
+// AI Support tags — colour → pill + row-accent classes. Status tokens where a
+// semantic one exists, otherwise theme-aware hsl tints (same recipe as the kit's
+// violet/sky tones), so every tag reads in both light and dark.
 const TAG_STYLES: Record<AiTagColor, { pill: string; row: string }> = {
-  amber:  { pill: "bg-amber-500/15 text-amber-700 dark:text-amber-300",   row: "border-l-2 border-l-amber-500" },
-  blue:   { pill: "bg-blue-500/15 text-blue-700 dark:text-blue-300",      row: "border-l-2 border-l-blue-500" },
-  green:  { pill: "bg-green-500/15 text-green-700 dark:text-green-300",    row: "border-l-2 border-l-green-500" },
-  purple: { pill: "bg-purple-500/15 text-purple-700 dark:text-purple-300", row: "border-l-2 border-l-purple-500" },
-  red:    { pill: "bg-red-500/15 text-red-700 dark:text-red-300",          row: "border-l-2 border-l-red-500" },
-  teal:   { pill: "bg-teal-500/15 text-teal-700 dark:text-teal-300",       row: "border-l-2 border-l-teal-500" },
-  pink:   { pill: "bg-pink-500/15 text-pink-700 dark:text-pink-300",       row: "border-l-2 border-l-pink-500" },
-  orange: { pill: "bg-orange-500/15 text-orange-700 dark:text-orange-300", row: "border-l-2 border-l-orange-500" },
+  amber:  { pill: TONES.risky,   row: "border-l-2 border-l-[hsl(var(--risky))]" },
+  blue:   { pill: TONES.sky,     row: "border-l-2 border-l-[hsl(199_89%_48%)]" },
+  green:  { pill: TONES.valid,   row: "border-l-2 border-l-[hsl(var(--valid))]" },
+  purple: { pill: TONES.violet,  row: "border-l-2 border-l-[hsl(280_70%_60%)]" },
+  red:    { pill: TONES.invalid, row: "border-l-2 border-l-[hsl(var(--invalid))]" },
+  teal:   { pill: "bg-[hsl(173_70%_40%/0.12)] text-[hsl(173_75%_30%)] dark:text-[hsl(173_65%_60%)]", row: "border-l-2 border-l-[hsl(173_70%_40%)]" },
+  pink:   { pill: "bg-[hsl(330_80%_60%/0.12)] text-[hsl(330_70%_48%)] dark:text-[hsl(330_85%_75%)]", row: "border-l-2 border-l-[hsl(330_80%_60%)]" },
+  orange: { pill: "bg-[hsl(25_95%_53%/0.12)] text-[hsl(22_85%_42%)] dark:text-[hsl(25_95%_68%)]",   row: "border-l-2 border-l-[hsl(25_95%_53%)]" },
 };
 
 type AiTag = { id: string; label: string; color: AiTagColor; ids: Set<string> };
@@ -298,7 +303,7 @@ export function CollectedPeopleTable({
   return (
     <div className="flex min-h-0 flex-1">
       {showFilters && (
-        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r bg-muted/10 md:flex">
+        <aside className="hidden w-64 shrink-0 flex-col overflow-clip border-r border-border bg-card md:flex">
           <PeopleFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_PEOPLE_FILTERS)} />
         </aside>
       )}
@@ -306,23 +311,29 @@ export function CollectedPeopleTable({
         <PeopleFilterPanel filters={filters} facets={facets} onChange={setFilters} onClear={() => setFilters(EMPTY_PEOPLE_FILTERS)} />
       </MobileFilterDrawer>
       <div className="relative flex min-w-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b px-4 py-2">
+      <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-2.5 sm:px-6">
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, title or company…" className="h-9 pl-9" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" strokeWidth={1.75} />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, title or company…" type="search" autoComplete="off" data-1p-ignore data-lpignore="true" className="h-9 pl-9" />
         </div>
-        <span className="hidden text-sm text-muted-foreground sm:inline"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
+        <span className="hidden items-center gap-1.5 rounded-md bg-surface px-2 py-1 text-xs text-muted-foreground sm:inline-flex"><span className="font-semibold text-foreground tabular-nums">{formatNumber(total)}</span> people</span>
         <div className="flex shrink-0 items-center gap-1.5 sm:ml-auto sm:gap-2">
           <div className="relative">
-            <Button size="sm" variant={aiOpen || aiTags.length > 0 ? "secondary" : "outline"} className="h-9" onClick={() => setAiOpen((o) => !o)} title="Ask AI to tag rows by a natural-language instruction.">
-              <Sparkles className="size-4" /> <span className="hidden sm:inline">AI Support</span>{aiTags.length > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{aiTags.length}</span>}
+            <Button size="sm" variant={aiOpen || aiTags.length > 0 ? "brand" : "outline"} className="h-9" onClick={() => setAiOpen((o) => !o)} title="Ask AI to tag rows by a natural-language instruction.">
+              <Sparkles /> <span className="hidden sm:inline">AI Support</span>{aiTags.length > 0 && <span className="ml-0.5 rounded-md bg-brand/10 px-1.5 text-[10px] font-semibold tabular-nums text-brand sm:ml-1">{aiTags.length}</span>}
             </Button>
             {aiOpen && (
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setAiOpen(false)} />
-                <div className="fixed inset-x-4 z-30 mt-1 rounded-lg border bg-card p-3 shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:w-[22rem] sm:max-w-[calc(100vw-2rem)]">
-                  <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="size-4 text-primary" /> AI Support</div>
-                  <p className="mb-2 text-xs text-muted-foreground">Describe what to tag. The AI highlights matching people in the table.</p>
+                <div className="fixed inset-x-4 z-30 mt-1.5 animate-fade-in overflow-hidden rounded-xl border border-border bg-card shadow-pop sm:absolute sm:inset-x-auto sm:right-0 sm:w-[23rem] sm:max-w-[calc(100vw-2rem)]">
+                  <div className="flex items-start gap-3 border-b border-border px-4 py-3">
+                    <IconTile icon={Sparkles} tone="brand" size="sm" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold leading-snug">AI Support</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">Describe what to tag. The AI highlights matching people in the table.</p>
+                    </div>
+                  </div>
+                  <div className="p-3">
                   <div className="flex items-center gap-2">
                     <Input
                       autoFocus
@@ -334,34 +345,35 @@ export function CollectedPeopleTable({
                       disabled={aiBusy}
                     />
                     <Button size="sm" className="h-9 shrink-0" onClick={runAiTag} disabled={aiBusy || !aiPrompt.trim()}>
-                      {aiBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                      {aiBusy ? <Loader2 className="animate-spin" /> : <Sparkles />}
                       {aiBusy ? "Running…" : "Run"}
                     </Button>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
+                  <p className="mb-1.5 mt-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Try</p>
+                  <div className="flex flex-wrap gap-1.5">
                     {["Highlight Indian names", "Tag founders & CEOs", "Mark fintech companies", "Flag people with no email"].map((ex) => (
-                      <button key={ex} onClick={() => setAiPrompt(ex)} disabled={aiBusy} className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-50">{ex}</button>
+                      <button key={ex} onClick={() => setAiPrompt(ex)} disabled={aiBusy} className="rounded-md border border-border bg-surface px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50">{ex}</button>
                     ))}
+                  </div>
                   </div>
                 </div>
               </>
             )}
           </div>
           <ColumnsMenu cols={cols} onToggle={toggleCol} onReset={resetCols} />
-          <Button size="sm" variant={showFilters ? "secondary" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
-            <SlidersHorizontal className="size-4" /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-full bg-primary/15 px-1.5 text-[10px] font-semibold text-primary sm:ml-1">{filtersActive}</span>}
+          <Button size="sm" variant={showFilters ? "brand" : "outline"} className="h-9" onClick={() => openFiltersFor(setShowFilters, setMobileFilters)}>
+            <SlidersHorizontal /> <span className="hidden sm:inline">Filters</span>{filtersActive > 0 && <span className="ml-0.5 rounded-md bg-brand/10 px-1.5 text-[10px] font-semibold tabular-nums text-brand sm:ml-1">{filtersActive}</span>}
           </Button>
         </div>
       </div>
 
       {aiTags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-b bg-muted/10 px-4 py-2 text-xs">
-          <Sparkles className="size-3.5 text-muted-foreground" />
-          <span className="mr-0.5 font-medium text-muted-foreground">AI tags:</span>
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border bg-surface px-4 py-2 text-xs sm:px-6">
+          <span className="mr-0.5 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><Sparkles className="size-3.5 text-brand" strokeWidth={1.75} /> AI tags</span>
           {aiTags.map((t) => {
             const on = activeTagId === t.id;
             return (
-              <span key={t.id} className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium", TAG_STYLES[t.color].pill, on && "ring-2 ring-inset ring-current")}>
+              <span key={t.id} className={cn("inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-semibold", TAG_STYLES[t.color].pill, on && "ring-1 ring-inset ring-current")}>
                 <button
                   onClick={() => setActiveTagId((cur) => (cur === t.id ? null : t.id))}
                   title={on ? "Showing only these rows. Click to show all" : "Filter the table to rows with this tag"}
@@ -374,7 +386,7 @@ export function CollectedPeopleTable({
             );
           })}
           {activeTagId
-            ? <button onClick={() => setActiveTagId(null)} className="ml-1 font-medium text-primary hover:underline">Show all</button>
+            ? <button onClick={() => setActiveTagId(null)} className="ml-1 font-medium text-brand hover:underline">Show all</button>
             : <span className="ml-1 text-muted-foreground">· click a tag to filter</span>}
           <button onClick={() => { setAiTags([]); setActiveTagId(null); }} className="ml-auto text-muted-foreground hover:text-foreground">Clear all</button>
         </div>
@@ -382,14 +394,14 @@ export function CollectedPeopleTable({
 
       <div className="min-h-0 flex-1">
         {isLoading ? (
-          <div className="space-y-2 p-4">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+          <div className="space-y-2 p-4 sm:px-6">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-lg" />)}</div>
         ) : total === 0 ? (
           filtersActive > 0 || debounced ? (
             <EmptyState
               icon={Search}
               title="No people match your filters"
               description="No one matches the current filters and search. Try removing some to see more."
-              action={<Button variant="outline" onClick={() => { setFilters(EMPTY_PEOPLE_FILTERS); setSearch(""); }}><X className="size-4" /> Clear filters</Button>}
+              action={<Button variant="outline" onClick={() => { setFilters(EMPTY_PEOPLE_FILTERS); setSearch(""); }}><X /> Clear filters</Button>}
               className="m-6"
             />
           ) : (
@@ -398,54 +410,56 @@ export function CollectedPeopleTable({
         ) : (
           <>
           {/* Mobile: people cards */}
-          <div className={cn("scrollbar-thin h-full space-y-2 overflow-auto p-3 transition-opacity md:hidden", isPlaceholderData && "opacity-60")}>
+          <div className={cn("scrollbar-thin h-full space-y-2 overflow-auto bg-background p-3 transition-opacity md:hidden", isPlaceholderData && "opacity-60")}>
             {rows.map((p) => {
               const selected = rowChecked(p.id);
               const finding = inflightIds.has(p.id);
               const rowTags = tagsForRow(p.id);
               return (
-                <div key={p.id} onClick={() => onOpenPerson(p)} className={cn("rounded-xl border p-3 transition-colors active:bg-muted/40", rowTags[0] && TAG_STYLES[rowTags[0].color].row, selected && "border-primary/40 bg-primary/[0.04]")}>
+                <div key={p.id} onClick={() => onOpenPerson(p)} className={cn("rounded-xl border border-border bg-card p-3 shadow-xs transition-colors active:bg-accent", rowTags[0] && TAG_STYLES[rowTags[0].color].row, selected && "border-brand/40 bg-brand/[0.05]")}>
                   <div className="flex items-start gap-2.5">
                     <div className="pt-0.5" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(p.id)} /></div>
                     <Avatar name={p.name} seed={p.id} />
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="min-w-0 truncate font-medium">{p.name}</span>
-                        {personHasFunding(p) && <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[hsl(var(--valid))]/10 px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]"><DollarSign className="size-3" /> Funded</span>}
-                        {p.llmVerification && <LlmBadge v={p.llmVerification} />}
-                        {rowTags.map((t) => <span key={t.id} className={cn("inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium", TAG_STYLES[t.color].pill)}>{t.label}</span>)}
-                      </div>
+                      <p className="truncate text-sm font-semibold leading-snug">{p.name}</p>
                       {p.title?.value && <p className="truncate text-xs text-muted-foreground">{p.title.value}</p>}
                       {p.altName && p.altName !== p.name && (
                         <p className="truncate text-[11px] text-muted-foreground">Also: <span className="font-medium text-foreground/80">{p.altName}</span></p>
                       )}
                     </div>
-                    <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                    <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
                   </div>
-                  <div className="mt-2 space-y-1.5 pl-[26px] text-xs">
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-[26px]">
+                    <Pill tone={SENIORITY_TONE[p.seniority]} className="normal-case">{SENIORITY_LABEL[p.seniority]}</Pill>
+                    {personHasFunding(p) && <Pill tone="valid"><DollarSign className="size-3" /> Funded</Pill>}
+                    {p.llmVerification && <LlmBadge v={p.llmVerification} />}
+                    {rowTags.map((t) => <span key={t.id} className={cn("inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold", TAG_STYLES[t.color].pill)}>{t.label}</span>)}
+                  </div>
+                  <div className="mt-2.5 space-y-2 border-t border-border pl-[26px] pt-2.5 text-xs">
                     <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
                       <CompanyLogo domain={p.companyDomain} text={p.companyLogoText} className="size-5 shrink-0 text-[9px]" />
-                      <span className="min-w-0 truncate">{p.company}</span>
-                      <span className={cn("ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium", SENIORITY_STYLE[p.seniority])}>{SENIORITY_LABEL[p.seniority]}</span>
+                      <span className="min-w-0 truncate font-medium text-foreground">{p.company}</span>
                     </div>
                     <div onClick={(e) => e.stopPropagation()}>
                       {p.emailVerification ? (
-                        isUnconfirmedEmail(p) ? <span className="text-muted-foreground">Not found</span>
-                          : <div className="flex flex-wrap items-center gap-1.5"><span className="break-all">{String(p.email?.value ?? p.emailVerification.email)}</span><VerificationBadge ev={p.emailVerification} /></div>
+                        isUnconfirmedEmail(p) ? <Pill tone="muted" className="normal-case">Not found</Pill>
+                          : <div className="flex flex-wrap items-center gap-1.5"><span className="break-all font-medium">{String(p.email?.value ?? p.emailVerification.email)}</span><VerificationBadge ev={p.emailVerification} /></div>
                       ) : p.email ? (
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="break-all">{String(p.email.value)}</span>
-                          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not verified</span>
-                          <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" disabled={finding || bulkVerifying} onClick={() => verifyOne.mutate(p.id)}>{finding ? <Loader2 className="size-3.5 animate-spin" /> : <MailCheck className="size-3.5" />}{finding ? "Verifying…" : "Verify"}</Button>
+                          <span className="break-all font-medium">{String(p.email.value)}</span>
+                          <Pill tone="muted" className="normal-case">Not verified</Pill>
+                          <Button size="sm" variant="brand" className="h-7 gap-1.5 px-2 text-xs" disabled={finding || bulkVerifying} onClick={() => verifyOne.mutate(p.id)}>{finding ? <Loader2 className="animate-spin" /> : <MailCheck />}{finding ? "Verifying…" : "Verify"}</Button>
                         </div>
                       ) : (
-                        <Button size="sm" variant="outline" className="h-7 gap-1.5 px-2 text-xs" disabled={finding || bulkVerifying} onClick={() => verifyOne.mutate(p.id)}>{finding ? <Loader2 className="size-3.5 animate-spin" /> : <MailCheck className="size-3.5" />}{finding ? "Finding…" : "Access email"}</Button>
+                        <Button size="sm" variant="brand" className="h-7 gap-1.5 px-2 text-xs" disabled={finding || bulkVerifying} onClick={() => verifyOne.mutate(p.id)}>{finding ? <Loader2 className="animate-spin" /> : <MailCheck />}{finding ? "Finding…" : "Access email"}</Button>
                       )}
                     </div>
-                    <div className="flex items-center gap-3 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
-                      {p.linkedin && <a href={linkedinHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="hover:text-primary" aria-label="LinkedIn"><Linkedin className="size-4" /></a>}
-                      {p.location && <span className="min-w-0 truncate">{p.location}</span>}
-                    </div>
+                    {(p.linkedin || p.location) && (
+                      <div className="flex items-center gap-3 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                        {p.linkedin && <a href={linkedinHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="inline-flex size-6 items-center justify-center rounded-md bg-surface transition-colors hover:text-brand" aria-label="LinkedIn"><Linkedin className="size-3.5" strokeWidth={1.75} /></a>}
+                        {p.location && <span className="min-w-0 truncate">{p.location}</span>}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -453,14 +467,14 @@ export function CollectedPeopleTable({
           </div>
 
           {/* Desktop: table */}
-          <div className={cn("scrollbar-thin hidden h-full overflow-auto transition-opacity md:block", isPlaceholderData && "opacity-60")}>
+          <div className={cn("scrollbar-thin hidden h-full overflow-auto bg-card transition-opacity md:block", isPlaceholderData && "opacity-60")}>
             <table className="w-full border-collapse text-[13px]">
-              <thead className="sticky top-0 z-10 bg-card">
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="w-10 px-3 py-2.5">
+              <thead className="sticky top-0 z-10 bg-surface/95 backdrop-blur supports-[backdrop-filter]:bg-surface/85">
+                <tr className="border-b border-border text-left text-[13px] font-normal text-muted-foreground">
+                  <th className="w-10 py-3 pl-4 pr-2 sm:pl-6">
                     <div className="flex items-center gap-1">
                       <Check checked={allMatching || allPageSelected} indeterminate={someSelected && !allMatching && !allPageSelected} onChange={toggleHeader} />
-                      <DropdownMenu align="start" trigger={<button className="rounded p-0.5 text-muted-foreground hover:text-foreground" aria-label="Selection options"><ChevronDown className="size-3.5" /></button>}>
+                      <DropdownMenu align="start" trigger={<button className="rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-card hover:text-foreground" aria-label="Selection options"><ChevronDown className="size-3.5" /></button>}>
                         <DropdownItem onClick={selectThisPage}>Select this page ({pageIds.length})</DropdownItem>
                         <DropdownItem onClick={selectAll}>Select all {formatNumber(total)}</DropdownItem>
                         {someSelected && <><DropdownSeparator /><DropdownItem onClick={clearSelection}>Clear selection</DropdownItem></>}
@@ -478,7 +492,7 @@ export function CollectedPeopleTable({
                   {show("companyEmail") && <SortHeader label="Company email" field="companyEmail" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
                   {show("linkedin") && <SortHeader label="LinkedIn" field="linkedin" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
                   {show("location") && <SortHeader label="Location" field="location" sortField={sortField} sortDir={sortDir} onSort={onSort} />}
-                  <th className="w-8" />
+                  <th className="w-8 pr-4 sm:pr-6" />
                 </tr>
               </thead>
               <tbody>
@@ -487,67 +501,68 @@ export function CollectedPeopleTable({
                   const finding = inflightIds.has(p.id);
                   const rowTags = tagsForRow(p.id);
                   return (
-                    <tr key={p.id} onClick={() => onOpenPerson(p)} className={cn("cursor-pointer border-b hover:bg-muted/30", rowTags[0] && TAG_STYLES[rowTags[0].color].row, selected && "bg-primary/[0.04]")}>
-                      <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(p.id)} /></td>
-                      <td className="min-w-[160px] max-w-[240px] px-3 py-2 align-top">
-                        <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+                    <tr key={p.id} onClick={() => onOpenPerson(p)} className={cn("group cursor-pointer border-b border-border transition-colors hover:bg-surface/60", rowTags[0] && TAG_STYLES[rowTags[0].color].row, selected && "bg-brand/[0.05] hover:bg-brand/[0.07]")}>
+                      <td className="py-2.5 pl-4 pr-2 align-top sm:pl-6" onClick={(e) => e.stopPropagation()}><div className="pt-1.5"><Check checked={selected} onChange={() => toggleRow(p.id)} /></div></td>
+                      <td className="min-w-[160px] max-w-[240px] px-3 py-2.5 align-top">
+                        <div className="flex min-w-0 items-start gap-2.5">
                           <Avatar name={p.name} seed={p.id} />
-                          <span className="min-w-0 truncate font-medium">{p.name}</span>
-                          {personHasFunding(p) && (
-                            <span
-                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[hsl(var(--valid))]/10 px-2 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]"
-                              title={`Company funding: ${p.companyFunding}`}
-                            >
-                              <DollarSign className="size-3" /> Funded
-                            </span>
-                          )}
-                          {p.llmVerification && <LlmBadge v={p.llmVerification} />}
-                          {rowTags.map((t) => (
-                            <span key={t.id} className={cn("inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium", TAG_STYLES[t.color].pill)} title={`AI tag: ${t.label}`}>{t.label}</span>
-                          ))}
-                          {p.altName && p.altName !== p.name && (
-                            <span
-                              className="inline-flex shrink-0 items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                              title={`Name corrected via LinkedIn (title + company); the email was found using "${p.altName}"`}
-                            >
-                              alt: {p.altName}
-                            </span>
-                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate pt-0.5 font-semibold leading-snug text-foreground transition-colors group-hover:text-brand">{p.name}</p>
+                            {(personHasFunding(p) || p.llmVerification || rowTags.length > 0 || (p.altName && p.altName !== p.name)) && (
+                              <div className="mt-1 flex flex-wrap items-center gap-1">
+                                {personHasFunding(p) && (
+                                  <span title={`Company funding: ${p.companyFunding}`}><Pill tone="valid"><DollarSign className="size-3" /> Funded</Pill></span>
+                                )}
+                                {p.llmVerification && <LlmBadge v={p.llmVerification} />}
+                                {rowTags.map((t) => (
+                                  <span key={t.id} className={cn("inline-flex shrink-0 items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold", TAG_STYLES[t.color].pill)} title={`AI tag: ${t.label}`}>{t.label}</span>
+                                ))}
+                                {p.altName && p.altName !== p.name && (
+                                  <span
+                                    className="inline-flex max-w-full shrink-0 items-center truncate rounded-md bg-surface px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+                                    title={`Name corrected via LinkedIn (title + company); the email was found using "${p.altName}"`}
+                                  >
+                                    alt: {p.altName}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                       {show("title") && (
-                        <td className="min-w-[200px] max-w-[420px] px-3 py-2 align-top text-muted-foreground">
+                        <td className="min-w-[200px] max-w-[420px] px-3 py-2.5 align-top text-muted-foreground">
                           <span className="whitespace-normal break-words">{p.title?.value ?? "—"}</span>
                         </td>
                       )}
                       {show("email") && (
-                      <td className="min-w-[220px] max-w-[360px] px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>
+                      <td className="min-w-[220px] max-w-[360px] px-3 py-2.5 align-top" onClick={(e) => e.stopPropagation()}>
                         {p.emailVerification ? (
                           isUnconfirmedEmail(p) ? (
-                            <span className="text-xs text-muted-foreground">Not found</span>
+                            <Pill tone="muted" className="normal-case">Not found</Pill>
                           ) : (
-                            <div className="flex flex-col gap-1">
-                              <span className="break-all text-xs">{String(p.email?.value ?? p.emailVerification.email)}</span>
-                              <div><VerificationBadge ev={p.emailVerification} /></div>
+                            <div className="flex flex-col items-start gap-1">
+                              <span className="break-all text-xs font-medium text-foreground">{String(p.email?.value ?? p.emailVerification.email)}</span>
+                              <VerificationBadge ev={p.emailVerification} />
                             </div>
                           )
                         ) : p.email ? (
                           // Imported email — shown as-is with a "not verified" note.
                           // Full address on its own line; the note + Verify sit below
                           // so the email is never truncated. Verify only VERIFIES it.
-                          <div className="flex flex-col gap-1">
-                            <span className="break-all text-xs">{String(p.email.value)}</span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="break-all text-xs font-medium text-foreground">{String(p.email.value)}</span>
                             <div className="flex items-center gap-1.5">
-                              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not verified</span>
+                              <Pill tone="muted" className="normal-case">Not verified</Pill>
                               <Button
                                 size="sm"
-                                variant="outline"
+                                variant="brand"
                                 className="h-7 gap-1.5 px-2 text-xs"
                                 disabled={finding || bulkVerifying}
                                 onClick={() => verifyOne.mutate(p.id)}
                                 title={finding ? "Verifying email…" : "Verify this email"}
                               >
-                                {finding ? <Loader2 className="size-3.5 animate-spin" /> : <MailCheck className="size-3.5" />}
+                                {finding ? <Loader2 className="animate-spin" /> : <MailCheck />}
                                 {finding ? "Verifying…" : "Verify"}
                               </Button>
                             </div>
@@ -555,58 +570,58 @@ export function CollectedPeopleTable({
                         ) : (
                           <Button
                             size="sm"
-                            variant="outline"
+                            variant="brand"
                             className="h-7 gap-1.5 px-2 text-xs"
                             disabled={finding || bulkVerifying}
                             onClick={() => verifyOne.mutate(p.id)}
                             title={finding ? "Finding email…" : "Find & verify this person's email"}
                           >
-                            {finding ? <Loader2 className="size-3.5 animate-spin" /> : <MailCheck className="size-3.5" />}
+                            {finding ? <Loader2 className="animate-spin" /> : <MailCheck />}
                             {finding ? "Finding…" : "Access email"}
                           </Button>
                         )}
                       </td>
                       )}
                       {show("company") && (
-                        <td className="min-w-[200px] max-w-[380px] px-3 py-2 align-top">
+                        <td className="min-w-[200px] max-w-[380px] px-3 py-2.5 align-top">
                           <div className="flex min-w-0 items-start gap-2">
                             <CompanyLogo domain={p.companyDomain} text={p.companyLogoText} className="mt-0.5 size-6 text-[10px]" />
-                            <span className="whitespace-normal break-words">{p.company}</span>
+                            <span className="whitespace-normal break-words pt-0.5 font-medium text-foreground">{p.company}</span>
                           </div>
                         </td>
                       )}
                       {show("companyEmployees") && (
-                        <td className="whitespace-nowrap px-3 py-2 text-center align-top text-muted-foreground">{p.companyEmployees || <span className="text-xs">—</span>}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-center align-top tabular-nums text-muted-foreground">{p.companyEmployees || <span className="text-muted-foreground/60">—</span>}</td>
                       )}
                       {show("companyIndustry") && (
-                        <td className="min-w-[140px] max-w-[240px] px-3 py-2 align-top text-muted-foreground">
+                        <td className="min-w-[140px] max-w-[240px] px-3 py-2.5 align-top text-muted-foreground">
                           <span className="whitespace-normal break-words">{p.companyIndustry || "—"}</span>
                         </td>
                       )}
                       {show("seniority") && (
-                        <td className="px-3 py-2 align-top"><span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", SENIORITY_STYLE[p.seniority])}>{SENIORITY_LABEL[p.seniority]}</span></td>
+                        <td className="px-3 py-2.5 align-top"><Pill tone={SENIORITY_TONE[p.seniority]} className="normal-case">{SENIORITY_LABEL[p.seniority]}</Pill></td>
                       )}
                       {show("companyPhone") && (
-                        <td className="whitespace-nowrap px-3 py-2 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>
-                          {p.companyPhone ? <a href={`tel:${p.companyPhone}`} className="hover:text-primary">{p.companyPhone}</a> : <span className="text-xs">—</span>}
+                        <td className="whitespace-nowrap px-3 py-2.5 align-top tabular-nums text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                          {p.companyPhone ? <a href={`tel:${p.companyPhone}`} className="transition-colors hover:text-brand">{p.companyPhone}</a> : <span className="text-muted-foreground/60">—</span>}
                         </td>
                       )}
                       {show("companyEmail") && (
-                        <td className="max-w-[220px] px-3 py-2 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>
-                          {p.companyEmail ? <a href={`mailto:${p.companyEmail}`} className="line-clamp-1 hover:text-primary">{p.companyEmail}</a> : <span className="text-xs">—</span>}
+                        <td className="max-w-[220px] px-3 py-2.5 align-top text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                          {p.companyEmail ? <a href={`mailto:${p.companyEmail}`} className="line-clamp-1 transition-colors hover:text-brand">{p.companyEmail}</a> : <span className="text-muted-foreground/60">—</span>}
                         </td>
                       )}
                       {show("linkedin") && (
-                        <td className="px-3 py-2 align-top" onClick={(e) => e.stopPropagation()}>
+                        <td className="px-3 py-2.5 align-top" onClick={(e) => e.stopPropagation()}>
                           {p.linkedin ? (
-                            <a href={linkedinHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary" aria-label="View LinkedIn"><Linkedin className="size-4" /></a>
-                          ) : <span className="text-xs text-muted-foreground">—</span>}
+                            <a href={linkedinHref(String(p.linkedin.value))} target="_blank" rel="noreferrer" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand/10 hover:text-brand" aria-label="View LinkedIn"><Linkedin className="size-4" strokeWidth={1.75} /></a>
+                          ) : <span className="text-muted-foreground/60">—</span>}
                         </td>
                       )}
                       {show("location") && (
-                        <td className="whitespace-nowrap px-3 py-2 align-top text-muted-foreground">{p.location ?? "—"}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 align-top text-muted-foreground">{p.location ?? "—"}</td>
                       )}
-                      <td className="px-2 py-2 text-right align-top"><ChevronRight className="size-4 text-muted-foreground" /></td>
+                      <td className="py-2.5 pl-2 pr-4 text-right align-top sm:pr-6"><ChevronRight className="mt-1 size-4 text-muted-foreground/60 transition-colors group-hover:text-brand" strokeWidth={1.75} /></td>
                     </tr>
                   );
                 })}
@@ -618,11 +633,11 @@ export function CollectedPeopleTable({
       </div>
 
       {total > 0 && (
-        <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-muted-foreground">
-          <span>{formatNumber(total)} people</span>
+        <div className="flex items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 text-xs text-muted-foreground sm:px-6">
+          <span><span className="font-semibold tabular-nums text-foreground">{formatNumber(total)}</span> people</span>
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" className="h-8" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
-            <span className="tabular-nums">Page {page} / {totalPages}</span>
+            <span className="rounded-md bg-surface px-2 py-1 font-medium tabular-nums text-foreground">Page {page} / {totalPages}</span>
             <Button size="sm" variant="outline" className="h-8" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next</Button>
           </div>
         </div>
@@ -631,21 +646,21 @@ export function CollectedPeopleTable({
       {/* Floating selection bar — same treatment as the Jobs tab. */}
       {someSelected && (
         <div className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
-          <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-xl border bg-card/95 p-2 pl-4 shadow-2xl backdrop-blur">
+          <div className="pointer-events-auto flex max-w-full animate-fade-in flex-wrap items-center justify-center gap-2 rounded-xl border border-border bg-card/95 p-1.5 pl-3 shadow-pop backdrop-blur">
             <span className="flex items-center gap-2 pr-1 text-sm font-semibold">
-              <span className="rounded-md bg-primary px-2 py-0.5 text-primary-foreground tabular-nums">{formatNumber(effectiveCount)}</span> selected
+              <span className="rounded-md bg-brand/10 px-2 py-0.5 text-brand tabular-nums">{formatNumber(effectiveCount)}</span> selected
             </span>
             {!allMatching && total > selectedIds.size && (
-              <button onClick={selectAll} className="text-xs font-medium text-primary hover:underline">Select all {formatNumber(total)}</button>
+              <button onClick={selectAll} className="text-xs font-medium text-brand hover:underline">Select all {formatNumber(total)}</button>
             )}
             <div className="h-6 w-px bg-border" />
-            <DropdownMenu up align="end" trigger={<Button size="sm" variant="ghost" disabled={busy !== null}>{busy === "list" ? <Loader2 className="size-4 animate-spin" /> : <ListPlus className="size-4" />} Add to list <ChevronDown className="size-3.5" /></Button>}>
-              {lists.map((l) => <DropdownItem key={l.id} onClick={() => addSelectedToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs text-muted-foreground">{l.summary.total}</span></DropdownItem>)}
+            <DropdownMenu up align="end" trigger={<Button size="sm" variant="ghost" disabled={busy !== null}>{busy === "list" ? <Loader2 className="animate-spin" /> : <ListPlus />} Add to list <ChevronDown /></Button>}>
+              {lists.map((l) => <DropdownItem key={l.id} onClick={() => addSelectedToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs tabular-nums text-muted-foreground">{l.summary.total}</span></DropdownItem>)}
               {lists.length > 0 && <DropdownSeparator />}
               <DropdownItem onClick={() => { setNewListName(""); setNewListOpen(true); }}><Plus /> New list</DropdownItem>
             </DropdownMenu>
-            <Button size="sm" variant="outline" onClick={onExport} disabled={busy !== null} title={allMatching ? "Exports all matching records." : "Exports the checked records (all fields)."}>{busy === "export" ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} Export</Button>
-            <button onClick={clearSelection} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Clear selection"><X className="size-4" /></button>
+            <Button size="sm" onClick={onExport} disabled={busy !== null} title={allMatching ? "Exports all matching records." : "Exports the checked records (all fields)."}>{busy === "export" ? <Loader2 className="animate-spin" /> : <Download />} Export</Button>
+            <Button size="icon" variant="ghost" onClick={clearSelection} className="size-8" aria-label="Clear selection"><X /></Button>
           </div>
         </div>
       )}
@@ -653,19 +668,23 @@ export function CollectedPeopleTable({
       {/* New list dialog — name it (same as the /lists screen), then add the selection. */}
       <Dialog open={newListOpen} onOpenChange={(o) => { if (!o) { setNewListOpen(false); setNewListName(""); } }}>
         <DialogHeader>
+          <IconTile icon={ListPlus} tone="brand" className="mb-3" />
           <DialogTitle>New list</DialogTitle>
           <DialogDescription>Name the list, then add the {formatNumber(effectiveCount)} selected {effectiveCount === 1 ? "person" : "people"}.</DialogDescription>
         </DialogHeader>
-        <Input
-          autoFocus
-          value={newListName}
-          onChange={(e) => setNewListName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && newListName.trim()) createAndAdd(); }}
-          placeholder="List name"
-        />
+        <Field label="List name" htmlFor="people-new-list-name">
+          <Input
+            id="people-new-list-name"
+            autoFocus
+            value={newListName}
+            onChange={(e) => setNewListName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && newListName.trim()) createAndAdd(); }}
+            placeholder="List name"
+          />
+        </Field>
         <DialogFooter>
           <Button variant="outline" onClick={() => { setNewListOpen(false); setNewListName(""); }}>Cancel</Button>
-          <Button disabled={!newListName.trim() || busy === "list"} onClick={createAndAdd}>{busy === "list" ? <Loader2 className="size-4 animate-spin" /> : null} Create &amp; add</Button>
+          <Button disabled={!newListName.trim() || busy === "list"} onClick={createAndAdd}>{busy === "list" ? <Loader2 className="animate-spin" /> : null} Create &amp; add</Button>
         </DialogFooter>
       </Dialog>
       </div>
@@ -679,10 +698,10 @@ function SortHeader({ label, field, sortField, sortDir, onSort, align }: {
 }) {
   const active = sortField === field;
   return (
-    <th className={cn("px-3 py-2.5 font-medium", align === "center" && "text-center")}>
-      <button onClick={() => onSort(field)} className="inline-flex items-center gap-1 hover:text-foreground" title={`Sort by ${label}`}>
-        {label}
-        {active ? (sortDir === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />) : <ArrowUpDown className="size-3.5 opacity-40" />}
+    <th className={cn("whitespace-nowrap px-3 py-3 font-normal", align === "center" && "text-center")}>
+      <button onClick={() => onSort(field)} className={cn("inline-flex items-center gap-1 transition-colors hover:text-foreground", active && "text-brand")} title={`Sort by ${label}`}>
+        <ColHead label={label} />
+        {active ? (sortDir === "asc" ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />) : <ArrowUpDown className="size-3 opacity-40" />}
       </button>
     </th>
   );
@@ -690,40 +709,5 @@ function SortHeader({ label, field, sortField, sortDir, onSort, align }: {
 
 /** Column show/hide picker. Its own popover (stays open across toggles). */
 function ColumnsMenu({ cols, onToggle, onReset }: { cols: Record<ColKey, boolean>; onToggle: (k: ColKey) => void; onReset: () => void }) {
-  const [open, setOpen] = React.useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onClick); document.removeEventListener("keydown", onKey); };
-  }, [open]);
-  const shown = COLUMN_DEFS.filter((c) => cols[c.key]).length;
-  return (
-    <div ref={ref} className="relative inline-block text-left">
-      <Button size="sm" variant="outline" className="h-9" onClick={() => setOpen((o) => !o)}>
-        <Columns3 className="size-4" /> <span className="hidden sm:inline">Columns</span>
-        <span className="ml-0.5 rounded-full bg-muted px-1.5 text-[10px] font-semibold text-muted-foreground tabular-nums sm:ml-1">{shown}</span>
-      </Button>
-      {open && (
-        <div className="absolute right-0 z-40 mt-1 w-56 animate-fade-in rounded-lg border bg-popover p-1.5 shadow-lg" style={{ fontFamily: "var(--font-sans), system-ui, sans-serif" }}>
-          <div className="flex items-center justify-between px-2 py-1.5">
-            <span className="text-xs font-semibold text-muted-foreground">Show columns</span>
-            <button onClick={onReset} className="text-[11px] font-medium text-primary hover:underline">Reset</button>
-          </div>
-          <div className="max-h-72 overflow-y-auto">
-            {COLUMN_DEFS.map((c) => (
-              <label key={c.key} className="group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent">
-                <CheckboxIndicator checked={cols[c.key]} />
-                <input type="checkbox" className="sr-only" checked={cols[c.key]} onChange={() => onToggle(c.key)} />
-                <span className="flex-1">{c.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <SharedColumnsMenu defs={COLUMN_DEFS} cols={cols} onToggle={onToggle} onReset={onReset} />;
 }

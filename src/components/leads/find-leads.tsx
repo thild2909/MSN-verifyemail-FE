@@ -43,15 +43,13 @@ export function FindLeads() {
     <div className="relative flex h-full min-h-0 flex-col">
       {/* Header — compact on mobile: just the tab rail (the title/subtitle,
           redundant with the active tab, show from sm up to save vertical space). */}
-      <div className="border-b px-4 py-2 sm:space-y-2 sm:px-5 sm:py-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="hidden text-xs font-bold uppercase tracking-widest text-muted-foreground sm:inline">Find Leads</span>
-          <LeadsTabs active={tab} onChange={setTab} />
+      <div className="border-b border-border bg-card px-4 pt-2 sm:px-6 sm:pt-5">
+        <div className="mb-3 hidden sm:block">
+          <p className="text-xs font-medium text-muted-foreground">Find leads</p>
+          <h1 className="mt-0.5 text-xl font-semibold tracking-tight">{TAB_TITLE[tab]}</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">{TAB_SUB[tab]}</p>
         </div>
-        <div className="hidden sm:block">
-          <h1 className="text-base font-bold tracking-tight sm:text-lg">{TAB_TITLE[tab]}</h1>
-          <p className="hidden text-sm text-muted-foreground sm:block">{TAB_SUB[tab]}</p>
-        </div>
+        <LeadsTabs active={tab} onChange={setTab} />
       </div>
 
       {/* Body */}

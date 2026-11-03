@@ -1,15 +1,19 @@
 "use client";
+import { ColHead } from "@/components/common/col-head";
 import * as React from "react";
 import Papa from "papaparse";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Sparkles, Paperclip, ArrowUp, Loader2, X, Download, FileText, AlertTriangle, ChevronDown, ListPlus, Plus,
+  Radar, Info, Lightbulb, ArrowUpRight, Building2, SearchX, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { EmptyState } from "@/components/common/empty-state";
+import { IconTile, Pill } from "@/components/common/kit";
 import { cn, formatNumber } from "@/lib/utils";
 import { getLeadLists, createLeadList, addLeadItems } from "@/lib/api/client";
 import { aiReportToCompanyLeadItems, addToListToast } from "@/lib/leads/lead-snapshot";
@@ -248,11 +252,11 @@ export function FindWithAiTab() {
   const empty = messages.length === 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       {/* Thread */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+      <div ref={scrollRef} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
         {empty ? (
-          <EmptyState onPick={(s) => setInput(s)} />
+          <AiWelcome onPick={(s) => setInput(s)} />
         ) : (
           <div className="mx-auto flex max-w-5xl flex-col gap-5">
             {messages.map((m) =>
@@ -270,19 +274,23 @@ export function FindWithAiTab() {
       </div>
 
       {/* Composer */}
-      <div className="border-t bg-background px-4 py-3 sm:px-5">
+      <div className="border-t border-border bg-card/60 px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
         <div className="mx-auto max-w-5xl">
           {file && (
-            <div className="mb-2 inline-flex items-center gap-2 rounded-lg border bg-muted/40 px-2.5 py-1.5 text-xs">
-              <FileText className="size-3.5 text-muted-foreground" />
-              <span className="max-w-[220px] truncate font-medium">{file.fileName}</span>
-              <span className="text-muted-foreground">{file.chars.toLocaleString()} chars</span>
-              <button onClick={() => setFile(null)} className="rounded p-0.5 hover:bg-muted" aria-label="Remove brief">
+            <div className="mb-2 inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-card py-1 pl-1 pr-1.5 text-xs shadow-xs">
+              <IconTile icon={FileText} tone="brand" size="sm" />
+              <span className="min-w-0 max-w-[220px] truncate font-medium">{file.fileName}</span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">{file.chars.toLocaleString()} chars</span>
+              <button
+                onClick={() => setFile(null)}
+                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                aria-label="Remove brief"
+              >
                 <X className="size-3.5" />
               </button>
             </div>
           )}
-          <div className="flex flex-col gap-2 rounded-2xl border bg-card p-2.5 shadow-sm transition-shadow focus-within:border-ring/50 focus-within:shadow-md">
+          <div className="overflow-hidden rounded-xl border border-border bg-card shadow-card transition-[border-color,box-shadow] focus-within:border-brand/50 focus-within:ring-[3px] focus-within:ring-brand/15">
             <input
               ref={fileInputRef}
               type="file"
@@ -290,30 +298,35 @@ export function FindWithAiTab() {
               className="hidden"
               onChange={onPickFile}
             />
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={onKeyDown}
-              rows={2}
-              placeholder="Describe the companies and roles you want to find…"
-              /* text-base (16px) on mobile stops iOS Safari auto-zooming on focus; back to text-sm from sm+. */
-              className="max-h-[240px] min-h-[72px] w-full resize-none bg-transparent px-1.5 py-1 text-base leading-relaxed outline-none placeholder:text-muted-foreground sm:text-sm"
-            />
+            <div className="flex items-start gap-3 px-3 pt-3 sm:px-4">
+              <IconTile icon={Sparkles} tone="violet" size="sm" className="mt-0.5 hidden sm:flex" />
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={onKeyDown}
+                rows={2}
+                placeholder="Describe the companies and roles you want to find…"
+                /* text-base (16px) on mobile stops iOS Safari auto-zooming on focus; back to text-sm from sm+. */
+                className="max-h-[240px] min-h-[72px] w-full resize-none bg-transparent py-1 text-base leading-relaxed outline-none placeholder:text-muted-foreground sm:text-sm"
+              />
+            </div>
             {/* Toolbar */}
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border bg-surface/50 px-2 py-2 sm:px-3">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 shrink-0 gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground"
+                className="shrink-0 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
                 disabled={uploading}
                 onClick={() => fileInputRef.current?.click()}
                 title="Attach an agent brief (.docx / .txt / .md)"
               >
-                {uploading ? <Loader2 className="size-4 animate-spin" /> : <Paperclip className="size-4" />}
+                {uploading ? <Loader2 className="animate-spin" /> : <Paperclip />}
                 <span className="hidden sm:inline">Brief</span>
               </Button>
+
+              <span className="mx-0.5 hidden h-5 w-px bg-border sm:block" aria-hidden />
 
               {/* Provider selector */}
               <div className="relative shrink-0">
@@ -321,7 +334,7 @@ export function FindWithAiTab() {
                   value={provider}
                   onChange={(e) => onProviderChange(e.target.value as ProviderId)}
                   title="AI provider"
-                  className="h-8 cursor-pointer appearance-none rounded-lg border bg-background pl-2.5 pr-7 text-xs font-medium text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
+                  className={SELECT_CLASS}
                 >
                   {providers.map((p) => (
                     <option key={p.id} value={p.id} disabled={!p.configured}>
@@ -339,7 +352,7 @@ export function FindWithAiTab() {
                     value={currentModel}
                     onChange={(e) => onModelChange(e.target.value)}
                     title="Model"
-                    className="h-8 cursor-pointer appearance-none rounded-lg border bg-background pl-2.5 pr-7 text-xs font-medium text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
+                    className={cn(SELECT_CLASS, "font-mono text-[11px]")}
                   >
                     {currentModels.map((m) => (
                       <option key={m} value={m}>{m}</option>
@@ -354,36 +367,45 @@ export function FindWithAiTab() {
                 <button
                   type="button"
                   onClick={() => onSmartChange(!smartSearch)}
+                  aria-pressed={smartSearch}
                   title="Smart search — brainstorm a wider candidate pool before ranking (slower, better coverage)"
                   className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors",
-                    smartSearch ? "border-primary/40 bg-primary/10 text-primary" : "bg-background text-muted-foreground hover:bg-muted",
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium shadow-xs transition-colors",
+                    smartSearch
+                      ? "border-brand/40 bg-brand/10 text-brand"
+                      : "border-border bg-card text-muted-foreground hover:bg-surface hover:text-foreground",
                   )}
                 >
-                  <Sparkles className="size-3.5" />
+                  {smartSearch ? <span className="size-1.5 rounded-full bg-brand animate-pulse" aria-hidden /> : <Sparkles className="size-3.5" strokeWidth={1.75} />}
                   <span className="hidden sm:inline">Smart search</span>
                 </button>
               )}
 
               {/* ChatGPT: thinking effort */}
               {showEffort && (
-                <div className="relative shrink-0" title="Thinking effort (reasoning models)">
-                  <select
-                    value={effort}
-                    onChange={(e) => onEffortChange(e.target.value as Effort)}
-                    className="h-8 cursor-pointer appearance-none rounded-lg border bg-background pl-2.5 pr-7 text-xs font-medium text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="low">Effort: low</option>
-                    <option value="medium">Effort: medium</option>
-                    <option value="high">Effort: high</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <div className="inline-flex shrink-0 items-center rounded-lg border border-border bg-surface p-0.5" title="Thinking effort (reasoning models)" role="radiogroup" aria-label="Thinking effort">
+                  <span className="hidden px-1.5 text-[11px] font-medium text-muted-foreground sm:inline">Effort</span>
+                  {(["low", "medium", "high"] as const).map((lvl) => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      role="radio"
+                      aria-checked={effort === lvl}
+                      onClick={() => onEffortChange(lvl)}
+                      className={cn(
+                        "rounded-md px-2 py-0.5 text-xs font-medium capitalize transition-colors",
+                        effort === lvl ? "bg-card text-brand shadow-xs" : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
                 </div>
               )}
 
               {/* Rows stepper */}
               <label
-                className="hidden h-8 shrink-0 items-center gap-1.5 rounded-lg border bg-background pl-2.5 pr-1.5 text-xs text-muted-foreground transition-colors focus-within:ring-1 focus-within:ring-ring hover:bg-muted sm:flex"
+                className="hidden h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-card pl-2.5 pr-1.5 text-xs text-muted-foreground shadow-xs transition-colors focus-within:border-brand/50 focus-within:ring-[3px] focus-within:ring-brand/15 hover:bg-surface sm:flex"
                 title="Number of companies to return"
               >
                 Rows
@@ -393,26 +415,34 @@ export function FindWithAiTab() {
                   max={40}
                   value={limit}
                   onChange={(e) => setLimit(Math.max(1, Math.min(40, Number(e.target.value) || 20)))}
-                  className="w-8 bg-transparent text-center font-medium text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  className="w-8 rounded bg-surface py-0.5 text-center font-semibold tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 />
               </label>
 
               <Button
                 type="button"
-                size="icon"
-                className="ml-auto size-9 shrink-0 rounded-full"
+                className="ml-auto h-8 shrink-0 gap-1.5 px-3"
                 disabled={!input.trim() || loading}
                 onClick={() => void send()}
                 title="Generate report"
+                aria-label="Generate report"
               >
-                {loading ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
+                {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+                <span className="hidden sm:inline">Generate</span>
               </Button>
             </div>
           </div>
-          <p className="mt-1.5 px-1 text-[11px] text-muted-foreground">
-            {showSmart && smartSearch
-              ? "Smart search ON — crawls live job boards for real dated postings + URLs, then verifies each against your brief (slower)."
-              : "Generates the list from the model's knowledge (fast). Turn on Smart search to verify against live job postings."}
+          <p className="mt-2 flex items-start gap-1.5 px-1 text-[11px] leading-relaxed text-muted-foreground">
+            {showSmart && smartSearch ? (
+              <Radar className="mt-px size-3 shrink-0 text-brand" strokeWidth={1.75} />
+            ) : (
+              <Info className="mt-px size-3 shrink-0" strokeWidth={1.75} />
+            )}
+            <span>
+              {showSmart && smartSearch
+                ? "Smart search ON — crawls live job boards for real dated postings + URLs, then verifies each against your brief (slower)."
+                : "Generates the list from the model's knowledge (fast). Turn on Smart search to verify against live job postings."}
+            </span>
           </p>
         </div>
       </div>
@@ -420,29 +450,41 @@ export function FindWithAiTab() {
   );
 }
 
+const SELECT_CLASS =
+  "h-8 max-w-[180px] cursor-pointer appearance-none truncate rounded-md border border-border bg-card pl-2.5 pr-7 text-xs font-medium text-foreground shadow-xs transition-colors hover:bg-surface focus:border-brand/50 focus:outline-none focus:ring-[3px] focus:ring-brand/15";
+
 /* ------------------------------ sub-views -------------------------------- */
 
-function EmptyState({ onPick }: { onPick: (s: string) => void }) {
+function AiWelcome({ onPick }: { onPick: (s: string) => void }) {
   return (
-    <div className="mx-auto flex max-w-2xl flex-col items-center pt-10 text-center sm:pt-16">
-      <div className="mb-4 grid size-14 place-items-center rounded-2xl bg-primary/10 text-primary">
-        <Sparkles className="size-7" />
+    <div className="mx-auto flex max-w-3xl flex-col items-center pt-6 text-center sm:pt-14">
+      <div className="relative mb-5">
+        <div className="absolute inset-0 -z-10 scale-150 rounded-full bg-brand/10 blur-2xl" aria-hidden />
+        <IconTile icon={Sparkles} tone="violet" className="size-14 rounded-2xl [&>svg]:size-6" />
       </div>
-      <h2 className="text-lg font-bold tracking-tight">Find leads with AI</h2>
-      <p className="mt-1 max-w-md text-sm text-muted-foreground">
+      <Pill tone="violet" className="mb-2 normal-case">AI research</Pill>
+      <h2 className="text-xl font-semibold tracking-tight">Find leads with AI</h2>
+      <p className="mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">
         Attach an agent brief (optional) and describe your ideal targets. AI searches live job boards and company
         sources, then returns a ranked company report you can export.
       </p>
-      <div className="mt-6 grid w-full gap-2">
-        {PROMPT_IDEAS.map((s) => (
-          <button
-            key={s}
-            onClick={() => onPick(s)}
-            className="rounded-xl border bg-card px-4 py-3 text-left text-sm transition-colors hover:bg-muted"
-          >
-            {s}
-          </button>
-        ))}
+      <div className="mt-8 w-full text-left">
+        <p className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Try a prompt</p>
+        <div className="grid w-full gap-2 sm:grid-cols-3">
+          {PROMPT_IDEAS.map((s) => (
+            <button
+              key={s}
+              onClick={() => onPick(s)}
+              className="group flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left text-[13px] leading-relaxed shadow-xs transition-[border-color,box-shadow] hover:border-brand/40 hover:shadow-card"
+            >
+              <span className="flex items-center justify-between">
+                <IconTile icon={Lightbulb} tone="brand" size="sm" />
+                <ArrowUpRight className="size-4 text-muted-foreground transition-colors group-hover:text-brand" strokeWidth={1.75} />
+              </span>
+              <span className="text-foreground/90">{s}</span>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -451,9 +493,9 @@ function EmptyState({ onPick }: { onPick: (s: string) => void }) {
 function UserBubble({ text, fileName }: { text: string; fileName?: string }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground shadow-xs">
         {fileName && (
-          <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-md bg-primary-foreground/15 px-2 py-0.5 text-xs">
+          <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-md bg-primary-foreground/15 px-2 py-0.5 text-xs font-medium">
             <FileText className="size-3" /> {fileName}
           </div>
         )}
@@ -465,18 +507,36 @@ function UserBubble({ text, fileName }: { text: string; fileName?: string }) {
 
 function ErrorBubble({ text }: { text: string }) {
   return (
-    <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <span>{text}</span>
+    <div className="flex items-start gap-3 rounded-xl border border-[hsl(var(--invalid)/0.3)] bg-[hsl(var(--invalid)/0.06)] p-3 text-sm">
+      <IconTile icon={AlertTriangle} tone="invalid" size="sm" />
+      <div className="min-w-0 pt-0.5">
+        <p className="text-[13px] font-semibold text-[hsl(var(--invalid))]">Report failed</p>
+        <p className="mt-0.5 break-words text-[13px] text-foreground/80">{text}</p>
+      </div>
     </div>
   );
 }
 
 function ThinkingBubble() {
   return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="size-4 animate-spin" />
-      <span>Planning queries, searching the web, and composing the report…</span>
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
+      <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-brand/10">
+          <Loader2 className="size-3.5 animate-spin text-brand" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold">Generating report</p>
+          <p className="truncate text-xs text-muted-foreground">Planning queries, searching the web, and composing the report…</p>
+        </div>
+      </div>
+      <div className="space-y-2 p-4" aria-hidden>
+        {[92, 78, 85, 64].map((w, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <div className="h-3 w-24 animate-pulse rounded bg-surface" />
+            <div className="h-3 animate-pulse rounded bg-surface" style={{ width: `${w}%`, animationDelay: `${i * 120}ms` }} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -545,58 +605,61 @@ function AssistantReport({ report }: { report: ReportPayload }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-start gap-2.5">
-        <div className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
-          <Sparkles className="size-4" />
-        </div>
-        <div className="min-w-0 flex-1 space-y-1">
-          {summary && <p className="whitespace-pre-wrap text-sm leading-relaxed">{summary}</p>}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <Sparkles className="size-3" /> AI-generated{report.model ? ` · ${report.model}` : ""}
-            </span>
-            <span>{rows.length} companies</span>
+      <div className="flex items-start gap-3">
+        <IconTile icon={Sparkles} tone="violet" size="sm" className="mt-0.5" />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          {summary && <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{summary}</p>}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Pill tone="violet" className="normal-case">
+              <Sparkles className="size-3" /> AI-generated
+            </Pill>
+            {report.model && <Pill tone="muted" className="font-mono normal-case">{report.model}</Pill>}
+            <Pill tone="brand" className="normal-case tabular-nums">{rows.length} companies</Pill>
           </div>
         </div>
       </div>
 
       {rows.length > 0 ? (
-        <div className="rounded-xl border">
-          <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Company report</span>
-            <div className="flex items-center gap-2">
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
+            <div className="flex min-w-0 items-center gap-2">
+              <Building2 className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
+              <span className="text-[13px] font-semibold">Company report</span>
+              <span className="rounded-md bg-surface px-1.5 py-px text-[11px] font-semibold tabular-nums text-muted-foreground">{formatNumber(rows.length)}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
               <DropdownMenu align="end" trigger={
-                <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" disabled={busy}>
-                  {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ListPlus className="size-3.5" />} Add to list <ChevronDown className="size-3" />
+                <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" disabled={busy}>
+                  {busy ? <Loader2 className="animate-spin" /> : <ListPlus />} Add to list <ChevronDown className="opacity-60" />
                 </Button>
               }>
                 {lists.map((l) => (
-                  <DropdownItem key={l.id} onClick={() => addToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs text-muted-foreground">{l.summary.total}</span></DropdownItem>
+                  <DropdownItem key={l.id} onClick={() => addToList(l.id, l.name)}><ListPlus /> {l.name} <span className="ml-auto text-xs tabular-nums text-muted-foreground">{l.summary.total}</span></DropdownItem>
                 ))}
                 {lists.length > 0 && <DropdownSeparator />}
                 <DropdownItem onClick={() => { setNewListName(""); setNewListOpen(true); }}><Plus /> New list</DropdownItem>
               </DropdownMenu>
-              <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={exportCsv}>
-                <Download className="size-3.5" /> Export CSV
+              <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2.5 text-xs" onClick={exportCsv}>
+                <Download /> Export CSV
               </Button>
             </div>
           </div>
-          <div className="max-w-full overflow-x-auto">
+          <div className="scrollbar-thin max-w-full overflow-x-auto">
             <table className="w-full border-collapse text-xs">
               <thead>
-                <tr className="border-b bg-muted/40 text-left">
+                <tr className="border-b border-border bg-surface/95 text-left text-[13px] font-normal text-muted-foreground">
                   {columns.map((c) => (
-                    <th key={c.key} className={cn("whitespace-nowrap px-2.5 py-2 font-semibold", columnWidth(c.key))}>
-                      {c.label}
+                    <th key={c.key} className={cn("whitespace-nowrap px-3 py-2.5 font-normal first:pl-4 last:pr-4", columnWidth(c.key))}>
+                      <ColHead label={c.label} />
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r, i) => (
-                  <tr key={i} className="border-b align-top last:border-0 hover:bg-muted/30">
-                    {columns.map((c) => (
-                      <td key={c.key} className={cn("px-2.5 py-2", columnWidth(c.key))}>
+                  <tr key={i} className="border-b border-border align-top transition-colors last:border-0 hover:bg-surface/60">
+                    {columns.map((c, ci) => (
+                      <td key={c.key} className={cn("px-3 py-2.5 leading-relaxed first:pl-4 last:pr-4", ci === 0 && "font-medium text-foreground", columnWidth(c.key))}>
                         <Cell value={r[c.key]} />
                       </td>
                     ))}
@@ -607,19 +670,27 @@ function AssistantReport({ report }: { report: ReportPayload }) {
           </div>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">No companies matched. Try refining your request.</p>
+        <EmptyState
+          icon={SearchX}
+          title="No companies matched"
+          description="Try refining your request."
+          className="py-10"
+        />
       )}
 
       {report.rejections && report.rejections.length > 0 && (
-        <details className="rounded-xl border bg-muted/20 px-3 py-2 text-xs">
-          <summary className="cursor-pointer font-semibold text-muted-foreground">
-            Rejection list ({report.rejections.length}) — strong candidates that failed a rule
+        <details className="group overflow-hidden rounded-xl border border-border bg-card text-xs shadow-xs">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 transition-colors hover:bg-surface/60 [&::-webkit-details-marker]:hidden">
+            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+            <span className="font-semibold text-foreground">Rejection list</span>
+            <Pill tone="risky" className="tabular-nums">{report.rejections.length}</Pill>
+            <span className="hidden truncate text-muted-foreground sm:inline">— strong candidates that failed a rule</span>
           </summary>
-          <ul className="mt-2 space-y-1.5">
+          <ul className="divide-y divide-border border-t border-border">
             {report.rejections.map((r, i) => (
-              <li key={i} className="flex gap-2">
-                <span className="font-medium">{r.company}</span>
-                <span className="text-muted-foreground">— {r.reason}</span>
+              <li key={i} className="flex flex-col gap-0.5 px-4 py-2 sm:flex-row sm:gap-3">
+                <span className="shrink-0 font-medium text-foreground sm:w-48 sm:truncate">{r.company}</span>
+                <span className="text-muted-foreground">{r.reason}</span>
               </li>
             ))}
           </ul>
@@ -629,13 +700,14 @@ function AssistantReport({ report }: { report: ReportPayload }) {
       {/* New list dialog — name it, then add the report's companies. */}
       <Dialog open={newListOpen} onOpenChange={(o) => { if (!o) { setNewListOpen(false); setNewListName(""); } }}>
         <DialogHeader>
+          <IconTile icon={ListPlus} tone="brand" className="mb-3" />
           <DialogTitle>New list</DialogTitle>
           <DialogDescription>Name the list, then add the {formatNumber(rows.length)} {rows.length === 1 ? "company" : "companies"} from this report.</DialogDescription>
         </DialogHeader>
         <Input autoFocus value={newListName} onChange={(e) => setNewListName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newListName.trim()) createAndAdd(); }} placeholder="List name" />
         <DialogFooter>
           <Button variant="outline" onClick={() => setNewListOpen(false)}>Cancel</Button>
-          <Button disabled={!newListName.trim() || busy} onClick={createAndAdd}>{busy ? <Loader2 className="size-4 animate-spin" /> : null} Create &amp; add</Button>
+          <Button disabled={!newListName.trim() || busy} onClick={createAndAdd}>{busy ? <Loader2 className="animate-spin" /> : null} Create &amp; add</Button>
         </DialogFooter>
       </Dialog>
     </div>
@@ -655,7 +727,7 @@ function OneLink({ token }: { token: string }) {
     let label = t.replace(/^https?:\/\//i, "").replace(/\/$/, "");
     if (label.length > 48) label = label.slice(0, 45) + "…"; // keep the cell compact
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className="break-all text-primary hover:underline" title={t}>
+      <a href={href} target="_blank" rel="noopener noreferrer" className="break-all font-medium text-brand hover:underline" title={t}>
         {label}
       </a>
     );
@@ -670,7 +742,7 @@ function OneLink({ token }: { token: string }) {
  */
 function Cell({ value }: { value: string }) {
   const v = (value || "").trim();
-  if (!v || v === "—") return <span>—</span>;
+  if (!v || v === "—") return <span className="text-muted-foreground">—</span>;
   const tokens = v.split(/\n+/).map((s) => s.trim()).filter(Boolean);
   const hasLink = tokens.some((t) => /^https?:\/\//i.test(t) || DOMAIN_RE.test(t));
   if (hasLink) {

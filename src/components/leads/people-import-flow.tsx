@@ -1,79 +1,21 @@
 "use client";
 import * as React from "react";
 import Papa from "papaparse";
-import { CheckCircle2, ArrowRight, Loader2, Download, AlertTriangle, ChevronDown } from "lucide-react";
+import { ArrowRight, Loader2, Download, AlertTriangle, ChevronDown, UserPlus, FileSpreadsheet, ListChecks, Check, Link2, Columns3, RefreshCw, Layers, Zap, Plus } from "lucide-react";
+import { colHeadMeta } from "@/components/common/col-head";
+import { OPTIONAL_FIELDS, EMPTY_OPT, FIRST_RE, LAST_RE, COMPANY_RE, FULLNAME_RE, autoMap, type Mapping, type OptKey } from "@/lib/leads/people-import-map";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
 import { FileDropzone } from "@/components/verification/file-dropzone";
 import { useToast } from "@/components/ui/toast";
 import { createPeopleJob, matchLeadItems, ApiError, type LeadItem } from "@/lib/api/client";
 import type { CollectedPerson } from "@/lib/leads/people-types";
-import { formatNumber } from "@/lib/utils";
+import { formatNumber, cn } from "@/lib/utils";
+import { IconTile, Field, Pill, TONES } from "@/components/common/kit";
 
 interface Parsed { fileName: string; columns: string[]; rows: string[][] }
-const FIRST_RE = /first.?name|given|fname|^first$/i;
-const LAST_RE = /last.?name|surname|family|lname|^last$/i;
-const COMPANY_RE = /^company$|company.?name|organi|account|^business$|employer|^org$/i;
-const CITY_RE = /^city$|town|^locality$/i;
-const STATE_RE = /^state$|province|^region$/i;
-const COUNTRY_RE = /^country$|nation/i;
-// Fallback: a single pre-combined location column (no separate city/state/country).
-const LOCATION_RE = /^location$|address|hq/i;
-const FULLNAME_RE = /full.?name|^name$|contact/i;
-
-/**
- * Optional columns that FILL the people table directly from the CSV (an
- * Apollo-style export). Not required — the crawl still runs and fills gaps
- * (esp. a verified email) — but these show immediately. `not` skips a column
- * that also matches a broader pattern (person LinkedIn vs Company Linkedin).
- */
-const OPTIONAL_FIELDS = [
-  { key: "title", label: "Title", re: /^title$|job.?title|position|^role$/i },
-  { key: "headline", label: "Headline", re: /headline/i },
-  { key: "seniority", label: "Seniority", re: /senior/i },
-  { key: "department", label: "Department", re: /department/i },
-  { key: "personLinkedin", label: "LinkedIn (person)", re: /linked.?in/i, not: /company/i },
-  { key: "email", label: "Email", re: /e-?mail/i, not: /domain|catchall|company/i },
-  { key: "mobile", label: "Mobile / Phone", re: /mobile|phone|cell|^tel/i, not: /company/i },
-  { key: "website", label: "Company Website", re: /company.?website|company.?domain|^website$|^domain$/i },
-  { key: "industry", label: "Industry", re: /industry/i },
-  { key: "employees", label: "Employees", re: /employees|head.?count|company.?size/i },
-  { key: "companyPhone", label: "Company Phone", re: /company.?phone/i },
-  { key: "twitter", label: "Twitter", re: /twitter/i, not: /company/i },
-  { key: "facebook", label: "Facebook", re: /facebook/i, not: /company/i },
-  { key: "photo", label: "Photo", re: /photo|avatar|picture/i },
-  // Rich company detail (Apollo-style export). Revenue/Funding match both the
-  // raw and "…Clean" columns — bestColumn keeps the denser one.
-  { key: "keywords", label: "Keywords", re: /^keywords?$|keyword/i, not: /seo/i },
-  { key: "companyLinkedin", label: "Company LinkedIn", re: /company.?linked.?in/i },
-  { key: "companyRevenue", label: "Company Annual Revenue", re: /company.?annual.?revenue/i },
-  { key: "companyFunding", label: "Company Total Funding", re: /company.?total.?funding/i },
-  { key: "companyTechnologies", label: "Company Technologies", re: /company.?technolog|tech.?stack/i },
-  { key: "companyFoundedYear", label: "Company Founded Year", re: /company.?founded|founded.?year|year.?founded/i },
-  { key: "companySeoDescription", label: "Company SEO Description", re: /seo.?desc/i },
-  { key: "companyShortDescription", label: "Company Short Description", re: /short.?desc/i },
-] as const satisfies readonly { key: string; label: string; re: RegExp; not?: RegExp }[];
-
-type OptKey = (typeof OPTIONAL_FIELDS)[number]["key"];
-type Mapping = { firstName: string; lastName: string; company: string; city: string; state: string; country: string } & Record<OptKey, string>;
-const EMPTY_OPT = Object.fromEntries(OPTIONAL_FIELDS.map((f) => [f.key, ""])) as Record<OptKey, string>;
-
-/** Densest column whose header matches `re` (populated beats sparse); `exclude` skips claimed columns, `not` skips a broader-pattern collision. */
-function bestColumn(cols: string[], rows: string[][], re: RegExp, exclude: string[] = [], not?: RegExp): string | undefined {
-  let best: string | undefined;
-  let bestFill = -1;
-  cols.forEach((c, i) => {
-    if (exclude.includes(c) || !re.test(c) || (not && not.test(c))) return;
-    let fill = 0;
-    for (const r of rows) if ((r[i] ?? "").trim()) fill++;
-    if (fill > bestFill) { bestFill = fill; best = c; }
-  });
-  return best;
-}
-
 export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; onCreated: (jobId: string) => void }) {
   const [parsed, setParsed] = React.useState<Parsed | null>(null);
   const [name, setName] = React.useState("");
@@ -93,27 +35,9 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
     const finish = (columns: string[], data: string[][]) => {
       const cols = columns.length ? columns : ["first_name", "last_name", "company", "location"];
       setParsed({ fileName: file.name, columns: cols, rows: data });
-      const firstName = bestColumn(cols, data, FIRST_RE) ?? bestColumn(cols, data, FULLNAME_RE) ?? cols[0] ?? "";
-      // Last Name is OPTIONAL — only auto-map a real Last-Name column. Never fall
-      // back to "some other column", which used to steal Company/Email into Last
-      // Name (emptying the required Company map, so every row looked "missing").
-      // A single combined name column is split per-row later (see `built`).
-      const lastName = bestColumn(cols, data, LAST_RE, [firstName]) ?? "";
-      const company = bestColumn(cols, data, COMPANY_RE, [firstName, lastName].filter(Boolean)) ?? "";
-      // Location is composed from City + State + Country (Apollo-style exports).
-      // A single generic "Location"/address column falls back into City.
-      const city = bestColumn(cols, data, CITY_RE, [firstName, lastName, company]) ?? bestColumn(cols, data, LOCATION_RE, [firstName, lastName, company]) ?? "";
-      const state = bestColumn(cols, data, STATE_RE, [firstName, lastName, company, city]) ?? "";
-      const country = bestColumn(cols, data, COUNTRY_RE, [firstName, lastName, company, city, state]) ?? "";
-      const claimed = [firstName, lastName, company, city, state, country];
-      const opt = { ...EMPTY_OPT };
-      let anyOpt = false;
-      for (const f of OPTIONAL_FIELDS) {
-        const col = bestColumn(cols, data, f.re, claimed, "not" in f ? f.not : undefined);
-        if (col) { opt[f.key] = col; claimed.push(col); anyOpt = true; }
-      }
-      setMap({ firstName, lastName, company, city, state, country, ...opt });
-      setShowOptional(anyOpt); // auto-open when the CSV has rich columns
+      const m = autoMap(cols, data);
+      setMap(m);
+      setShowOptional(false);
       setName(file.name.replace(/\.[^.]+$/, ""));
     };
     const fail = (message = "Use a .csv or .xlsx with First Name, Last Name and Company Name columns.") =>
@@ -186,6 +110,34 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
     return () => { cancelled = true; };
   }, [built]);
 
+  /** Per-column fill count + first sample value (drives the mapping preview). */
+  const stats = React.useMemo<ColStats>(() => {
+    const out: ColStats = { columns: [], byName: {} };
+    if (!parsed) return out;
+    out.columns = parsed.columns;
+    parsed.columns.forEach((c, i) => {
+      let fill = 0;
+      let sample = "";
+      for (const r of parsed.rows) {
+        const v = (r[i] ?? "").trim();
+        if (v) { fill++; if (!sample) sample = v; }
+      }
+      out.byName[c] = { fill, sample, total: parsed.rows.length };
+    });
+    return out;
+  }, [parsed]);
+
+  const usedColumns = new Set(Object.values(map).filter(Boolean));
+  const mappedTotal = usedColumns.size;
+  const emptyColumns = parsed ? parsed.columns.filter((c) => !stats.byName[c]?.fill) : [];
+  const extraColumns = parsed ? parsed.columns.filter((c) => stats.byName[c]?.fill && !usedColumns.has(c)) : [];
+  const unmappedFields = [
+    ...(!map.city ? [{ key: "city", label: "City" }] : []),
+    ...(!map.state ? [{ key: "state", label: "State" }] : []),
+    ...(!map.country ? [{ key: "country", label: "Country" }] : []),
+    ...OPTIONAL_FIELDS.filter((f) => !map[f.key]).map((f) => ({ key: f.key as string, label: f.label as string })),
+  ];
+
   const matchedCount = React.useMemo(() => built.reduce((n, _r, i) => (matches[String(i)] ? n + 1 : n), 0), [built, matches]);
 
   const skipped = parsed ? parsed.rows.length - built.length : 0;
@@ -237,98 +189,325 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
   const apolloValid = /^https?:\/\/\S+$/i.test(apolloTrimmed);
   const apolloError = apolloTrimmed.length > 0 && !apolloValid;
 
+  // Visual step only: 1 Upload → 2 Map columns → 3 Ready to import.
+  const step = !parsed ? 1 : missingMap || built.length === 0 ? 2 : 3;
+
   return (
-    <Dialog open={open} onOpenChange={close} className="max-w-xl">
+    <Dialog open={open} onOpenChange={close} className={cn("sm:max-w-2xl", parsed && "sm:max-w-6xl")}>
       <DialogHeader>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <IconTile icon={UserPlus} tone="brand" />
+          <StepDots step={step} />
+        </div>
         <DialogTitle>Import people</DialogTitle>
         <DialogDescription>
-          Upload a CSV with <span className="font-medium text-foreground">First Name</span>, <span className="font-medium text-foreground">Last Name</span> and <span className="font-medium text-foreground">Company Name</span> (required). Map any extra columns (title, LinkedIn, seniority, phone, company info) to <span className="font-medium text-foreground">fill the table directly</span>. We still find each person's verified work email.
+          Upload a list with <span className="font-medium text-foreground">name</span> and <span className="font-medium text-foreground">company</span>. Every column with data is mapped automatically, and we find each person&apos;s verified work email.
         </DialogDescription>
       </DialogHeader>
 
-      <div className="space-y-1.5">
-        <Label>Apollo list URL <span className="text-[hsl(var(--invalid))]">*</span></Label>
-        <Input
-          type="url"
-          value={apolloUrl}
-          onChange={(e) => setApolloUrl(e.target.value)}
-          placeholder="https://app.apollo.io/#/people?..."
-        />
-        {apolloError
-          ? <p className="text-xs text-[hsl(var(--invalid))]">Enter a valid URL starting with http:// or https://</p>
-          : <p className="text-[11px] text-muted-foreground">Saved with this import and shown on the search afterwards.</p>}
-      </div>
+      {(() => {
+        const apolloField = (
+          <Field
+            label={<><Link2 className="size-3.5 text-muted-foreground" strokeWidth={1.75} /> Apollo list URL <span className="text-[hsl(var(--invalid))]">*</span></>}
+            htmlFor="people-import-apollo"
+            error={apolloError ? "Enter a valid URL starting with http:// or https://" : undefined}
+            hint="Saved with this import so you can reopen the source list."
+          >
+            <Input
+              id="people-import-apollo"
+              type="url"
+              value={apolloUrl}
+              onChange={(e) => setApolloUrl(e.target.value)}
+              placeholder="https://app.apollo.io/#/people?..."
+              autoComplete="off"
+              className={cn(apolloError && "border-[hsl(var(--invalid))] focus-visible:ring-[hsl(var(--invalid)/0.3)]")}
+            />
+          </Field>
+        );
 
-      {!parsed ? (
-        <div className="space-y-3">
-          <FileDropzone onFile={onFile} />
-          <button onClick={downloadExample} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Download className="size-3.5" /> Download example CSV</button>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2 rounded-lg bg-valid/10 px-3 py-2 text-sm text-[hsl(var(--valid))]"><CheckCircle2 className="size-4" /> {parsed.fileName}. Map the columns below.</div>
-          <div className="space-y-1.5"><Label>Job name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Target contacts" /></div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <MapField label="First Name" required value={map.firstName} cols={parsed.columns} onChange={(v) => setMap({ ...map, firstName: v })} />
-            <MapField label="Last Name" required value={map.lastName} cols={parsed.columns} onChange={(v) => setMap({ ...map, lastName: v })} />
-            <MapField label="Company Name" required value={map.company} cols={parsed.columns} onChange={(v) => setMap({ ...map, company: v })} />
-            <MapField label="City" value={map.city} cols={parsed.columns} onChange={(v) => setMap({ ...map, city: v })} />
-            <MapField label="State" value={map.state} cols={parsed.columns} onChange={(v) => setMap({ ...map, state: v })} />
-            <MapField label="Country" value={map.country} cols={parsed.columns} onChange={(v) => setMap({ ...map, country: v })} />
-          </div>
-
-          <div className="rounded-lg border border-border">
-            <button type="button" onClick={() => setShowOptional((s) => !s)} className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium">
-              <span>Optional fields to fill the table {optionalMapped > 0 && <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs text-primary">{optionalMapped} mapped</span>}</span>
-              <ChevronDown className={`size-4 transition-transform ${showOptional ? "rotate-180" : ""}`} />
-            </button>
-            {showOptional && (
-              <div className="grid gap-3 border-t border-border p-3 sm:grid-cols-2">
-                {OPTIONAL_FIELDS.map((f) => (
-                  <MapField key={f.key} label={f.label} value={map[f.key]} cols={parsed.columns} onChange={(v) => setMap({ ...map, [f.key]: v })} />
-                ))}
+        if (!parsed) {
+          return (
+            <div className="mx-auto w-full max-w-2xl space-y-4">
+              {apolloField}
+              <FileDropzone onFile={onFile} />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                <span>Required: <span className="font-medium text-foreground">First name</span>, <span className="font-medium text-foreground">Last name</span>, <span className="font-medium text-foreground">Company</span></span>
+                <button onClick={downloadExample} className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 font-medium text-brand transition-colors hover:bg-brand/10">
+                  <Download className="size-3.5" strokeWidth={1.75} /> Example CSV
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+          );
+        }
 
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span><span className="font-semibold text-foreground">{formatNumber(built.length)}</span> valid rows{optionalMapped > 0 && ` · ${optionalMapped} extra field${optionalMapped === 1 ? "" : "s"}`}</span>
-            {skipped > 0 && <span className="inline-flex items-center gap-1 text-[hsl(var(--risky))]"><AlertTriangle className="size-3.5" /> {formatNumber(skipped)} rows missing name or company</span>}
-          </div>
-          {matching && <p className="text-xs text-muted-foreground">Checking your lists for matches…</p>}
-          {matchedCount > 0 && (
-            <p className="rounded-md bg-primary/10 px-2.5 py-1.5 text-xs text-primary">
-              <span className="font-medium">{formatNumber(matchedCount)}</span> row{matchedCount === 1 ? " is" : "s are"} already in your <span className="font-medium">Lists</span>. Filled straight from the saved record, <span className="font-medium">no crawl</span>.
-            </p>
-          )}
-          {asIsCount > 0 && (
-            <p className="rounded-md bg-valid/10 px-2.5 py-1.5 text-xs text-[hsl(var(--valid))]">
-              <span className="font-medium">{formatNumber(asIsCount)}</span> row{asIsCount === 1 ? "" : "s"} already have LinkedIn / title / email, shown <span className="font-medium">directly, no crawl</span>.{built.length > asIsCount && ` The other ${formatNumber(built.length - asIsCount)} (name + company only) get their LinkedIn & email added.`}
-            </p>
-          )}
-        </div>
-      )}
+        const requiredMapped = [map.firstName, map.lastName, map.company].filter(Boolean).length;
+        const locationMapped = [map.city, map.state, map.country].filter(Boolean).length;
 
-      <DialogFooter>
+        return (
+          <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
+            {/* ---------- Left: source + readiness ---------- */}
+            <aside className="space-y-4">
+              {/* File summary */}
+              <div className="rounded-xl border border-border bg-card p-3 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <IconTile icon={FileSpreadsheet} tone="valid" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold" title={parsed.fileName}>{parsed.fileName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      <span className="tabular-nums">{formatNumber(parsed.rows.length)}</span> rows · <span className="tabular-nums">{parsed.columns.length}</span> columns
+                    </p>
+                  </div>
+                  <Button size="icon" variant="ghost" onClick={() => { setParsed(null); setMatches({}); }} className="size-8 shrink-0 text-muted-foreground" aria-label="Replace file" title="Replace file">
+                    <RefreshCw />
+                  </Button>
+                </div>
+                <div className="mt-3 flex h-1.5 gap-[2px] overflow-hidden rounded-full" aria-hidden>
+                  <span className="h-full rounded-full bg-[hsl(var(--valid))]" style={{ flexGrow: mappedTotal }} />
+                  <span className="h-full rounded-full bg-[hsl(280_62%_55%)]" style={{ flexGrow: extraColumns.length }} />
+                  <span className="h-full rounded-full bg-border" style={{ flexGrow: emptyColumns.length }} />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-[hsl(var(--valid))]" /> <b className="font-semibold tabular-nums text-foreground">{mappedTotal}</b> mapped</span>
+                  <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-[hsl(280_62%_55%)]" /> <b className="font-semibold tabular-nums text-foreground">{extraColumns.length}</b> extra</span>
+                  <span className="inline-flex items-center gap-1"><span className="size-2 rounded-full bg-border" /> <b className="font-semibold tabular-nums text-foreground">{emptyColumns.length}</b> empty</span>
+                </div>
+              </div>
+
+              <Field label="Job name" htmlFor="people-import-name">
+                <Input id="people-import-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Target contacts" autoComplete="off" />
+              </Field>
+
+              {apolloField}
+
+              {/* Readiness */}
+              <div className="space-y-2">
+                <ReadyStat icon={ListChecks} tone="brand" value={built.length} label="rows to import" />
+                <ReadyStat icon={Zap} tone="valid" value={asIsCount} label="shown directly, no crawl" />
+                <ReadyStat icon={AlertTriangle} tone={skipped > 0 ? "risky" : "muted"} value={skipped} label="missing name or company" />
+              </div>
+              {matching && <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><span className="size-1.5 animate-pulse rounded-full bg-brand" aria-hidden /> Checking your lists for matches…</p>}
+              {matchedCount > 0 && (
+                <p className={cn("rounded-lg px-3 py-2 text-xs", TONES.brand)}>
+                  <span className="font-semibold tabular-nums">{formatNumber(matchedCount)}</span> row{matchedCount === 1 ? " is" : "s are"} already in your Lists, filled from the saved record (no crawl).
+                </p>
+              )}
+
+              {/* Extra / empty columns */}
+              {extraColumns.length > 0 && (
+                <div className="rounded-xl border border-dashed border-border p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-medium">
+                    <Layers className="size-3.5 text-[hsl(280_62%_55%)] dark:text-[hsl(280_80%_76%)]" strokeWidth={1.9} />
+                    Kept as extra columns
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">No matching field — stored as-is and included in exports.</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {extraColumns.map((c) => (
+                      <span key={c} className="inline-flex max-w-[12rem] items-center rounded-md bg-surface px-1.5 py-0.5 text-[11px]"><span className="truncate">{c}</span></span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {emptyColumns.length > 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  Skipped empty: <span className="text-foreground">{emptyColumns.slice(0, 6).join(", ")}{emptyColumns.length > 6 ? `, +${emptyColumns.length - 6} more` : ""}</span>
+                </p>
+              )}
+            </aside>
+
+            {/* ---------- Right: mapping table ---------- */}
+            <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <IconTile icon={Columns3} tone="violet" size="sm" />
+                  <div>
+                    <p className="text-sm font-semibold leading-tight">Column mapping</p>
+                    <p className="text-xs text-muted-foreground">Auto-matched from your headers — change any field.</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Column headings (desktop) */}
+              <div className={cn(MAP_GRID, "hidden border-b border-border bg-surface px-4 py-2 text-[12px] text-muted-foreground md:grid")}>
+                <span>Field</span>
+                <span />
+                <span>Column in your file</span>
+                <span>Sample value</span>
+                <span className="text-right">Filled</span>
+              </div>
+
+              <MapGroup title="Required" mapped={requiredMapped} total={3}>
+                <MapRow label="First Name" required value={map.firstName} stats={stats} onChange={(v) => setMap({ ...map, firstName: v })} />
+                <MapRow label="Last Name" required value={map.lastName} stats={stats} onChange={(v) => setMap({ ...map, lastName: v })} />
+                <MapRow label="Company Name" required value={map.company} stats={stats} onChange={(v) => setMap({ ...map, company: v })} />
+              </MapGroup>
+
+              {locationMapped > 0 && (
+                <MapGroup title="Location" mapped={locationMapped} total={locationMapped}>
+                  {map.city && <MapRow label="City" value={map.city} stats={stats} onChange={(v) => setMap({ ...map, city: v })} />}
+                  {map.state && <MapRow label="State" value={map.state} stats={stats} onChange={(v) => setMap({ ...map, state: v })} />}
+                  {map.country && <MapRow label="Country" value={map.country} stats={stats} onChange={(v) => setMap({ ...map, country: v })} />}
+                </MapGroup>
+              )}
+
+              {optionalMapped > 0 && (
+                <MapGroup title="Fills the table" mapped={optionalMapped} total={optionalMapped}>
+                  {OPTIONAL_FIELDS.filter((f) => map[f.key]).map((f) => (
+                    <MapRow key={f.key} label={f.label} value={map[f.key]} stats={stats} onChange={(v) => setMap({ ...map, [f.key]: v })} />
+                  ))}
+                </MapGroup>
+              )}
+
+              {/* Fields the file doesn't have — collapsed, mappable by hand */}
+              {unmappedFields.length > 0 && (
+                <div className="border-t border-border">
+                  <button
+                    type="button"
+                    onClick={() => setShowOptional((s) => !s)}
+                    className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-[13px] text-muted-foreground transition-colors hover:bg-surface/60 hover:text-foreground"
+                    aria-expanded={showOptional}
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <Plus className="size-4" strokeWidth={1.75} />
+                      Map more fields
+                      <span className="rounded bg-surface px-1.5 text-[10px] font-semibold tabular-nums">{unmappedFields.length} not in file</span>
+                    </span>
+                    <ChevronDown className={cn("size-4 transition-transform", showOptional && "rotate-180")} />
+                  </button>
+                  {showOptional && (
+                    <div className="divide-y divide-border/60 border-t border-border bg-surface/30">
+                      {unmappedFields.map((f) => (
+                        <MapRow key={f.key} label={f.label} value={map[f.key as keyof Mapping] as string} stats={stats} onChange={(v) => setMap({ ...map, [f.key]: v })} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          </div>
+        );
+      })()}
+
+      <DialogFooter className="border-t border-border pt-4">
         <Button variant="ghost" onClick={close}>Cancel</Button>
         <Button disabled={!parsed || built.length === 0 || missingMap || !apolloValid || creating} onClick={create}>
-          {creating ? <Loader2 className="size-4 animate-spin" /> : null} Import {built.length > 0 ? formatNumber(built.length) : ""} people <ArrowRight className="size-4" />
+          {creating ? <Loader2 className="animate-spin" /> : null} Import {built.length > 0 ? formatNumber(built.length) : ""} people <ArrowRight />
         </Button>
       </DialogFooter>
     </Dialog>
   );
 }
 
+const STEPS = ["Upload", "Map", "Import"] as const;
+
+/** Compact 3-step indicator: done = valid tick, current = brand, upcoming = muted. */
+function StepDots({ step }: { step: number }) {
+  return (
+    <ol className="flex items-center gap-1.5 pr-8" aria-label={`Step ${step} of ${STEPS.length}`}>
+      {STEPS.map((label, i) => {
+        const n = i + 1;
+        const done = n < step;
+        const current = n === step;
+        return (
+          <li key={label} className="flex items-center gap-1.5">
+            {i > 0 && <span className={cn("h-px w-3 sm:w-5", done || current ? "bg-brand/40" : "bg-border")} aria-hidden />}
+            <span className={cn(
+              "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold",
+              done ? TONES.valid : current ? TONES.brand : TONES.muted,
+            )}>
+              <span className="flex size-3.5 items-center justify-center tabular-nums">{done ? <Check className="size-3" strokeWidth={2.5} /> : n}</span>
+              <span className={cn(!current && "hidden sm:inline")}>{label}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 type ImportRow = { firstName: string; lastName: string; company: string; location: string; city: string; state: string; country: string; raw: string[] } & Record<OptKey, string>;
 
-function MapField({ label, required, value, cols, onChange }: { label: string; required?: boolean; value: string; cols: string[]; onChange: (v: string) => void }) {
+interface ColStats { columns: string[]; byName: Record<string, { fill: number; sample: string; total: number }> }
+
+/** Field · arrow · column · sample · filled — shared by the heading row and every mapping row. */
+const MAP_GRID = "md:grid md:grid-cols-[minmax(0,1fr)_16px_minmax(0,1.15fr)_minmax(0,1fr)_88px] md:items-center md:gap-3";
+
+function MapGroup({ title, mapped, total, children }: { title: string; mapped: number; total: number; children: React.ReactNode }) {
+  const complete = mapped >= total && total > 0;
   return (
-    <div className="space-y-1.5">
-      <Label>{label} {required && <span className="text-[hsl(var(--invalid))]">*</span>}</Label>
-      <Select value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="">—</option>
-        {cols.map((c) => <option key={c} value={c}>{c}</option>)}
+    <div className="border-t border-border first:border-t-0">
+      <div className="flex items-center gap-2 bg-surface/50 px-4 py-1.5">
+        <p className="text-[11px] font-semibold text-muted-foreground">{title}</p>
+        <span className={cn("inline-flex items-center gap-1 rounded px-1 text-[10px] font-semibold tabular-nums", complete ? TONES.valid : TONES.risky)}>
+          {complete && <Check className="size-2.5" strokeWidth={3} />} {mapped}/{total}
+        </span>
+      </div>
+      <div className="divide-y divide-border/60">{children}</div>
+    </div>
+  );
+}
+
+/** One mapping line: meaning-tinted field tile → source column, its first sample value and fill rate. */
+function MapRow({ label, required, value, stats, onChange }: { label: string; required?: boolean; value: string; stats: ColStats; onChange: (v: string) => void }) {
+  const s = value ? stats.byName[value] : undefined;
+  const pct = s && s.total ? Math.round((s.fill / s.total) * 100) : 0;
+  const missing = required && !value;
+  const meta = colHeadMeta(label);
+  const Glyph = meta?.icon;
+  const barTone = pct >= 80 ? "bg-[hsl(var(--valid))]" : pct >= 30 ? "bg-[hsl(var(--risky))]" : "bg-muted-foreground/50";
+  return (
+    <div className={cn("space-y-2 px-4 py-2.5 transition-colors hover:bg-surface/40 md:space-y-0", MAP_GRID, missing && "bg-[hsl(var(--invalid)/0.04)]")}>
+      {/* Field */}
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-surface">
+          {Glyph ? <Glyph className={cn("size-3.5", meta?.tone)} strokeWidth={1.9} /> : <Columns3 className="size-3.5 text-muted-foreground" />}
+        </span>
+        <span className="min-w-0 truncate text-[13px] font-medium" title={label}>{label}</span>
+        {required && <span className="shrink-0 text-[hsl(var(--invalid))]">*</span>}
+      </div>
+
+      {/* Arrow */}
+      <ArrowRight className={cn("hidden size-4 md:block", value ? "text-[hsl(var(--valid))]" : "text-muted-foreground/40")} strokeWidth={1.9} />
+
+      {/* Column picker */}
+      <Select value={value} onChange={(e) => onChange(e.target.value)} className={cn("h-8 bg-card text-[13px]", !value && "text-muted-foreground", missing && "border-[hsl(var(--invalid))]")}>
+        <option value="">— Not mapped —</option>
+        {stats.columns.map((c) => (
+          <option key={c} value={c}>{stats.byName[c]?.fill ? c : `${c} (empty)`}</option>
+        ))}
       </Select>
+
+      {/* Sample */}
+      <div className="min-w-0 text-[12px]">
+        {s ? (
+          <span className="block truncate rounded-md bg-surface px-2 py-1 font-mono text-[11px] text-foreground" title={s.sample}>{s.sample || "—"}</span>
+        ) : (
+          <span className="text-muted-foreground/60">{missing ? "Required" : "—"}</span>
+        )}
+      </div>
+
+      {/* Filled */}
+      <div className="flex items-center gap-2 md:justify-end">
+        {s ? (
+          <>
+            <span className="h-1.5 w-12 overflow-hidden rounded-full bg-border">
+              <span className={cn("block h-full rounded-full", barTone)} style={{ width: `${pct}%` }} />
+            </span>
+            <span className="w-9 text-right text-[11px] font-semibold tabular-nums">{pct}%</span>
+          </>
+        ) : (
+          <span className="text-[11px] text-muted-foreground/60">—</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReadyStat({ icon: Icon, tone, value, label }: { icon: React.ElementType; tone: "brand" | "valid" | "risky" | "muted"; value: number; label: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
+      <IconTile icon={Icon} tone={tone} size="sm" />
+      <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">{label}</span>
+      <span className="text-sm font-semibold tabular-nums">{formatNumber(value)}</span>
     </div>
   );
 }

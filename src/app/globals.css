@@ -3,78 +3,116 @@
 @tailwind utilities;
 
 @layer base {
+  /* ------------------------------------------------------------------
+     Light theme — airy white chrome, soft grey canvas, violet-indigo brand.
+     ------------------------------------------------------------------ */
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    color-scheme: light;
+
+    --background: 220 30% 98%;
+    --foreground: 226 32% 14%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 226 32% 14%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 226 32% 14%;
 
-    /* Indigo / blue primary */
-    --primary: 243 75% 59%;
+    /* Recessed surface for pills, segmented controls, inset wells */
+    --surface: 225 27% 96.5%;
+
+    /* Brand violet-indigo */
+    --brand: 246 72% 58%;
+    --primary: 246 72% 58%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 222 47% 11%;
+    --secondary: 225 25% 96%;
+    --secondary-foreground: 226 32% 14%;
 
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
+    --muted: 225 25% 96%;
+    --muted-foreground: 223 11% 46%;
 
-    --accent: 243 75% 96%;
-    --accent-foreground: 243 75% 40%;
+    --accent: 246 90% 97%;
+    --accent-foreground: 246 62% 50%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 243 75% 59%;
+    --border: 225 20% 91%;
+    --input: 225 18% 88%;
+    --ring: 246 72% 58%;
 
     --radius: 0.75rem;
 
     /* Verification status accents */
-    --valid: 142 71% 45%;
-    --invalid: 0 72% 51%;
-    --risky: 38 92% 50%;
-    --unknown: 220 9% 55%;
+    --valid: 152 62% 38%;
+    --invalid: 354 72% 52%;
+    --risky: 32 92% 50%;
+    --unknown: 223 10% 55%;
 
-    /* Sidebar (dark) */
-    --sidebar: 234 40% 13%;
-    --sidebar-foreground: 220 20% 92%;
-    --sidebar-muted: 222 15% 58%;
-    --sidebar-accent: 243 75% 59%;
-    --sidebar-border: 232 25% 22%;
+    /* Sidebar (light, matches the cards) */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 226 26% 22%;
+    --sidebar-muted: 223 11% 48%;
+    --sidebar-accent: 246 72% 58%;
+    --sidebar-active: 246 90% 96.5%;
+    --sidebar-border: 225 20% 92%;
+
+    --shadow-color: 228 30% 20%;
   }
 
+  /* ------------------------------------------------------------------
+     Dark theme — deep ink canvas, slightly lifted cards, brighter brand.
+     ------------------------------------------------------------------ */
   .dark {
-    --background: 222 47% 8%;
-    --foreground: 210 40% 98%;
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 11%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 243 75% 63%;
+    color-scheme: dark;
+
+    --background: 229 22% 7%;
+    --foreground: 225 25% 94%;
+    --card: 229 19% 10.5%;
+    --card-foreground: 225 25% 94%;
+    --popover: 229 19% 12%;
+    --popover-foreground: 225 25% 94%;
+    --surface: 229 17% 14%;
+    --brand: 246 90% 72%;
+    --primary: 246 78% 64%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 217 33% 18%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 18%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 20%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 63% 45%;
+    --secondary: 229 16% 16%;
+    --secondary-foreground: 225 25% 94%;
+    --muted: 229 16% 15%;
+    --muted-foreground: 225 12% 63%;
+    --accent: 246 35% 19%;
+    --accent-foreground: 246 95% 82%;
+    --destructive: 354 70% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 217 33% 20%;
-    --input: 217 33% 22%;
-    --ring: 243 75% 63%;
+    --border: 229 14% 18%;
+    --input: 229 14% 22%;
+    --ring: 246 85% 70%;
+
+    --valid: 152 55% 48%;
+    --invalid: 354 80% 64%;
+    --risky: 34 92% 58%;
+    --unknown: 225 10% 60%;
+
+    --sidebar: 229 21% 9%;
+    --sidebar-foreground: 225 20% 88%;
+    --sidebar-muted: 225 11% 60%;
+    --sidebar-accent: 246 90% 72%;
+    --sidebar-active: 246 38% 18%;
+    --sidebar-border: 229 14% 16%;
+
+    --shadow-color: 230 40% 2%;
   }
 }
 
 @layer base {
   * {
     @apply border-border;
+  }
+  /* Browsers bold <th> by default; headers take their weight from the row
+     (13px regular, Outreach-suite style) unless a cell opts in explicitly. */
+  th {
+    font-weight: inherit;
   }
   html {
     /* Consistent viewport height incl. mobile browser chrome (fallback → dvh). */

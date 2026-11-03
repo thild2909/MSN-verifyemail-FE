@@ -2,6 +2,7 @@
 import * as React from "react";
 import { Search, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconTile } from "@/components/common/kit";
 import { parseNaturalQuery } from "@/lib/leads/nl-search";
 import type { PeopleFilters } from "@/lib/leads/types";
 
@@ -22,32 +23,37 @@ export function SearchBar({
 
   return (
     <div className="relative w-full">
-      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" strokeWidth={1.75} />
       <input
         ref={inputRef}
+        type="search"
+        autoComplete="off"
+        data-1p-ignore
+        data-lpignore="true"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-10 w-full rounded-lg border border-input bg-card pl-9 pr-3 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-10 w-full rounded-lg border border-border bg-card pl-9 pr-3 text-sm shadow-xs transition-[border-color,box-shadow] placeholder:text-muted-foreground focus-visible:border-brand/50 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-brand/15"
       />
 
       {showPanel && (
-        <div className="absolute left-0 right-0 top-12 z-30 animate-fade-in rounded-xl border bg-popover p-4 shadow-xl">
-          <p className="mb-3 flex items-center gap-1.5 text-xs font-semibold text-primary">
-            <Sparkles className="size-3.5" /> AI understood your search as:
-          </p>
-          <div className="flex flex-wrap gap-3">
+        <div className="absolute left-0 right-0 top-12 z-30 animate-fade-in overflow-hidden rounded-xl border border-border bg-popover shadow-pop">
+          <div className="flex items-center gap-2.5 border-b border-border px-4 py-3">
+            <IconTile icon={Sparkles} tone="violet" size="sm" />
+            <p className="text-[13px] font-semibold">AI understood your search as:</p>
+          </div>
+          <div className="flex flex-wrap gap-2 p-4">
             {parsed.chips.map((c, i) => (
-              <div key={i} className="rounded-lg border bg-card px-3 py-1.5">
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{c.field}</p>
-                <p className="text-sm font-medium">{c.label}</p>
+              <div key={i} className="rounded-lg border border-border bg-surface px-3 py-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{c.field}</p>
+                <p className="text-[13px] font-medium text-foreground">{c.label}</p>
               </div>
             ))}
           </div>
-          <div className="mt-3 flex justify-end gap-2">
+          <div className="flex justify-end gap-2 border-t border-border bg-surface/50 px-4 py-2.5">
             <Button size="sm" variant="ghost" onClick={() => setDismissed(true)}>Dismiss</Button>
             <Button size="sm" onClick={() => { onApplyParsed?.(parsed.patch); setDismissed(true); }}>
-              <Sparkles className="size-4" /> Apply filters
+              <Sparkles /> Apply filters
             </Button>
           </div>
         </div>

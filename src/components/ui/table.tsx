@@ -1,5 +1,7 @@
 import * as React from "react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ColHead } from "@/components/common/col-head";
 
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
@@ -26,24 +28,39 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
   ({ className, ...props }, ref) => (
     <tr
       ref={ref}
-      className={cn("border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-accent", className)}
+      className={cn("border-b border-border/60 transition-colors hover:bg-surface/60 data-[state=selected]:bg-brand/[0.06]", className)}
       {...props}
     />
   ),
 );
 TableRow.displayName = "TableRow";
 
-const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => (
-    <th
-      ref={ref}
-      className={cn(
-        "h-10 whitespace-nowrap px-3 text-left align-middle text-xs font-semibold uppercase tracking-wide text-muted-foreground sm:h-11 sm:px-4 [&:has([role=checkbox])]:pr-0",
-        className,
-      )}
-      {...props}
-    />
-  ),
+type TableHeadProps = React.ThHTMLAttributes<HTMLTableCellElement> & {
+  /** Header icon: auto-picked from a plain-text label; pass a glyph to override or `false` to hide. */
+  icon?: LucideIcon | false;
+};
+
+const TableHead = React.forwardRef<HTMLTableCellElement, TableHeadProps>(
+  ({ className, children, icon, ...props }, ref) => {
+    const alignRight = /\btext-right\b/.test(className ?? "");
+    const alignCenter = /\btext-center\b/.test(className ?? "");
+    return (
+      <th
+        ref={ref}
+        className={cn(
+          "h-11 whitespace-nowrap bg-surface px-3 text-left align-middle text-[13px] font-normal text-muted-foreground sm:px-4 [&:has([role=checkbox])]:pr-0",
+          className,
+        )}
+        {...props}
+      >
+        {typeof children === "string" && children.trim() ? (
+          <ColHead label={children} icon={icon} align={alignRight ? "right" : alignCenter ? "center" : "left"} />
+        ) : (
+          children
+        )}
+      </th>
+    );
+  },
 );
 TableHead.displayName = "TableHead";
 

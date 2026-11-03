@@ -30,12 +30,25 @@ export async function be<T = unknown>(
       ...(init.body != null ? { "Content-Type": "application/json" } : {}),
       ...(init.headers ?? {}),
     };
-    const res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers,
-      signal: controller.signal,
-      cache: "no-store",
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers,
+        signal: controller.signal,
+        cache: "no-store",
+      });
+    } catch (e) {
+      // BE-service down / unreachable / timed out. Report it as a 503 instead of
+      // throwing, so route handlers answer with JSON (an uncaught throw becomes
+      // an empty 500 body → "Unexpected end of JSON input" in the browser).
+      console.error(`[be] ${init.method ?? "GET"} ${BASE}${path} failed:`, (e as Error)?.message ?? e);
+      return {
+        ok: false,
+        status: 503,
+        json: { error: { code: "BE_UNAVAILABLE", message: "Backend service is unavailable." } } as T,
+      };
+    }
     const json = (await res.json().catch(() => ({}))) as T;
     return { ok: res.ok, status: res.status, json };
   } finally {

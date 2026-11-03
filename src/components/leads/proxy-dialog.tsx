@@ -1,4 +1,5 @@
 "use client";
+import { ColHead } from "@/components/common/col-head";
 import * as React from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, ShieldCheck, ShieldAlert, Shuffle, ExternalLink, Play } from "lucide-react";
@@ -6,6 +7,7 @@ import Link from "next/link";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { IconTile, Pill } from "@/components/common/kit";
 import { testProxy, type ProxyStatus } from "@/lib/api/client";
 
 /**
@@ -26,55 +28,66 @@ export function ProxyDialog({ open, onOpenChange }: { open: boolean; onOpenChang
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} className="max-w-lg">
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2"><Shuffle className="size-5 text-primary" /> Proxy pool</DialogTitle>
-        <DialogDescription>Layer 1 rotating proxy for crawling (Decodo is the Layer 2 fallback). Check it&rsquo;s still valid and usable.</DialogDescription>
+      <DialogHeader className="space-y-3 pr-8">
+        <IconTile icon={Shuffle} tone={!s ? "brand" : healthy ? "valid" : s.configured ? "invalid" : "risky"} />
+        <div className="space-y-1">
+          <DialogTitle className="text-base">Proxy pool</DialogTitle>
+          <DialogDescription className="text-[13px] leading-relaxed">Layer 1 rotating proxy for crawling (Decodo is the Layer 2 fallback). Check it&rsquo;s still valid and usable.</DialogDescription>
+        </div>
       </DialogHeader>
 
       <div className="space-y-3 py-1">
         {test.isPending && !s ? (
-          <div className="flex items-center gap-2 rounded-lg border bg-muted/20 p-3 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Testing proxies…</div>
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-surface/60 p-3 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin text-brand" strokeWidth={1.75} /> Testing proxies…
+          </div>
         ) : test.isError ? (
-          <div className="flex items-start gap-2 rounded-lg border border-[hsl(var(--invalid))]/30 bg-[hsl(var(--invalid))]/5 p-3 text-sm">
-            <ShieldAlert className="mt-0.5 size-4 text-[hsl(var(--invalid))]" />
-            <span>Couldn&rsquo;t reach the crawler service to test the proxy.</span>
+          <div className="flex items-start gap-3 rounded-lg border border-[hsl(var(--invalid)/0.25)] bg-[hsl(var(--invalid)/0.06)] p-3 text-sm">
+            <IconTile icon={ShieldAlert} tone="invalid" size="sm" />
+            <span className="pt-1">Couldn&rsquo;t reach the crawler service to test the proxy.</span>
           </div>
         ) : !s ? null : !s.configured ? (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
-            <ShieldAlert className="mt-0.5 size-4 text-amber-600 dark:text-amber-400" />
-            <span>No proxy configured. Crawls go direct then fall back to Decodo. Add a proxy list in Settings → Config for IP rotation.</span>
+          <div className="flex items-start gap-3 rounded-lg border border-[hsl(var(--risky)/0.3)] bg-[hsl(var(--risky)/0.06)] p-3 text-sm">
+            <IconTile icon={ShieldAlert} tone="risky" size="sm" />
+            <span className="pt-1 leading-relaxed">No proxy configured. Crawls go direct then fall back to Decodo. Add a proxy list in Settings → Config for IP rotation.</span>
           </div>
         ) : (
           <>
             <div className={cn(
-              "flex items-center gap-2 rounded-lg border p-3 text-sm font-medium",
-              healthy ? "border-[hsl(var(--valid))]/30 bg-[hsl(var(--valid))]/5 text-[hsl(var(--valid))]"
-                : "border-[hsl(var(--invalid))]/30 bg-[hsl(var(--invalid))]/5 text-[hsl(var(--invalid))]",
+              "flex items-start gap-3 rounded-lg border p-3 text-sm",
+              healthy ? "border-[hsl(var(--valid)/0.25)] bg-[hsl(var(--valid)/0.06)]"
+                : "border-[hsl(var(--invalid)/0.25)] bg-[hsl(var(--invalid)/0.06)]",
             )}>
-              {healthy ? <ShieldCheck className="size-4" /> : <ShieldAlert className="size-4" />}
-              {!s.reachable
-                ? (s.error || "Proxy list won't download — the plan may be expired or the URL wrong.")
-                : healthy
-                  ? `Working — ${s.working}/${s.tested} sampled IPs OK, ${s.total} in pool.`
-                  : `Pool loaded (${s.total} IPs) but 0/${s.tested} sampled IPs responded — likely blocked or expired.`}
+              <IconTile icon={healthy ? ShieldCheck : ShieldAlert} tone={healthy ? "valid" : "invalid"} size="sm" />
+              <span className={cn("pt-1 font-medium leading-relaxed", healthy ? "text-[hsl(var(--valid))]" : "text-[hsl(var(--invalid))]")}>
+                {!s.reachable
+                  ? (s.error || "Proxy list won't download — the plan may be expired or the URL wrong.")
+                  : healthy
+                    ? `Working — ${s.working}/${s.tested} sampled IPs OK, ${s.total} in pool.`
+                    : `Pool loaded (${s.total} IPs) but 0/${s.tested} sampled IPs responded — likely blocked or expired.`}
+              </span>
             </div>
 
             {s.results.length > 0 && (
-              <div className="max-h-44 overflow-auto scrollbar-thin rounded-lg border">
-                <table className="w-full text-[13px]">
-                  <thead className="sticky top-0 bg-card text-left text-muted-foreground">
-                    <tr className="border-b"><th className="px-3 py-1.5">Proxy IP</th><th className="px-3 py-1.5">Status</th><th className="px-3 py-1.5 text-right">Latency</th></tr>
+              <div className="max-h-48 overflow-auto scrollbar-thin rounded-lg border border-border bg-card">
+                <table className="w-full border-collapse text-[13px]">
+                  <thead className="sticky top-0 z-10 bg-surface/95 text-left backdrop-blur supports-[backdrop-filter]:bg-surface/85">
+                    <tr className="border-b border-border text-[13px] font-normal text-muted-foreground">
+                      <th className="px-3 py-3"><ColHead label="Proxy IP" /></th>
+                      <th className="px-3 py-3"><ColHead label="Status" /></th>
+                      <th className="px-3 py-3 text-right"><ColHead label="Latency" /></th>
+                    </tr>
                   </thead>
                   <tbody>
                     {s.results.map((r) => (
-                      <tr key={r.ip} className="border-b last:border-0">
-                        <td className="px-3 py-1.5 font-mono text-xs">{r.ip}</td>
-                        <td className="px-3 py-1.5">
-                          <span className={cn("rounded-full px-1.5 py-0.5 text-[11px] font-semibold", r.ok ? "bg-[hsl(var(--valid))]/12 text-[hsl(var(--valid))]" : "bg-[hsl(var(--invalid))]/12 text-[hsl(var(--invalid))]")}>
+                      <tr key={r.ip} className="border-b border-border transition-colors last:border-0 hover:bg-surface/60">
+                        <td className="px-3 py-2 font-mono text-xs text-foreground/90">{r.ip}</td>
+                        <td className="px-3 py-2">
+                          <Pill tone={r.ok ? "valid" : "invalid"} dot className="normal-case">
                             {r.ok ? "OK" : (r.status ?? "fail")}
-                          </span>
+                          </Pill>
                         </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{r.ms}ms</td>
+                        <td className="px-3 py-2 text-right font-mono text-xs tabular-nums text-muted-foreground">{r.ms}ms</td>
                       </tr>
                     ))}
                   </tbody>
@@ -86,11 +99,11 @@ export function ProxyDialog({ open, onOpenChange }: { open: boolean; onOpenChang
       </div>
 
       <DialogFooter>
-        <Link href="/settings/config" className="mr-auto inline-flex items-center gap-1 text-sm text-primary hover:underline">
-          <ExternalLink className="size-3.5" /> Configure proxy
+        <Link href="/settings/config" className="mr-auto inline-flex items-center gap-1.5 self-center text-sm font-medium text-brand hover:underline">
+          <ExternalLink className="size-3.5" strokeWidth={1.75} /> Configure proxy
         </Link>
         <Button variant="outline" onClick={() => test.mutate()} disabled={test.isPending}>
-          {test.isPending ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />} Test again
+          {test.isPending ? <Loader2 className="animate-spin" /> : <Play />} Test again
         </Button>
         <Button onClick={() => onOpenChange(false)}>Done</Button>
       </DialogFooter>

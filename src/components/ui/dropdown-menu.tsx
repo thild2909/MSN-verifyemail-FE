@@ -93,7 +93,7 @@ export function DropdownMenu({ trigger, children, align = "end", up = false, cla
           <div
             ref={menuRef}
             className={cn(
-              "z-50 min-w-[10rem] animate-fade-in overflow-hidden rounded-lg border bg-popover p-1 shadow-lg",
+              "z-50 min-w-[10rem] animate-fade-in overflow-hidden rounded-xl border bg-popover p-1 text-popover-foreground shadow-pop",
               className,
             )}
             style={{ ...style, fontFamily: "var(--font-sans), system-ui, sans-serif" }}
@@ -115,7 +115,7 @@ export function DropdownItem({
   return (
     <button
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm font-normal transition-colors hover:bg-accent [&_svg]:size-4 [&_svg]:text-muted-foreground disabled:pointer-events-none disabled:opacity-50",
+        "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm font-normal transition-colors hover:bg-surface [&_svg]:size-4 [&_svg]:text-muted-foreground disabled:pointer-events-none disabled:opacity-50",
         destructive && "text-destructive hover:bg-destructive/10 [&_svg]:text-destructive",
         className,
       )}

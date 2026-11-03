@@ -2,8 +2,9 @@
 import * as React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Bot, Search, KeyRound, Info, Shuffle, MailCheck } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { SettingsCard, Pill, IconTile, type Tone } from "@/components/settings/settings-ui";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Select } from "@/components/ui/select";
@@ -95,6 +96,13 @@ const GROUPS: GroupDef[] = [
   },
 ];
 
+const GROUP_TONE: Record<string, Tone> = {
+  "AI models": "violet",
+  "Search & crawl": "sky",
+  "Proxy rotation (Layer 1)": "risky",
+  "Email verification fallback": "valid",
+};
+
 export default function ConfigSettingsPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -155,14 +163,28 @@ export default function ConfigSettingsPage() {
       }),
     );
 
+  // Configured-count per group for the header pill and the overview.
+  const configured = (g: GroupDef) => g.fields.filter((f) => byKey.get(f.key)?.hasValue && !cleared.has(f.key)).length;
+  const totalFields = GROUPS.reduce((n, g) => n + g.fields.length, 0);
+  const totalSet = GROUPS.reduce((n, g) => n + configured(g), 0);
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-start gap-2 rounded-lg border border-primary/25 bg-primary/5 p-3 text-sm">
-        <Info className="mt-0.5 size-4 shrink-0 text-primary" />
-        <p className="text-muted-foreground">
-          These settings live on the crawler service and <strong className="text-foreground">override the <code>.env</code> file</strong> — no redeploy.
-          Secrets are stored server-side and shown masked. Leave a secret blank to keep the current value, or use <em>Clear</em> to remove your override and fall back to <code>.env</code>.
-        </p>
+    <div className="space-y-5">
+      <div className="flex items-start gap-3 rounded-xl border border-brand/20 bg-brand/[0.04] p-4">
+        <IconTile icon={Info} tone="brand" />
+        <div className="min-w-0 flex-1 text-sm">
+          <p className="font-semibold">Live service configuration</p>
+          <p className="mt-0.5 text-muted-foreground">
+            These settings live on the crawler service and <strong className="text-foreground">override the <code className="rounded bg-surface px-1 text-xs">.env</code> file</strong>, so no redeploy is needed.
+            Secrets are stored server-side and shown masked. Leave a secret blank to keep it, or use <em>Clear</em> to fall back to <code className="rounded bg-surface px-1 text-xs">.env</code>.
+          </p>
+        </div>
+        {!isLoading && (
+          <span className="hidden shrink-0 text-right sm:block">
+            <span className="block text-lg font-semibold tabular-nums">{totalSet}/{totalFields}</span>
+            <span className="block text-[11px] text-muted-foreground">configured</span>
+          </span>
+        )}
       </div>
 
       {isLoading ? (
@@ -170,37 +192,41 @@ export default function ConfigSettingsPage() {
       ) : (
         <>
           {GROUPS.map((g) => {
-            const Icon = g.icon;
+            const n = configured(g);
             return (
-              <Card key={g.title}>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base"><Icon className="size-4 text-primary" /> {g.title}</CardTitle>
-                  <CardDescription>{g.description}</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
+              <SettingsCard
+                key={g.title}
+                icon={g.icon}
+                tone={GROUP_TONE[g.title] ?? "brand"}
+                title={g.title}
+                description={g.description}
+                aside={<Pill tone={n === g.fields.length ? "valid" : n > 0 ? "risky" : "muted"}>{n}/{g.fields.length} set</Pill>}
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
                   {g.fields.map((f) => {
                     const meta = byKey.get(f.key);
                     const secret = meta?.secret ?? true;
                     const isCleared = cleared.has(f.key);
                     const value = isCleared ? "" : draft[f.key] ?? (secret ? "" : meta?.value ?? "");
                     const placeholder = secret && meta?.hasValue && !isCleared ? `${meta.value} — leave blank to keep` : f.placeholder;
+                    const wide = g.fields.length === 1 || (f.help?.length ?? 0) > 90 || f.placeholder.length > 40;
                     return (
-                      <div key={f.key} className="space-y-1.5">
+                      <div key={f.key} className={cn("space-y-1.5", wide && "sm:col-span-2")}>
                         <div className="flex items-center justify-between gap-2">
-                          <Label htmlFor={f.key} className="flex items-center gap-1.5">
-                            {secret && <KeyRound className="size-3 text-muted-foreground" />}
-                            {f.label}
-                            {meta?.hasValue && !isCleared && (
-                              <span className="rounded-full bg-[hsl(var(--valid))]/12 px-1.5 py-0.5 text-[10px] font-medium text-[hsl(var(--valid))]">
-                                {meta.overridden ? "Set" : "From .env"}
-                              </span>
+                          <Label htmlFor={f.key} className="flex min-w-0 items-center gap-1.5 text-[13px]">
+                            {secret && <KeyRound className="size-3 shrink-0 text-muted-foreground" />}
+                            <span className="truncate">{f.label}</span>
+                            {isCleared ? (
+                              <Pill tone="invalid">Will clear</Pill>
+                            ) : (
+                              meta?.hasValue && <Pill tone={meta.overridden ? "valid" : "sky"}>{meta.overridden ? "Set" : "From .env"}</Pill>
                             )}
                           </Label>
                           {secret && meta?.hasValue && (
                             <button
                               type="button"
                               onClick={() => setCleared((s) => { const n = new Set(s); if (n.has(f.key)) n.delete(f.key); else n.add(f.key); return n; })}
-                              className="text-xs text-muted-foreground hover:text-[hsl(var(--invalid))]"
+                              className="shrink-0 text-xs font-medium text-muted-foreground hover:text-[hsl(var(--invalid))]"
                             >
                               {isCleared ? "Undo clear" : "Clear"}
                             </button>
@@ -235,20 +261,37 @@ export default function ConfigSettingsPage() {
                             onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
                           />
                         )}
-                        {f.help && <p className="text-[11px] text-muted-foreground">{f.help}</p>}
+                        {f.help && <p className="text-[11px] leading-relaxed text-muted-foreground">{f.help}</p>}
                       </div>
                     );
                   })}
-                </CardContent>
-              </Card>
+                </div>
+              </SettingsCard>
             );
           })}
 
-          <div className="flex justify-end gap-2">
-            {dirty && <Button variant="ghost" onClick={reset} disabled={save.isPending}>Discard</Button>}
-            <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
-              {save.isPending ? <Loader2 className="size-4 animate-spin" /> : "Save changes"}
-            </Button>
+          {/* Sticky save bar */}
+          <div
+            className={cn(
+              "sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 flex items-center justify-between gap-3 rounded-xl border bg-card/95 px-4 py-3 shadow-pop backdrop-blur transition-colors lg:bottom-4",
+              dirty ? "border-brand/40" : "border-border",
+            )}
+          >
+            <p className="text-sm text-muted-foreground">
+              {dirty ? (
+                <span className="inline-flex items-center gap-2 font-medium text-foreground">
+                  <span className="size-2 rounded-full bg-brand" /> Unsaved changes
+                </span>
+              ) : (
+                "All changes saved"
+              )}
+            </p>
+            <div className="flex gap-2">
+              {dirty && <Button variant="ghost" onClick={reset} disabled={save.isPending}>Discard</Button>}
+              <Button onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
+                {save.isPending && <Loader2 className="animate-spin" />} Save changes
+              </Button>
+            </div>
           </div>
         </>
       )}

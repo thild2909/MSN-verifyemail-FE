@@ -1,17 +1,17 @@
 "use client";
 import * as React from "react";
 import Papa from "papaparse";
-import { CheckCircle2, ArrowRight, Loader2, Download, AlertTriangle } from "lucide-react";
+import { CheckCircle2, ArrowRight, Loader2, Download, AlertTriangle, Building2, FileSpreadsheet, ListChecks, Check } from "lucide-react";
+import { IconTile, Field } from "@/components/common/kit";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
 import { FileDropzone } from "@/components/verification/file-dropzone";
 import { useToast } from "@/components/ui/toast";
 import { createCollectJob, matchLeadItems, ApiError, type LeadItem } from "@/lib/api/client";
 import type { CollectedCompany } from "@/lib/leads/collect-types";
-import { formatNumber } from "@/lib/utils";
+import { formatNumber, cn } from "@/lib/utils";
 
 interface Parsed { fileName: string; columns: string[]; rows: string[][] }
 const COMPANY_RE = /company|organi|account|business|name/i;
@@ -136,9 +136,15 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
     }
   };
 
+  const step = parsed ? 2 : 1;
+
   return (
     <Dialog open={open} onOpenChange={close} className="max-w-xl">
       <DialogHeader>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <IconTile icon={Building2} tone="brand" />
+          <StepIndicator step={step} />
+        </div>
         <DialogTitle>Import companies</DialogTitle>
         <DialogDescription>Upload a CSV with <span className="font-medium text-foreground">Company Name</span> and <span className="font-medium text-foreground">Location</span> (both required). We collect the rest from multiple sources.</DialogDescription>
       </DialogHeader>
@@ -146,28 +152,40 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
       {!parsed ? (
         <div className="space-y-3">
           <FileDropzone onFile={onFile} />
-          <button onClick={downloadExample} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Download className="size-3.5" /> Download example CSV</button>
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>Needs two columns: company name + location.</span>
+            <button onClick={downloadExample} className="inline-flex shrink-0 items-center gap-1 font-medium text-brand hover:underline"><Download className="size-3.5" /> Download example CSV</button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 rounded-lg bg-valid/10 px-3 py-2 text-sm text-[hsl(var(--valid))]"><CheckCircle2 className="size-4" /> {parsed.fileName}. Map the required columns.</div>
-          <div className="space-y-1.5"><Label>Job name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Target accounts" /></div>
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-surface/60 p-2.5">
+            <IconTile icon={FileSpreadsheet} tone="valid" size="sm" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-medium">{parsed.fileName}</p>
+              <p className="text-[11px] text-muted-foreground"><span className="tabular-nums">{formatNumber(parsed.rows.length)}</span> rows · <span className="tabular-nums">{parsed.columns.length}</span> columns · map the required columns</p>
+            </div>
+            <CheckCircle2 className="size-4 shrink-0 text-[hsl(var(--valid))]" strokeWidth={1.75} />
+          </div>
+          <Field label="Job name" htmlFor="company-import-name">
+            <Input id="company-import-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Target accounts" />
+          </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5"><Label>Company Name <span className="text-[hsl(var(--invalid))]">*</span></Label>
+            <Field label={<>Company Name <span className="text-[hsl(var(--invalid))]">*</span></>}>
               <Select value={map.company} onChange={(e) => setMap({ ...map, company: e.target.value })}><option value="">—</option>{parsed.columns.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
-            </div>
-            <div className="space-y-1.5"><Label>Location <span className="text-[hsl(var(--invalid))]">*</span></Label>
+            </Field>
+            <Field label={<>Location <span className="text-[hsl(var(--invalid))]">*</span></>}>
               <Select value={map.location} onChange={(e) => setMap({ ...map, location: e.target.value })}><option value="">—</option>{parsed.columns.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
-            </div>
+            </Field>
           </div>
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span><span className="font-semibold text-foreground">{formatNumber(built.length)}</span> valid rows</span>
-            {skipped > 0 && <span className="inline-flex items-center gap-1 text-[hsl(var(--risky))]"><AlertTriangle className="size-3.5" /> {formatNumber(skipped)} rows missing name/location</span>}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5"><ListChecks className="size-3.5 text-[hsl(var(--valid))]" strokeWidth={1.75} /><span className="font-semibold tabular-nums text-foreground">{formatNumber(built.length)}</span> valid rows</span>
+            {skipped > 0 && <span className="inline-flex items-center gap-1 rounded-md bg-[hsl(var(--risky)/0.14)] px-1.5 py-0.5 font-medium text-[hsl(var(--risky))]"><AlertTriangle className="size-3.5" /> <span className="tabular-nums">{formatNumber(skipped)}</span> rows missing name/location</span>}
           </div>
-          {matching && <p className="text-xs text-muted-foreground">Checking your lists for matches…</p>}
+          {matching && <p className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><span className="size-1.5 rounded-full bg-brand animate-pulse" /> Checking your lists for matches…</p>}
           {matchedCount > 0 && (
-            <p className="rounded-md bg-primary/10 px-2.5 py-1.5 text-xs text-primary">
-              <span className="font-medium">{formatNumber(matchedCount)}</span> compan{matchedCount === 1 ? "y is" : "ies are"} already in your <span className="font-medium">Lists</span>. Filled straight from the saved record, <span className="font-medium">no crawl</span>.
+            <p className="rounded-lg border border-brand/20 bg-brand/[0.06] px-3 py-2 text-xs text-brand">
+              <span className="font-semibold tabular-nums">{formatNumber(matchedCount)}</span> compan{matchedCount === 1 ? "y is" : "ies are"} already in your <span className="font-semibold">Lists</span>. Filled straight from the saved record, <span className="font-semibold">no crawl</span>.
             </p>
           )}
         </div>
@@ -176,10 +194,40 @@ export function CompanyImportFlow({ open, onOpenChange, onCreated }: { open: boo
       <DialogFooter>
         <Button variant="ghost" onClick={close}>Cancel</Button>
         <Button disabled={!parsed || built.length === 0 || !map.company || !map.location || creating} onClick={create}>
-          {creating ? <Loader2 className="size-4 animate-spin" /> : null} Collect {built.length > 0 ? formatNumber(built.length) : ""} companies <ArrowRight className="size-4" />
+          {creating ? <Loader2 className="animate-spin" /> : null} Collect {built.length > 0 ? formatNumber(built.length) : ""} companies <ArrowRight />
         </Button>
       </DialogFooter>
     </Dialog>
+  );
+}
+
+/** "Upload → Map & collect" step dots: brand for current, valid for done. */
+function StepIndicator({ step }: { step: 1 | 2 }) {
+  const steps = ["Upload", "Map & collect"];
+  return (
+    <ol className="flex items-center gap-1.5">
+      {steps.map((label, i) => {
+        const n = i + 1;
+        const done = n < step;
+        const current = n === step;
+        return (
+          <li key={label} className="flex items-center gap-1.5">
+            {i > 0 && <span className={cn("h-px w-4", done || current ? "bg-[hsl(var(--valid)/0.5)]" : "bg-border")} />}
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-semibold",
+                current ? "bg-brand/10 text-brand" : done ? "bg-[hsl(var(--valid)/0.12)] text-[hsl(var(--valid))]" : "bg-surface text-muted-foreground",
+              )}
+            >
+              <span className={cn("flex size-4 items-center justify-center rounded-full text-[10px] tabular-nums", current ? "bg-card text-brand ring-1 ring-brand/40" : done ? "bg-card text-[hsl(var(--valid))] ring-1 ring-[hsl(var(--valid)/0.4)]" : "bg-card text-muted-foreground ring-1 ring-border")}>
+                {done ? <Check className="size-2.5" strokeWidth={3} /> : n}
+              </span>
+              <span className="hidden sm:inline">{label}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
