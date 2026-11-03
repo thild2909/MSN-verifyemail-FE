@@ -2,18 +2,48 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Sparkles, CheckCircle2, XCircle, AlertTriangle, HelpCircle, Users } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Sparkles, CheckCircle2, XCircle, AlertTriangle, HelpCircle, Mail, ShieldCheck, ListChecks, FileSpreadsheet, Loader2 } from "lucide-react";
+import { Card } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatCard } from "@/components/common/stat-card";
+import { PageHeader } from "@/components/common/page-header";
+import { IconTile, Pill, SectionCard, type Tone } from "@/components/common/kit";
 import { ResultsTable } from "@/components/verification/results-table";
 import { DownloadMenu } from "@/components/verification/download-menu";
 import { getList } from "@/lib/api/client";
 import { safeToSendRate } from "@/lib/types";
 import { formatNumber, formatDate, cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
+
+/* Verdict buckets, in the order they're stacked (good → bad). */
+const BUCKETS = [
+  { key: "valid", label: "Valid", hint: "Deliverable", icon: CheckCircle2, tone: "valid", color: "hsl(var(--valid))" },
+  { key: "risky", label: "Risky", hint: "Catch-all / role / disposable", icon: AlertTriangle, tone: "risky", color: "hsl(var(--risky))" },
+  { key: "unknown", label: "Unknown", hint: "Server didn't confirm", icon: HelpCircle, tone: "muted", color: "hsl(var(--unknown))" },
+  { key: "invalid", label: "Invalid", hint: "Will bounce", icon: XCircle, tone: "invalid", color: "hsl(var(--invalid))" },
+] as const satisfies readonly { key: string; label: string; hint: string; icon: React.ElementType; tone: Tone; color: string }[];
+
+function verdict(rate: number): { label: string; tone: Tone; color: string } {
+  if (rate >= 65) return { label: "Good to send", tone: "valid", color: "hsl(var(--valid))" };
+  if (rate >= 45) return { label: "Send with care", tone: "risky", color: "hsl(var(--risky))" };
+  return { label: "Clean before sending", tone: "invalid", color: "hsl(var(--invalid))" };
+}
+
+/** Circular gauge for the safe-to-send rate. */
+function Ring({ value, color }: { value: number; color: string }) {
+  const r = 42;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg viewBox="0 0 100 100" className="size-28 -rotate-90" role="img" aria-label={`${value}% safe to send`}>
+      <circle cx="50" cy="50" r={r} fill="none" stroke="hsl(var(--border))" strokeWidth="9" />
+      <circle
+        cx="50" cy="50" r={r} fill="none" stroke={color} strokeWidth="9" strokeLinecap="round"
+        strokeDasharray={c} strokeDashoffset={c * (1 - Math.min(100, Math.max(0, value)) / 100)}
+        className="transition-[stroke-dashoffset] duration-700"
+      />
+    </svg>
+  );
+}
 
 export default function ListDetailPage() {
   const params = useParams<{ id: string }>();
@@ -30,11 +60,9 @@ export default function ListDetailPage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-28 w-full" />)}
-        </div>
-        <Skeleton className="h-96 w-full" />
+        <Skeleton className="h-10 w-72" />
+        <Skeleton className="h-56 w-full rounded-xl" />
+        <Skeleton className="h-96 w-full rounded-xl" />
       </div>
     );
   }
@@ -50,75 +78,122 @@ export default function ListDetailPage() {
     );
   }
 
-  const rate = safeToSendRate(list.summary);
-  const rateTone = rate >= 65 ? "bg-[hsl(var(--valid))]" : rate >= 45 ? "bg-[hsl(var(--risky))]" : "bg-[hsl(var(--invalid))]";
+  const s = list.summary;
+  const scored = s.valid + s.invalid + s.risky + s.unknown;
+  const rate = safeToSendRate(s);
+  const v = verdict(rate);
+  const live = list.status === "processing" || list.status === "queued";
+  const pct = (n: number) => (scored > 0 ? (n / scored) * 100 : 0);
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb + header */}
-      <div>
-        <Link href="/verification/lists" className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ChevronLeft className="size-4" /> Lists
-        </Link>
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-3">
-              <h1 className="min-w-0 truncate text-2xl font-bold tracking-tight">{list.name}</h1>
-              <Badge className="shrink-0" variant={list.status === "completed" ? "success" : "warning"}>
-                {list.status === "completed" ? "Completed" : "Processing"}
-              </Badge>
-            </div>
-            <p className="mt-1 truncate text-sm text-muted-foreground">
-              {list.fileName} · {formatNumber(list.uniqueEmails)} unique emails · uploaded {formatDate(list.createdAt)}
-            </p>
-          </div>
-          <div className="flex gap-2">
+      <PageHeader
+        backHref="/verification/lists"
+        title={list.name}
+        status={
+          live ? (
+            <Pill tone="brand"><Loader2 className="size-3 animate-spin" /> {list.status === "queued" ? "Queued" : `Processing · ${list.progress}%`}</Pill>
+          ) : (
+            <Pill tone={list.status === "completed" ? "valid" : "risky"} dot>{list.status === "completed" ? "Completed" : list.status}</Pill>
+          )
+        }
+        subtitle={`${list.fileName} · ${formatNumber(list.uniqueEmails)} unique emails · uploaded ${formatDate(list.createdAt)}`}
+        actions={
+          <>
             <Button variant="outline" onClick={() => toast({ variant: "info", title: "Deep scan queued", description: "Risky rows will be re-checked over SMTP." })}>
-              <Sparkles className="size-4" /> Deep scan
+              <Sparkles /> Deep scan
             </Button>
             <DownloadMenu list={list} />
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
-      {/* Summary cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <StatCard label="Total emails" value={list.summary.total} icon={Users} />
-        <StatCard label="Valid" value={list.summary.valid} icon={CheckCircle2} accent="valid" />
-        <StatCard label="Invalid" value={list.summary.invalid} icon={XCircle} accent="invalid" />
-        <StatCard label="Risky" value={list.summary.risky} icon={AlertTriangle} accent="risky" />
-        <StatCard label="Unknown" value={list.summary.unknown} icon={HelpCircle} accent="unknown" />
-      </div>
-
-      {/* Safe to send */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Safe to send</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4">
-            <span className="text-3xl font-bold">{rate}%</span>
-            <div className="flex-1">
-              <div className="h-3 w-full overflow-hidden rounded-full bg-muted">
-                <div className={cn("h-full rounded-full transition-all", rateTone)} style={{ width: `${rate}%` }} />
+      {/* Overview: safe-to-send gauge + verdict breakdown */}
+      <Card className="overflow-hidden">
+        <div className="grid lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]">
+          {/* Gauge */}
+          <div className="flex items-center gap-5 border-b border-border p-5 sm:p-6 lg:border-b-0 lg:border-r">
+            <div className="relative shrink-0">
+              <Ring value={rate} color={v.color} />
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-2xl font-semibold leading-none tracking-tight tabular-nums">{rate}%</span>
+                <span className="mt-1 text-[10px] font-medium text-muted-foreground">safe</span>
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {formatNumber(list.summary.valid)} of {formatNumber(list.summary.total)} addresses are verified deliverable.
+            </div>
+            <div className="min-w-0">
+              <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+                <ShieldCheck className="size-4" strokeWidth={1.75} /> Safe to send
               </p>
+              <Pill tone={v.tone} className="mt-1.5 normal-case">{v.label}</Pill>
+              <p className="mt-2 text-sm text-muted-foreground">
+                <span className="font-semibold tabular-nums text-foreground">{formatNumber(s.valid)}</span> of{" "}
+                <span className="tabular-nums">{formatNumber(scored)}</span> checked addresses are deliverable.
+              </p>
+              {s.duplicates > 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">{formatNumber(s.duplicates)} duplicate{s.duplicates === 1 ? "" : "s"} removed on upload.</p>
+              )}
             </div>
           </div>
-        </CardContent>
+
+          {/* Breakdown */}
+          <div className="p-5 sm:p-6">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="flex items-center gap-2 text-[15px] font-semibold">
+                <IconTile icon={Mail} tone="brand" size="sm" /> Result breakdown
+              </p>
+              <p className="text-xs text-muted-foreground">
+                <span className="font-semibold tabular-nums text-foreground">{formatNumber(s.total)}</span> emails
+                {live && scored < s.total && <> · <span className="tabular-nums">{formatNumber(s.total - scored)}</span> still checking</>}
+              </p>
+            </div>
+
+            {/* Composition bar */}
+            <div className="mt-4 flex h-3 gap-[3px] overflow-hidden rounded-full bg-border" role="img" aria-label="Verdict composition">
+              {scored > 0 &&
+                BUCKETS.map((b) =>
+                  s[b.key] > 0 ? <div key={b.key} className="h-full rounded-full transition-all" style={{ width: `${pct(s[b.key])}%`, background: b.color }} title={`${b.label}: ${formatNumber(s[b.key])}`} /> : null,
+                )}
+            </div>
+
+            {/* Bucket tiles */}
+            <div className="mt-4 grid grid-cols-2 gap-2.5 xl:grid-cols-4">
+              {BUCKETS.map((b) => {
+                const n = s[b.key];
+                const p = pct(n);
+                return (
+                  <div key={b.key} className="rounded-xl border border-border bg-surface/40 p-3">
+                    <div className="flex items-center gap-2">
+                      <IconTile icon={b.icon} tone={b.tone} size="sm" className="rounded-full" />
+                      <span className="text-[13px] font-medium">{b.label}</span>
+                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">{p.toFixed(p > 0 && p < 10 ? 1 : 0)}%</span>
+                    </div>
+                    <p className="mt-2 text-xl font-semibold tracking-tight tabular-nums">{formatNumber(n)}</p>
+                    <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-border">
+                      <div className="h-full rounded-full" style={{ width: `${p}%`, background: b.color }} />
+                    </div>
+                    <p className="mt-1.5 truncate text-[11px] text-muted-foreground">{b.hint}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </Card>
 
       {/* Results */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Verification results</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ResultsTable listId={list.id} live={list.status === "processing" || list.status === "queued"} />
-        </CardContent>
-      </Card>
+      <SectionCard
+        icon={ListChecks}
+        tone="violet"
+        title="Verification results"
+        description="Every address with its verdict, score and checks."
+        aside={
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-surface px-2 py-1 text-xs text-muted-foreground">
+            <FileSpreadsheet className="size-3.5" strokeWidth={1.75} /> {list.fileName}
+          </span>
+        }
+      >
+        <ResultsTable listId={list.id} live={live} />
+      </SectionCard>
     </div>
   );
 }
