@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import * as store from "@/server/people-collect-store";
-import { isM365MxDomain, verifyCollectedPeople } from "@/server/people-verify";
+import { isM365MxDomain, isVerifyPassRunning, startVerifyPass, verifyDiagnostics } from "@/server/people-verify";
 import { RETRYABLE_NOT_FOUND_REASONS } from "@/lib/leads/collect-types";
 import { clearVerifyCache } from "@/server/verification";
 import { clearDomainCache } from "@/server/finder";
@@ -40,8 +40,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // Not found ("skipped") without a lookup.
   const scope = q.get("scope") === "m365" ? "m365" : "all";
 
-  // A pass is already running — don't start a second, racing one.
-  if (job.verifyStatus === "verifying") {
+  // A pass is already running — don't start a second, racing one. A job marked
+  // "verifying" with NO live pass in this process is stale (the pass died) — fall
+  // through and start a fresh one instead of refusing forever.
+  if (job.verifyStatus === "verifying" && isVerifyPassRunning(id)) {
     return NextResponse.json({ success: true, data: { started: false, alreadyRunning: true, pending: store.peopleVerifyTargets(id, true).length } });
   }
 
@@ -84,15 +86,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   const pending = store.peopleVerifyTargets(id, true).length;
-  // Mark verifying up front so the polling UI shows progress immediately.
-  store.setJobVerifyStatus(id, "verifying");
-  // Fire-and-forget: the pass persists after every person and sets the job to
-  // "done" when finished. On a hard failure, drop back to "idle" so it can be
-  // retried. (verifyCollectedPeople already resets to idle on engine outage.)
-  void verifyCollectedPeople(id, true, { scope }).catch((err) => {
-    store.setJobVerifyStatus(id, "idle");
-    console.error(`[verify-emails] background pass failed for ${id}:`, err);
-  });
+  // Fire-and-forget: marks the job "verifying" up front (so the polling UI shows
+  // progress immediately); the pass persists after every person, retries unfinished
+  // rows, and only then sets the job to "done". A hard failure drops it to "idle".
+  const started = startVerifyPass(id, { scope });
 
-  return NextResponse.json({ success: true, data: { started: true, pending } });
+  return NextResponse.json({ success: true, data: { started, alreadyRunning: !started, pending } });
+}
+
+/** Live diagnostics for running Find & verify passes (rows per layer, gate usage). */
+export async function GET() {
+  return NextResponse.json({ success: true, data: verifyDiagnostics() });
 }

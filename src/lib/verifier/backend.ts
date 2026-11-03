@@ -126,6 +126,9 @@ async function thirdPartyFallback(email: string, output: CheckEmailOutput, resul
   if (result.checks.greylisted) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TP_TIMEOUT_MS);
+  const st = tpStats();
+  const t0 = Date.now();
+  st.active++;
   try {
     const res = await fetch(`${CRAWLER_URL}/verify/thirdparty`, {
       method: "POST",
@@ -158,7 +161,23 @@ async function thirdPartyFallback(email: string, output: CheckEmailOutput, resul
     return null;
   } finally {
     clearTimeout(timer);
+    st.active--;
+    st.calls++;
+    st.ms += Date.now() - t0;
   }
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __tpStats: { active: number; calls: number; ms: number } | undefined;
+}
+function tpStats() {
+  if (!globalThis.__tpStats) globalThis.__tpStats = { active: 0, calls: 0, ms: 0 };
+  return globalThis.__tpStats;
+}
+/** Third-party fallback diagnostics (calls made from the SMTP slot). */
+export function thirdPartyStats() {
+  return { ...tpStats() };
 }
 
 /**

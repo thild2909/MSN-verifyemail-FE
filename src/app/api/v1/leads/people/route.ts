@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as store from "@/server/people-collect-store";
 import * as companyStore from "@/server/company-collect-store";
 import { startPeopleJob } from "@/server/people-collect-job";
+import { resumeInterruptedPasses } from "@/server/people-verify";
 import type { CollectedCompany } from "@/lib/leads/collect-types";
 import type { PeopleSeedInput } from "@/lib/leads/people-types";
 
@@ -93,6 +94,8 @@ function seedFromCompany(c: CollectedCompany): PeopleSeedInput {
 }
 
 export async function GET() {
+  // The People tab polls this: first poll after a restart resumes cut-off passes.
+  resumeInterruptedPasses();
   return NextResponse.json({ success: true, data: store.listPeopleJobs() });
 }
 
