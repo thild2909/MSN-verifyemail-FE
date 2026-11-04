@@ -71,5 +71,9 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // Run on everything except Next internals, API routes, and static files.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/|.*\\.[\\w]+$).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|api/|.*\\.[\\w]+$).*)",
+    // Next parses a Next-Action header on any path, so those exclusions must not exempt it.
+    { source: "/:path*", has: [{ type: "header", key: "next-action" }] },
+  ],
 };
