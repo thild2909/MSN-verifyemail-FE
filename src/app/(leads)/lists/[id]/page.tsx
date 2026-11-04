@@ -99,7 +99,7 @@ export default function SavedListDetailPage() {
         </div>
 
         {/* Tabs */}
-        <div role="tablist" className="mt-4 flex items-center gap-1 overflow-x-auto border-b border-border no-scrollbar">
+        <div role="tablist" className="scroll-rail no-scrollbar mt-4 flex items-center gap-1 shadow-[inset_0_-1px_0_hsl(var(--border))]">
           <TabBtn active={tab === "person"} onClick={() => setTab("person")} icon={Users} label="People leads" count={list.summary.people} />
           <TabBtn active={tab === "company"} onClick={() => setTab("company")} icon={Building2} label="Company leads" count={list.summary.companies} />
         </div>
@@ -143,7 +143,7 @@ function TabBtn({ active, onClick, icon: Icon, label, count }: { active: boolean
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "-mb-px inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+        "inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
         active ? "border-brand bg-brand/[0.04] text-brand" : "border-transparent text-foreground/75 hover:text-foreground",
       )}
     >

@@ -56,7 +56,7 @@ export function SettingsTabs() {
   const pathname = usePathname();
   const pages = usePages();
   return (
-    <nav aria-label="Settings sections" className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar lg:hidden">
+    <nav aria-label="Settings sections" className="scroll-rail no-scrollbar -mx-4 flex gap-2 px-4 pb-1 lg:hidden">
       {pages.map((p) => {
         const active = pathname === p.href || pathname.startsWith(p.href + "/");
         const Icon = p.icon;

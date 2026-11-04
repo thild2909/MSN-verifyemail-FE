@@ -222,7 +222,7 @@ export function JobsTab({ onNavigatePeople }: { onNavigatePeople?: (jobId: strin
 
       {/* Per-source coverage */}
       {active?.coverage && active.coverage.length > 0 && (
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-thin border-b border-border bg-surface/50 px-4 py-2 text-xs sm:px-6 [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
+        <div className="scroll-rail flex items-center gap-1.5 scrollbar-thin border-b border-border bg-surface/50 px-4 py-2 text-xs sm:px-6 [&>*]:shrink-0 md:flex-wrap md:overflow-visible">
           <span className="mr-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Coverage</span>
           {active.coverage.map((c) => <CoverageChip key={c.source} c={c} />)}
         </div>

@@ -90,7 +90,7 @@ export default function ApiDocsPage() {
 
         <div className="min-w-0 space-y-6">
           {/* Mobile TOC */}
-          <div className="-mx-4 flex gap-2 overflow-x-auto px-4 no-scrollbar lg:hidden">
+          <div className="scroll-rail no-scrollbar -mx-4 flex gap-2 px-4 lg:hidden">
             {SECTIONS.map((s) => (
               <a key={s.id} href={`#${s.id}`} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm">
                 <s.icon className="size-4 text-muted-foreground" strokeWidth={1.75} /> {s.label}

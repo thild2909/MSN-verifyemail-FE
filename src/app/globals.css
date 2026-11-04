@@ -177,6 +177,20 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  /* Horizontal tab/chip rail. `overflow-x: auto` alone computes overflow-y to
+     auto too, so 1px of overflow (e.g. a tab underline) makes the rail drag and
+     jump vertically on touch. Lock it to the x axis. */
+  .scroll-rail {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  @media (max-width: 767.98px) {
+    .scroll-rail {
+      touch-action: pan-x pinch-zoom;
+    }
+  }
 
   /* ---- Safe-area (notch / home-indicator) helpers for PWA standalone ---- */
   .pt-safe {

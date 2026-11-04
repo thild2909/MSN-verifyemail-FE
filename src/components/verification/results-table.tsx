@@ -89,7 +89,7 @@ export function ResultsTable({ listId, live = false }: { listId: string; live?: 
 
       {/* Filter pills — a horizontal, swipeable rail on mobile (saves vertical
           space vs. wrapping to 3 rows); wraps normally from sm up. */}
-      <div className="-mx-4 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:px-0">
+      <div className="scroll-rail no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
         <div className="inline-flex gap-0.5 rounded-lg border border-border bg-surface p-0.5">
           {FILTERS.map((f) => {
             const meta = colHeadMeta(FILTER_LABELS[f]);

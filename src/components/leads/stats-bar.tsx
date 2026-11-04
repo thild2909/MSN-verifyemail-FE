@@ -58,7 +58,7 @@ export function StatsBar({
       )}
       <div
         className={cn(
-          "items-center gap-2 overflow-x-auto scrollbar-thin px-4 pb-2.5 text-sm sm:px-6 [&>*]:shrink-0 md:flex md:flex-wrap md:overflow-visible md:py-2.5",
+          "scroll-rail items-center gap-2 scrollbar-thin px-4 pb-2.5 text-sm sm:px-6 [&>*]:shrink-0 md:flex md:flex-wrap md:overflow-visible md:py-2.5",
           openOnMobile ? "flex" : "hidden",
           live && "pt-2 md:pt-2.5", // no toggle button above it, so add its own top padding
         )}

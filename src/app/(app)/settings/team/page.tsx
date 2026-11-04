@@ -135,7 +135,7 @@ export default function UsersSettingsPage() {
       >
         {/* Toolbar */}
         <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div className="inline-flex self-start overflow-x-auto rounded-lg border border-border bg-surface p-0.5 no-scrollbar">
+          <div className="scroll-rail no-scrollbar inline-flex self-start rounded-lg border border-border bg-surface p-0.5">
             {(["all", "admin", "member", "inactive"] as Filter[]).map((f) => (
               <button
                 key={f}

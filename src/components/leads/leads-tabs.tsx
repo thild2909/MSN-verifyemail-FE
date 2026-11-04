@@ -38,7 +38,7 @@ const TABS: { key: LeadsTab; label: string; icon: React.ElementType; tone: strin
 
 export function LeadsTabs({ active, onChange }: { active: LeadsTab; onChange: (t: LeadsTab) => void }) {
   return (
-    <div role="tablist" aria-label="Lead sources" className="-mx-1 flex items-end gap-0.5 overflow-x-auto px-1 no-scrollbar">
+    <div role="tablist" aria-label="Lead sources" className="scroll-rail no-scrollbar -mx-1 -mb-px flex items-end gap-0.5 px-1 pb-px">
       {TABS.map((t) => {
         const on = active === t.key;
         const Icon = t.icon;
