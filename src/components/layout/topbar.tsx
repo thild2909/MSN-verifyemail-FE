@@ -22,7 +22,7 @@ const AVATAR_TONES = [
   "bg-[hsl(199_89%_48%/0.15)] text-[hsl(199_89%_40%)] dark:text-[hsl(199_90%_65%)]",
 ];
 
-function Avatar({ name, size = "md", src }: { name: string; size?: "md" | "lg"; src?: string | null }) {
+export function Avatar({ name, size = "md", src }: { name: string; size?: "md" | "lg"; src?: string | null }) {
   const tone = AVATAR_TONES[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AVATAR_TONES.length];
   if (src) {
     return (
@@ -66,7 +66,7 @@ function MenuRow({
 }
 
 /** Sibling Mind Supernova products, opened in a new tab from the account menu. */
-const MSN_APPS = [
+export const MSN_APPS = [
   { label: "MSN Sender", description: "Email campaigns and sending", href: "https://mail.mindsupernova.dev/campaigns", icon: Send },
   { label: "MSN CV", description: "CV and candidate manager", href: "https://mindsupernova.dev/", icon: FileText },
 ];

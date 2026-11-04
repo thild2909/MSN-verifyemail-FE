@@ -79,7 +79,7 @@ const OPTIONS: { value: ThemePref; label: string; icon: React.ElementType }[] = 
 ];
 
 /** Segmented Light / System / Dark switch (pill radiogroup). */
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({ className, size = "sm" }: { className?: string; size?: "sm" | "md" }) {
   const { theme, setTheme } = useTheme();
   return (
     <div
@@ -98,7 +98,8 @@ export function ThemeToggle({ className }: { className?: string }) {
             title={label}
             onClick={() => setTheme(value)}
             className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full text-[15px] transition-colors",
+              "flex items-center justify-center rounded-full transition-colors",
+              size === "md" ? "size-9 text-[18px]" : "h-6 w-6 text-[15px]",
               active ? "bg-card text-brand shadow-sm" : "text-muted-foreground hover:text-foreground",
             )}
           >

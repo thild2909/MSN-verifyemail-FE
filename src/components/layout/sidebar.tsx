@@ -15,18 +15,15 @@ function isActive(pathname: string, href: string, match?: string[]) {
   return prefixes.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
-export function SidebarContent({
-  onNavigate,
+function SidebarContent({
   collapsed = false,
   pinnedCollapsed = false,
   onToggleCollapse,
 }: {
-  onNavigate?: () => void;
   /** Render the narrow icon-only rail. */
   collapsed?: boolean;
   /** The user's pinned choice (drives the Expand / Collapse button). */
   pinnedCollapsed?: boolean;
-  /** Desktop only — omitted in the mobile drawer. */
   onToggleCollapse?: () => void;
 }) {
   const pathname = usePathname();
@@ -35,7 +32,7 @@ export function SidebarContent({
     <div className="flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       {/* Brand */}
       <div className={cn("flex h-16 shrink-0 items-center", collapsed ? "justify-center px-2" : "px-5")}>
-        <Link href="/verification" onClick={onNavigate} className="min-w-0" aria-label="Mind Supernova home">
+        <Link href="/verification" className="min-w-0" aria-label="Mind Supernova home">
           <BrandLockup compact={collapsed} size="sm" />
         </Link>
       </div>
@@ -64,7 +61,6 @@ export function SidebarContent({
                     )}
                     <Link
                       href={item.href}
-                      onClick={onNavigate}
                       title={collapsed ? item.label : undefined}
                       aria-current={active ? "page" : undefined}
                       className={cn(

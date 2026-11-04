@@ -3,8 +3,9 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createPortal } from "react-dom";
-import { MailCheck, Search, Radar, ListChecks, Menu, X } from "lucide-react";
-import { SidebarContent } from "./sidebar";
+import { MailCheck, Search, Radar, ListChecks, Menu } from "lucide-react";
+import { CommandPalette } from "./command-palette";
+import { MoreSheet } from "./more-sheet";
 import { cn } from "@/lib/utils";
 
 /* --------------------------- shared drawer state -------------------------- */
@@ -23,11 +24,11 @@ export function useMobileNav(): MobileNavCtx {
 }
 
 /**
- * Owns the slide-in full-navigation drawer (the "More" surface) shared by the
- * top-bar hamburger and the bottom tab bar. Renders nothing on desktop.
+ * Owns the "More" bottom sheet opened from the tab bar. Renders nothing on desktop.
  */
 export function MobileNavProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = React.useState(false);
+  const [searchOpen, setSearchOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
   const pathname = usePathname();
   React.useEffect(() => setMounted(true), []);
@@ -55,23 +56,17 @@ export function MobileNavProvider({ children }: { children: React.ReactNode }) {
       {mounted &&
         isOpen &&
         createPortal(
-          <div className="fixed inset-0 z-50 lg:hidden">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] animate-fade-in" onClick={() => setIsOpen(false)} />
-            <div className="absolute inset-y-0 left-0 flex w-[82%] max-w-xs animate-slide-in-left">
-              <div className="min-w-0 flex-1 overflow-hidden shadow-2xl">
-                <SidebarContent onNavigate={() => setIsOpen(false)} />
-              </div>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="absolute right-3 top-3.5 rounded-lg border border-border bg-card p-1.5 text-muted-foreground shadow-xs transition-colors hover:text-foreground"
-                aria-label="Close menu"
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-          </div>,
+          <MoreSheet
+            tabHrefs={TABS.map((t) => t.href)}
+            onClose={() => setIsOpen(false)}
+            onSearch={() => {
+              setIsOpen(false);
+              setSearchOpen(true);
+            }}
+          />,
           document.body,
         )}
+      <CommandPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
     </Ctx.Provider>
   );
 }
@@ -91,7 +86,7 @@ const TABS = [
 
 /**
  * Thumb-reachable primary navigation, mobile only. Four core destinations plus
- * a "More" button that reveals the full nav drawer. Sits above the home
+ * a "More" button that opens the bottom sheet. Sits above the home
  * indicator via safe-area padding; hidden from `lg` up where the sidebar shows.
  */
 export function MobileTabBar() {

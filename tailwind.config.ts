@@ -90,11 +90,16 @@ const config: Config = {
           from: { transform: "translateX(100%)" },
           to: { transform: "translateX(0)" },
         },
+        "sheet-up": {
+          from: { transform: "translateY(100%)" },
+          to: { transform: "translateY(0)" },
+        },
       },
       animation: {
         shimmer: "shimmer 1.5s infinite",
         "fade-in": "fade-in 0.2s ease-out",
         "slide-in-right": "slide-in-right 0.25s ease-out",
+        "sheet-up": "sheet-up 0.25s cubic-bezier(0.32, 0.72, 0, 1)",
       },
     },
   },
