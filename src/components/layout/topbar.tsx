@@ -3,7 +3,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Search, ChevronDown, Check, Settings, User, Users, CreditCard, LogOut, Sun, Moon, Command } from "lucide-react";
+import { Search, ChevronDown, Check, Settings, User, Users, CreditCard, LogOut, Sun, Moon, Command, Send, FileText, ExternalLink } from "lucide-react";
 import { NotificationBell } from "./notification-bell";
 import { CommandPalette, Kbd } from "./command-palette";
 import { DropdownMenu, DropdownItem, DropdownSeparator } from "@/components/ui/dropdown-menu";
@@ -64,6 +64,12 @@ function MenuRow({
     </DropdownItem>
   );
 }
+
+/** Sibling Mind Supernova products, opened in a new tab from the account menu. */
+const MSN_APPS = [
+  { label: "MSN Sender", description: "Email campaigns and sending", href: "https://mail.mindsupernova.dev/campaigns", icon: Send },
+  { label: "MSN CV", description: "CV and candidate manager", href: "https://mindsupernova.dev/", icon: FileText },
+];
 
 export function Topbar() {
   const router = useRouter();
@@ -190,6 +196,19 @@ export function Topbar() {
               <MenuRow icon={Users} label="Users" description="Invite and manage teammates" onClick={() => router.push("/settings/team")} />
             )}
             <MenuRow icon={CreditCard} label="Billing & credits" description="Balance, top-ups and history" onClick={() => router.push("/billing")} />
+
+            <DropdownSeparator />
+            <p className="px-2.5 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">Mind Supernova apps</p>
+            {MSN_APPS.map((app) => (
+              <MenuRow
+                key={app.href}
+                icon={app.icon}
+                label={app.label}
+                description={app.description}
+                trailing={<ExternalLink className="mt-0.5" />}
+                onClick={() => window.open(app.href, "_blank", "noopener,noreferrer")}
+              />
+            ))}
 
             <DropdownSeparator />
             <MenuRow
