@@ -45,6 +45,10 @@ function redirectTo(req: NextRequest, pathname: string, params?: Record<string, 
 }
 
 export async function middleware(req: NextRequest) {
+  // This app defines no Server Actions, so a Next-Action header is only ever a
+  // scanner probing for RSC deserialization bugs. Refuse it before Next parses it.
+  if (req.headers.has("next-action")) return new NextResponse(null, { status: 403 });
+
   const { pathname } = req.nextUrl;
   const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
   const isPublic = PUBLIC_PATHS.some((p) => under(pathname, p));
