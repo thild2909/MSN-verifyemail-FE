@@ -294,6 +294,13 @@ export async function classifyDomain(domain: string): Promise<{ klass: DomainCla
   // ONLY a bogus address coming back `valid` (is_reachable "safe") proves a TRUE
   // "dumb" catch-all — the server marks EVERY address deliverable, so a per-mailbox
   // `valid` is meaningless and a sweep would false-positive. Skip those.
+  // EXCEPT a Google per-user rate deferral ("4.2.1 receiving mail at a rate"): Google
+  // sends it to a throttled sender for ANY address, so the bogus `valid` says nothing
+  // about accept-all. Such a domain still discriminates by LATENCY (agriwebb.com: real
+  // kevin.baum likely_real, bogus inconclusive) → sweep; trustedValid ignores the
+  // rate-deferral valids during the sweep. (Was: cached dumb catch-all for 7 days →
+  // every colleague Not found.)
+  if (rateDeferralValid(r)) return { klass: "ok", calls };
   if (r.status === "valid") { mergeFacts(domain, { catchAll: true, catchAllScore: r.score }); return { klass: "catchall", calls }; }
   // A `catch_all` / `risky` / `role` verdict on a BOGUS address means the server
   // accepted-but-FLAGGED it — it WITHHELD `valid` from a nonexistent mailbox. Such a
@@ -344,8 +351,27 @@ export function cachedDomainClass(domain: string): DomainClass {
  */
 /** Reacher score floor for a `valid` to count: below it the row is Not found (user rule). */
 const MIN_VALID_SCORE = Number(process.env.FINDER_MIN_VALID_SCORE ?? 60);
-function trustedValid(r: VerificationResult): boolean {
-  return r.status === "valid" && r.score >= MIN_VALID_SCORE && (!r.checks.catchAll || r.perAddressObservation === true);
+/**
+ * When is a catch-all `valid` real? (2026-11-18, kevin.baum@agriwebb.com)
+ *  • latency probe "likely_real" on a domain NOT proven dumb catch-all → TRUST.
+ *    (Before: rejected because perAddressObservation was false → /verification said
+ *    Valid 99 while /find-leads said Not found.)
+ *  • Microsoft 365 GetCredentialType confirmed the account → TRUST.
+ *  • engine perAddressObservation alone → NOT trusted. In the engine
+ *    (core/src/smtp/connect.rs) the ONLY deliverable+per-address path is Google's
+ *    "4.2.1 … receiving mail at a rate" deferral, which Google sends to a throttled
+ *    sender for NONEXISTENT addresses too: ~40% of random bogus addresses at
+ *    agriwebb.com came back `safe 95 perAddr=true`.
+ */
+export function trustedValid(r: Pick<VerificationResult, "status" | "score" | "checks" | "latencyLikelyReal" | "m365Confirmed" | "domain">): boolean {
+  if (r.status !== "valid" || r.score < MIN_VALID_SCORE) return false;
+  if (!r.checks.catchAll || r.m365Confirmed === true) return true;
+  return r.latencyLikelyReal === true && !getFacts(cleanDomain(r.domain ?? ""))?.catchAll;
+}
+
+/** A catch-all `valid` produced only by the per-user rate-limit deferral (see trustedValid). */
+function rateDeferralValid(r: VerificationResult): boolean {
+  return r.status === "valid" && r.checks.catchAll && r.perAddressObservation === true && !r.latencyLikelyReal && !r.m365Confirmed;
 }
 
 function toResult(

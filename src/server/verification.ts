@@ -210,7 +210,10 @@ export async function cachedVerify(
     const hit = cache().get(key);
     // Serve fresh DEFINITIVE verdicts, and a non-definitive one only inside its short
     // window (see TRANSIENT_TTL_MS). Anything older is dropped and re-verified.
-    if (hit && servable(hit)) {
+    // A catch-all `valid` cached before `latencyLikelyReal` existed can't be judged by
+    // trustedValid (it would be rejected for the whole cache TTL) → re-verify it once.
+    const legacyCatchAllValid = hit?.outcome.result.status === "valid" && hit.outcome.result.checks.catchAll && hit.outcome.result.latencyLikelyReal === undefined;
+    if (hit && servable(hit) && !legacyCatchAllValid) {
       return { ...hit.outcome, cached: true };
     }
     if (hit) cache().delete(key);
@@ -256,6 +259,7 @@ async function m365Confirmed(outcome: VerifyOutcome, email: string): Promise<Ver
       // discriminate — a per-address observation, so trustedValid accepts it even
       // when a third-party provider had flagged the domain catch-all.
       perAddressObservation: true,
+      m365Confirmed: true,
     },
   };
 }

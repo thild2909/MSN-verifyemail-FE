@@ -74,6 +74,12 @@ export const verificationResultSchema = z.object({
   // address alike. A `valid` with catchAll=true is only trustworthy when this is true;
   // otherwise it's a "dumb catch-all" that marks every mailbox deliverable.
   perAddressObservation: z.boolean().optional(),
+  // The engine's catch-all LATENCY probe measured THIS address as a real mailbox
+  // (smtp.latency.verdict === "likely_real", statistically distinct from fabricated
+  // controls). This is how a Google-Workspace-style catch-all yields `valid`.
+  latencyLikelyReal: z.boolean().optional(),
+  // Microsoft GetCredentialType confirmed THIS account exists (see m365Confirmed).
+  m365Confirmed: z.boolean().optional(),
 });
 export type VerificationResult = z.infer<typeof verificationResultSchema>;
 

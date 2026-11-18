@@ -15,7 +15,7 @@ import { AsyncResource } from "node:async_hooks";
 import { cachedVerify, currentRowCancelled, newRowContext, rowStalledMs, runInRowContext, RowCancelledError, setRowPhase, smtpGateStats, type RowContext } from "./verification";
 import { VerifierUnavailableError, pingBackend, thirdPartyStats } from "@/lib/verifier/backend";
 import { m365GctStats, m365MailboxExists } from "@/lib/verifier/m365";
-import { findPersonEmail, cachedDomainClass, classifyDomain, isM365VerifiedDomain, knownDomainPattern, seedDomainPattern, setGlobalFallbackPattern, bestGuessEmail } from "./finder";
+import { findPersonEmail, cachedDomainClass, classifyDomain, isM365VerifiedDomain, knownDomainPattern, seedDomainPattern, setGlobalFallbackPattern, bestGuessEmail, trustedValid as finderTrustedValid } from "./finder";
 import { cleanDomain, derivePatternId } from "@/lib/finder/patterns";
 import { companyDomainVariants, strongVariantMatch, variantPageRelevant } from "@/lib/finder/domain-variants";
 import { extractSiteMailDomains, extractSiteEmails, type SiteEmail } from "@/lib/finder/site-mail-domains";
@@ -57,10 +57,10 @@ const now = () => new Date().toISOString();
  * a false positive. Mirrors the finder's guard so every layer applies it consistently.
  */
 /** Reacher score floor for a `valid` to count: below it the row is Not found (user rule). */
+// Single shared rule (finder.ts) — catch-all `valid` counts with a per-address
+// observation OR a latency-probe "likely_real" on a non-dumb catch-all.
+const trustedValid = finderTrustedValid;
 const MIN_VALID_SCORE = Number(process.env.FINDER_MIN_VALID_SCORE ?? 60);
-function trustedValid(r: { status: string; score: number; checks: { catchAll: boolean }; perAddressObservation?: boolean }): boolean {
-  return r.status === "valid" && r.score >= MIN_VALID_SCORE && (!r.checks.catchAll || r.perAddressObservation === true);
-}
 
 /**
  * LAST-RESORT best-guess result, used ONLY after every discovery layer has missed. On a

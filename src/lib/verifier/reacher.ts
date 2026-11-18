@@ -37,6 +37,8 @@ interface SmtpDetails {
   // True when the engine made a per-address observation for THIS mailbox on a
   // catch-all domain (distinguishing it from the domain's blanket accept-all).
   has_per_address_observation?: boolean;
+  // Catch-all latency probe (target vs fabricated controls).
+  latency?: { verdict?: string; p_value?: number } | null;
 }
 interface MiscDetails {
   is_disposable: boolean;
@@ -194,6 +196,7 @@ export function mapReacherOutput(o: CheckEmailOutput): VerificationResult {
     provider,
     mxRecords,
     perAddressObservation: smtp?.has_per_address_observation ?? false,
+    latencyLikelyReal: smtp?.latency?.verdict === "likely_real",
   };
 }
 
