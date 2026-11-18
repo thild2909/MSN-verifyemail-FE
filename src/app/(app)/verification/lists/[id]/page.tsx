@@ -125,10 +125,13 @@ export default function ListDetailPage() {
                 <ShieldCheck className="size-4" strokeWidth={1.75} /> Safe to send
               </p>
               <Pill tone={v.tone} className="mt-1.5 normal-case">{v.label}</Pill>
-              <p className="mt-2 text-sm text-muted-foreground">
-                <span className="font-semibold tabular-nums text-foreground">{formatNumber(s.valid)}</span> of{" "}
-                <span className="tabular-nums">{formatNumber(scored)}</span> checked addresses are deliverable.
-              </p>
+              <div className="mt-3 border-t border-border pt-3">
+                <p className="flex items-baseline gap-1 tabular-nums">
+                  <span className="text-lg font-semibold leading-none tracking-tight text-foreground">{formatNumber(s.valid)}</span>
+                  <span className="text-sm text-muted-foreground">/ {formatNumber(scored)}</span>
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">deliverable of checked addresses</p>
+              </div>
               {s.duplicates > 0 && (
                 <p className="mt-1 text-xs text-muted-foreground">{formatNumber(s.duplicates)} duplicate{s.duplicates === 1 ? "" : "s"} removed on upload.</p>
               )}

@@ -36,7 +36,10 @@ const RULES: [RegExp, LucideIcon, ToneKey][] = [
   [/company industry|industry|sector/, Factory, "tags"],
   [/^invalid|bounce|failed|blocked|error/, XCircle, "bad"],
   [/^valid|deliverable|clean/, CheckCircle2, "ok"],
-  [/risky|catch.?all|warning/, AlertTriangle, "time"],
+  // Catch-all gets its own glyph (Globe = the whole domain accepts mail, same as
+  // its StatusBadge) so it never reads as the broader "Risky" bucket.
+  [/catch.?all/, Globe, "time"],
+  [/risky|warning/, AlertTriangle, "time"],
   [/unknown/, HelpCircle, "neutral"],
   [/seniority|level/, Crown, "structure"],
   [/job|title|role|position/, Briefcase, "structure"],
