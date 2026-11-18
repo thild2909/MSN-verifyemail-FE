@@ -32,8 +32,11 @@ function legacyCells(r: EmailRecord): (string | number)[] {
  *   safe     → valid only              ("Safe to send")
  *   safe_ok  → valid + catch-all       ("Safe to send + Ok for All")
  *   unsafe   → invalid / risky / unknown / … (everything that isn't valid or catch-all) ("Invalid")
- *   <status> → exact status (results-table pills: valid/invalid/risky/catch_all/…)
+ *   risky    → summary bucket: risky / catch_all / role / disposable (matches the "Risky" card)
+ *   unknown  → summary bucket: anything not valid/invalid/risky-ish
+ *   <status> → exact status (results-table pills: valid/invalid/catch_all/role/…)
  */
+const RISKY_STATUSES = new Set(["risky", "catch_all", "role", "disposable"]);
 function matchesFilter(status: string | undefined, filter: string): boolean {
   const s = status ?? "";
   switch (filter) {
@@ -45,6 +48,10 @@ function matchesFilter(status: string | undefined, filter: string): boolean {
       return s === "valid" || s === "catch_all";
     case "unsafe":
       return s !== "" && s !== "valid" && s !== "catch_all";
+    case "risky":
+      return RISKY_STATUSES.has(s);
+    case "unknown":
+      return s !== "" && s !== "valid" && s !== "invalid" && !RISKY_STATUSES.has(s);
     default:
       return s === filter;
   }
