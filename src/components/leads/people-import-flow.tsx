@@ -3,7 +3,7 @@ import * as React from "react";
 import Papa from "papaparse";
 import { ArrowRight, Loader2, Download, AlertTriangle, ChevronDown, UserPlus, FileSpreadsheet, ListChecks, Check, Link2, Columns3, RefreshCw, Layers, Zap, Plus } from "lucide-react";
 import { colHeadMeta } from "@/components/common/col-head";
-import { OPTIONAL_FIELDS, EMPTY_OPT, FIRST_RE, LAST_RE, COMPANY_RE, FULLNAME_RE, autoMap, type Mapping, type OptKey } from "@/lib/leads/people-import-map";
+import { OPTIONAL_FIELDS, EMPTY_OPT, cleanCell, FIRST_RE, LAST_RE, COMPANY_RE, FULLNAME_RE, autoMap, type Mapping, type OptKey } from "@/lib/leads/people-import-map";
 import { Dialog, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,7 +88,9 @@ export function PeopleImportFlow({ open, onOpenChange, onCreated }: { open: bool
       // rows missing BOTH names — or the company — are skipped.
       if (!((firstName || lastName) && company)) continue;
       const opt = {} as Record<OptKey, string>;
-      for (const f of OPTIONAL_FIELDS) opt[f.key] = cell(r, optI[f.key]);
+      // Per-cell shape check: a value that doesn't fit its field (e.g. "false" in
+      // Email, a company URL in person LinkedIn) is dropped, even for a manual mapping.
+      for (const f of OPTIONAL_FIELDS) opt[f.key] = cleanCell(f.key, cell(r, optI[f.key]));
       out.push({ firstName, lastName, company, location, city, state, country, ...opt, raw: parsed.columns.map((_c, i) => r[i] ?? "") });
     }
     return out;

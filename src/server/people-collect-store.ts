@@ -10,6 +10,7 @@ import path from "path";
 import { initials } from "@/lib/utils";
 import { employeeBucket } from "@/lib/leads/collect-types";
 import { personHasFunding } from "@/lib/leads/people-types";
+import { valueFits } from "@/lib/leads/people-import-map";
 import type { CrawledPerson } from "./crawler-client";
 import type {
   CollectedPerson,
@@ -365,7 +366,17 @@ export interface CreatePeopleJobInput {
 export function createPeopleJob(input: CreatePeopleJobInput): { job: PeopleCollectJob; truncated: number } {
   const seen = new Set<string>();
   const unique = input.seeds
-    .map((s) => ({ ...s, company: s.company.trim(), firstName: s.firstName?.trim(), lastName: s.lastName?.trim(), location: (s.location ?? "").trim() }))
+    .map((s) => ({
+      ...s, company: s.company.trim(), firstName: s.firstName?.trim(), lastName: s.lastName?.trim(), location: (s.location ?? "").trim(),
+      // Drop a non-address "email" (e.g. a mis-mapped "Email Domain Catchall" = "false")
+      // so it is neither shown, treated as a complete seed, nor verified.
+      // Server-side guard (any client / API caller): shape-check the fields that
+      // drive "complete seed" + verification.
+      email: s.email && valueFits("email", s.email) ? s.email.trim() : undefined,
+      personLinkedin: s.personLinkedin && valueFits("personLinkedin", s.personLinkedin) ? s.personLinkedin.trim() : undefined,
+      title: s.title && valueFits("text", s.title) ? s.title.trim() : undefined,
+      seniority: s.seniority && valueFits("text", s.seniority) ? s.seniority.trim() : undefined,
+    }))
     .filter((s) => {
       if (!s.company) return false;
       // Enrich seeds dedup by person+company; discover seeds by company+location.

@@ -47,6 +47,55 @@ export const OPTIONAL_FIELDS = [
 ] as const satisfies readonly { key: string; label: string; re: RegExp; not?: RegExp }[];
 
 export type OptKey = (typeof OPTIONAL_FIELDS)[number]["key"];
+
+/**
+ * VALUE-shape validation. Header names alone are not trustworthy (Apollo's
+ * "Email Domain Catchall" = "false" once stole the Email field), so a column is
+ * only auto-mapped when most of its values look like the field, and every cell
+ * is re-checked on import (`cleanCell`) — even for a manually chosen column.
+ */
+const FLAG_RE = /^(true|false|yes|no|y|n|null|undefined|none|n\/a|na|-|—|0|1)$/i;
+export const EMAIL_VALUE_RE = /^[^\s@,;<>]+@[^\s@,;<>]+\.[a-z]{2,}$/i;
+const digits = (v: string) => v.replace(/\D/g, "").length;
+const isText = (v: string) => !FLAG_RE.test(v);
+const VALIDATORS: Partial<Record<OptKey, (v: string) => boolean>> = {
+  email: (v) => EMAIL_VALUE_RE.test(v),
+  personLinkedin: (v) => /linkedin\.com\/(in|pub)\//i.test(v),
+  companyLinkedin: (v) => /linkedin\.com\/(company|school|showcase)\//i.test(v),
+  website: (v) => !v.includes("@") && !/\s/.test(v) && /^(https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(\/\S*)?$/i.test(v) && !/linkedin\.com|facebook\.com|twitter\.com/i.test(v),
+  mobile: (v) => digits(v) >= 6 && !/[a-z]{4,}/i.test(v.replace(/ext/gi, "")),
+  companyPhone: (v) => digits(v) >= 6 && !/[a-z]{4,}/i.test(v.replace(/ext/gi, "")),
+  employees: (v) => /\d/.test(v),
+  companyRevenue: (v) => /\d/.test(v),
+  companyFunding: (v) => /\d/.test(v),
+  companyFoundedYear: (v) => /\b(1[5-9]|20)\d{2}\b/.test(v),
+  twitter: (v) => /twitter\.com\/|x\.com\/|^@\w{1,15}$/i.test(v),
+  facebook: (v) => /facebook\.com\/|fb\.com\//i.test(v),
+  photo: (v) => /^https?:\/\/\S+$/i.test(v),
+};
+/** Does one non-empty cell fit field `key`? Text fields just reject flag-like values ("false", "1", "-"). */
+export function valueFits(key: OptKey | "text", v: string): boolean {
+  const s = v.trim();
+  if (!s) return false;
+  const check = key === "text" ? undefined : VALIDATORS[key];
+  return check ? check(s) : isText(s);
+}
+/** The cell value if it fits the field, else "" (so a bad value never reaches the job). */
+export const cleanCell = (key: OptKey, v: string) => (valueFits(key, v) ? v.trim() : "");
+
+/** Share of non-empty values that must fit for a column to be auto-mapped. */
+const MIN_FIT = 0.6;
+/** Rows (sampled) whose value in column `i` fits; 0 when the column is mostly misfits. */
+function fitFill(rows: string[][], i: number, key: OptKey | "text"): number {
+  let filled = 0, fit = 0;
+  for (const r of rows) {
+    const v = (r[i] ?? "").trim();
+    if (!v) continue;
+    filled++;
+    if (valueFits(key, v)) fit++;
+  }
+  return filled && fit / filled >= MIN_FIT ? fit : 0;
+}
 export type Mapping = { firstName: string; lastName: string; company: string; city: string; state: string; country: string } & Record<OptKey, string>;
 export const EMPTY_OPT = Object.fromEntries(OPTIONAL_FIELDS.map((f) => [f.key, ""])) as Record<OptKey, string>;
 
@@ -62,12 +111,12 @@ export function fillOf(rows: string[][], i: number): number {
  * columns, `not` skips a broader-pattern collision. A column that is blank in
  * every row is never auto-mapped.
  */
-export function bestColumn(cols: string[], rows: string[][], re: RegExp, exclude: string[] = [], not?: RegExp): string | undefined {
+export function bestColumn(cols: string[], rows: string[][], re: RegExp, exclude: string[] = [], not?: RegExp, key: OptKey | "text" = "text"): string | undefined {
   let best: string | undefined;
   let bestFill = 0;
   cols.forEach((c, i) => {
     if (exclude.includes(c) || !re.test(c) || (not && not.test(c))) return;
-    const fill = fillOf(rows, i);
+    const fill = fitFill(rows, i, key); // values must LOOK like the field, not just exist
     if (fill > bestFill) { bestFill = fill; best = c; }
   });
   return best;
@@ -106,17 +155,19 @@ export const ALIASES: Partial<Record<OptKey | "city" | "state" | "country", stri
 };
 
 /** Fallback when no regex hit: densest non-empty, unclaimed column whose normalised header equals/contains an alias. */
-export function aliasColumn(cols: string[], rows: string[][], aliases: string[] | undefined, exclude: string[]): string | undefined {
+export function aliasColumn(cols: string[], rows: string[][], aliases: string[] | undefined, exclude: string[], not?: RegExp, key: OptKey | "text" = "text"): string | undefined {
   if (!aliases?.length) return undefined;
   let best: string | undefined;
   let bestScore = 0;
   cols.forEach((c, i) => {
-    if (exclude.includes(c)) return;
+    // `not` must apply here too: "Email Domain Catchall" partially matches the
+    // "email" alias, and stole the Email field whenever the real Email column was blank.
+    if (exclude.includes(c) || (not && not.test(c))) return;
     const n = norm(c);
     const exact = aliases.includes(n);
     const partial = !exact && aliases.some((a) => a.length >= 4 && n.includes(a));
     if (!exact && !partial) return;
-    const fill = fillOf(rows, i);
+    const fill = fitFill(rows, i, key);
     if (!fill) return;
     const score = fill + (exact ? 1e6 : 0); // exact header beats a partial one
     if (score > bestScore) { bestScore = score; best = c; }
@@ -144,14 +195,14 @@ export function autoMap(cols: string[], data: string[][]): Mapping {
   const opt = { ...EMPTY_OPT };
   // Pass 1: precise header patterns.
   for (const f of OPTIONAL_FIELDS) {
-    const col = bestColumn(cols, data, f.re, claimed, "not" in f ? f.not : undefined);
+    const col = bestColumn(cols, data, f.re, claimed, "not" in f ? f.not : undefined, f.key);
     if (col) { opt[f.key] = col; claimed.push(col); }
   }
   // Pass 2: loose alias match for anything still unmapped, so every column
   // that holds data lands on a field when there is a sensible one.
   for (const f of OPTIONAL_FIELDS) {
     if (opt[f.key]) continue;
-    const col = aliasColumn(cols, data, ALIASES[f.key], claimed);
+    const col = aliasColumn(cols, data, ALIASES[f.key], claimed, "not" in f ? f.not : undefined, f.key);
     if (col) { opt[f.key] = col; claimed.push(col); }
   }
   return { firstName, lastName, company, city, state, country, ...opt };
