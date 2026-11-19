@@ -7,7 +7,7 @@
  * fields the app enriches (name, email, LinkedIn, title…), and from the original
  * CSV row for everything else — so nothing imported is dropped.
  */
-import { SENIORITY_LABEL, type CollectedPerson } from "./people-types";
+import { SENIORITY_LABEL, isUnconfirmedEmail, type CollectedPerson } from "./people-types";
 
 /** Apollo people-export layout — the default when a job has no imported header. */
 export const APOLLO_PEOPLE_COLUMNS = [
@@ -56,7 +56,20 @@ def(["Full Name", "Name"], "person", (p) => p.name);
 def(["Company Name", "Company"], "person", (p) => p.company);
 def(["Company Website", "Website"], "source", (p) => url(p.companyDomain));
 def(["Company Domain", "Domain"], "source", (p) => str(p.companyDomain));
-def(["Email"], "person", (p) => str(p.email?.value));
+// Same value the table shows: a pattern/LLM guess that never confirmed is "Not
+// found" there, so it is blank here (never export a fabricated address).
+const emailOf = (p: CollectedPerson) => (isUnconfirmedEmail(p) ? "" : str(p.email?.value ?? p.emailVerification?.email));
+const EMAIL_STATUS_LABEL: Record<string, string> = {
+  valid: "Valid", catch_all: "Catch-all", risky: "Risky", invalid: "Invalid", unknown: "Unknown", not_found: "Not found",
+};
+const emailStatusOf = (p: CollectedPerson) => {
+  if (isUnconfirmedEmail(p)) return "Not found";
+  const s = p.emailVerification?.status;
+  if (s) return EMAIL_STATUS_LABEL[s] ?? s;
+  return p.email?.value ? "Unverified" : "";
+};
+def(["Email"], "person", emailOf);
+def(["Email Status"], "person", emailStatusOf);
 def(["Mobile Number", "Mobile", "Phone"], "person", (p) => str(p.mobile));
 def(["LinkedIn", "LinkedIn URL", "Person Linkedin Url"], "person", (p) => url(p.linkedin?.value ? String(p.linkedin.value) : ""));
 def(["Title", "Job Title"], "person", (p) => str(p.title?.value));
@@ -89,6 +102,20 @@ def(["Company Founded Year"], "person", (p) => str(p.companyFoundedYear));
  * columns are the union of each person's own `sourceColumns`, first-seen order,
  * falling back to the Apollo layout when nobody carries an imported header.
  */
+/**
+ * Fields the app finds/enriches and shows in the People table. An imported CSV
+ * often lacks them (e.g. only First/Last/Company/Website), so they are appended
+ * after the imported columns — Email + Email Status always, the rest only when
+ * some exported person has a value. Skipped when the header already carries an
+ * equivalent column (any alias of the same field).
+ */
+const APP_COLUMNS: { header: string; always?: boolean }[] = [
+  { header: "Email", always: true }, { header: "Email Status", always: true },
+  { header: "Title" }, { header: "LinkedIn" }, { header: "Seniority" },
+  { header: "Employees Count" }, { header: "Industry" }, { header: "Company Phone Number" }, { header: "Company Email" },
+  { header: "City" }, { header: "State" }, { header: "Country" },
+];
+
 export function peopleExportTable(people: CollectedPerson[], sourceColumns?: string[] | null): { headers: string[]; rows: string[][] } {
   let headers = sourceColumns?.length ? sourceColumns : null;
   if (!headers) {
@@ -97,6 +124,15 @@ export function peopleExportTable(people: CollectedPerson[], sourceColumns?: str
     for (const p of people) for (const h of p.sourceColumns ?? []) if (!seen.has(h)) { seen.add(h); union.push(h); }
     headers = union.length ? union : APOLLO_PEOPLE_COLUMNS;
   }
+  // Append app-found fields the imported header doesn't already cover.
+  const covered = new Set(headers.map((h) => FIELDS[norm(h)]).filter(Boolean));
+  const extra = APP_COLUMNS.filter(({ header, always }) => {
+    const f = FIELDS[norm(header)];
+    if (!f || covered.has(f)) return false;
+    covered.add(f);
+    return always || people.some((p) => f.get(p));
+  }).map((c) => c.header);
+  if (extra.length) headers = [...headers, ...extra];
   const fields = headers.map((h) => FIELDS[norm(h)]);
   const rows = people.map((p) => {
     // The person's CSV cells, keyed by its own header (another import may order
