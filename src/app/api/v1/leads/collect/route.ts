@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const createSchema = z.object({
   name: z.string().trim().min(1).max(120),
   fileName: z.string().trim().min(1),
-  rows: z.array(z.object({ company: z.string(), location: z.string(), prefill: z.record(z.unknown()).nullish() })).min(1).max(5000),
+  rows: z.array(z.object({ company: z.string(), location: z.string(), prefill: z.record(z.string(), z.unknown()).nullish() })).min(1).max(5000),
 });
 
 export async function GET() {

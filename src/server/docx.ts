@@ -13,6 +13,7 @@ import { inflateRawSync } from "node:zlib";
 const EOCD_SIG = 0x06054b50; // End Of Central Directory
 const CEN_SIG = 0x02014b50; // Central directory file header
 const LOC_SIG = 0x04034b50; // Local file header
+const MAX_INFLATED_BYTES = 30 * 1024 * 1024; // document.xml text ceiling
 
 function findEntryOffsetInCentralDir(buf: Buffer, wanted: string): { offset: number; method: number; compSize: number } | null {
   // Locate EOCD by scanning backward (comment can be up to 65535 bytes).
@@ -52,7 +53,9 @@ function readZipEntry(buf: Buffer, name: string): Buffer | null {
   const data = buf.subarray(dataStart, dataStart + entry.compSize);
   if (entry.method === 0) return Buffer.from(data); // stored
   if (entry.method === 8) {
-    try { return inflateRawSync(data); } catch { return null; }
+    // Cap the inflated size: a crafted 10 MB "zip bomb" could otherwise expand
+    // to gigabytes and exhaust the server's memory.
+    try { return inflateRawSync(data, { maxOutputLength: MAX_INFLATED_BYTES }); } catch { return null; }
   }
   return null;
 }
@@ -63,7 +66,7 @@ function decodeXmlEntities(s: string): string {
   return s.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, ent: string) => {
     if (ent[0] === "#") {
       const code = ent[1] === "x" || ent[1] === "X" ? parseInt(ent.slice(2), 16) : parseInt(ent.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+      return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
     }
     return ENTITIES[ent.toLowerCase()] ?? m;
   });

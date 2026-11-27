@@ -22,7 +22,8 @@ export default function LoginPage() {
     try {
       await login(email.trim(), password);
       const next = new URLSearchParams(window.location.search).get("next");
-      const dest = next && next.startsWith("/") ? next : "/verification";
+      // Same-origin paths only: "//evil.com" or "/\evil.com" would be an open redirect.
+      const dest = next && /^\/(?![/\\])/.test(next) ? next : "/verification";
       router.replace(dest);
       router.refresh();
     } catch (err) {

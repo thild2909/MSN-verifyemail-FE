@@ -8,8 +8,8 @@ export const dynamic = "force-dynamic";
 const aiReportSchema = z.object({
   model: z.string().optional(),
   generatedAt: z.string().optional(),
-  values: z.record(z.string()).default({}),
-  labels: z.record(z.string()).optional(),
+  values: z.record(z.string(), z.string()).default({}),
+  labels: z.record(z.string(), z.string()).optional(),
 });
 const leadItemSchema = z.object({
   kind: z.enum(["person", "company"]),
@@ -19,7 +19,7 @@ const leadItemSchema = z.object({
   company: z.string().nullish(),
   title: z.string().nullish(),
   email: z.string().nullish(),
-  data: z.record(z.unknown()).default({}),
+  data: z.record(z.string(), z.unknown()).default({}),
   aiReport: aiReportSchema.nullish(),
 });
 const addSchema = z.object({ items: z.array(leadItemSchema).min(1).max(1000) });

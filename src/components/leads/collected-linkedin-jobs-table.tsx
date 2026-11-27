@@ -21,6 +21,7 @@ import type { PeopleSeedInput } from "@/lib/leads/people-types";
 import { CompanyLogo, ScoreBar } from "./leads-ui";
 import { LinkedInJobsFilterSidebar } from "./linkedin-jobs-filter-sidebar";
 import { MobileFilterDrawer, openFiltersFor } from "./filter-drawer";
+import { safeHref } from "@/lib/safe-url";
 
 const PAGE_SIZE = 25;
 
@@ -271,7 +272,7 @@ export function CollectedLinkedInJobsTable({
                       <div className="pt-0.5" onClick={(e) => e.stopPropagation()}><Check checked={selected} onChange={() => toggleRow(j.id)} /></div>
                       <JobTile />
                       <div className="min-w-0 flex-1">
-                        <a href={j.jobUrl || undefined} target="_blank" rel="noreferrer" className="line-clamp-2 text-sm font-semibold leading-snug text-foreground transition-colors hover:text-brand">{j.title}</a>
+                        <a href={safeHref(j.jobUrl)} target="_blank" rel="noreferrer" className="line-clamp-2 text-sm font-semibold leading-snug text-foreground transition-colors hover:text-brand">{j.title}</a>
                         {j.location && <p className="truncate text-xs text-muted-foreground">{j.location}</p>}
                       </div>
                       <div className="w-24 shrink-0 pt-0.5"><ScoreBar value={j.fitScore} /></div>
@@ -333,7 +334,7 @@ export function CollectedLinkedInJobsTable({
                           <div className="flex min-w-0 items-start gap-2.5">
                             <JobTile />
                             <div className="min-w-0 flex-1">
-                              <a href={j.jobUrl || undefined} target="_blank" rel="noreferrer" title={j.title} className="block truncate pt-0.5 font-semibold leading-snug text-foreground transition-colors group-hover:text-brand">{j.title}</a>
+                              <a href={safeHref(j.jobUrl)} target="_blank" rel="noreferrer" title={j.title} className="block truncate pt-0.5 font-semibold leading-snug text-foreground transition-colors group-hover:text-brand">{j.title}</a>
                               <div className="mt-1 flex flex-wrap items-center gap-1 empty:hidden">
                                 {j.qualified && <Pill tone="valid" className="normal-case"><CheckCircle2 className="size-3" strokeWidth={2} /> Qualified</Pill>}
                                 {j.remote && <Pill tone="muted" className="normal-case">Remote</Pill>}
@@ -351,7 +352,7 @@ export function CollectedLinkedInJobsTable({
                             <CompanyLogo text={j.companyLogoText} seed={j.company} className="mt-0.5 size-6 text-[10px]" />
                             <div className="min-w-0 pt-0.5">
                               {j.companyLinkedinUrl ? (
-                                <a href={j.companyLinkedinUrl} target="_blank" rel="noopener noreferrer" className="whitespace-normal break-words font-medium text-foreground transition-colors hover:text-brand">{j.company}</a>
+                                <a href={safeHref(j.companyLinkedinUrl)} target="_blank" rel="noopener noreferrer" className="whitespace-normal break-words font-medium text-foreground transition-colors hover:text-brand">{j.company}</a>
                               ) : (
                                 <span className="whitespace-normal break-words font-medium text-foreground">{j.company}</span>
                               )}
@@ -367,7 +368,7 @@ export function CollectedLinkedInJobsTable({
                         <td className="whitespace-nowrap px-3 py-2.5 align-top tabular-nums text-muted-foreground">{j.postedDaysAgo != null || j.postedText ? postedLabel(j) : DASH}</td>
                         <td className="py-2.5 pl-2 pr-4 text-right align-top sm:pr-6">
                           {j.jobUrl && (
-                            <a href={j.jobUrl} target="_blank" rel="noreferrer" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-brand/10 hover:text-brand group-hover:text-brand" aria-label="Open role">
+                            <a href={safeHref(j.jobUrl)} target="_blank" rel="noreferrer" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-brand/10 hover:text-brand group-hover:text-brand" aria-label="Open role">
                               <ExternalLink className="size-4" strokeWidth={1.75} />
                             </a>
                           )}
@@ -446,7 +447,7 @@ function CompanyStrength({ j }: { j: CollectedLinkedInJob }) {
       {j.companyRevenue && <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold bg-[hsl(var(--valid)/0.12)] text-[hsl(var(--valid))]" title="Annual revenue (estimate)">Rev {j.companyRevenue}</span>}
       {listed && <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold bg-[hsl(var(--valid)/0.12)] text-[hsl(var(--valid))]">Listed</span>}
       {group && (j.companyParentSource ? (
-        <a href={j.companyParentSource} target="_blank" rel="noopener noreferrer" className={cn(TONES.sky, "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold hover:underline")} title="Backing group — open the source">Group: {group}</a>
+        <a href={safeHref(j.companyParentSource)} target="_blank" rel="noopener noreferrer" className={cn(TONES.sky, "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold hover:underline")} title="Backing group — open the source">Group: {group}</a>
       ) : (
         <span className={cn(TONES.sky, "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-semibold")} title={j.companyParentGroup ? "Parent / backing group" : `Affiliated: ${(j.companyAffiliates ?? []).join(", ")}`}>Group: {group}</span>
       ))}

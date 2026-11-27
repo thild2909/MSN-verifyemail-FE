@@ -19,6 +19,7 @@ import { PersonDetailDrawer } from "./people-detail-drawer";
 import { PeopleImportFlow } from "./people-import-flow";
 import { StatsBar } from "./stats-bar";
 import type { CollectedPerson, PeopleCollectJob } from "@/lib/leads/people-types";
+import { safeHref } from "@/lib/safe-url";
 
 export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
   const qc = useQueryClient();
@@ -256,7 +257,7 @@ export function PeopleTab({ initialJobId }: { initialJobId?: string | null }) {
           </span>
         )}
         {active?.apolloUrl && (
-          <a href={active.apolloUrl} target="_blank" rel="noreferrer" title={active.apolloUrl} className="hidden max-w-[280px] items-center gap-1.5 rounded-md bg-brand/10 px-2 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15 sm:inline-flex">
+          <a href={safeHref(active.apolloUrl)} target="_blank" rel="noreferrer" title={active.apolloUrl} className="hidden max-w-[280px] items-center gap-1.5 rounded-md bg-brand/10 px-2 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15 sm:inline-flex">
             <ExternalLink className="size-3 shrink-0" strokeWidth={1.75} /> <span className="truncate">Apollo list</span><span className="text-brand/60">·</span><span className="max-w-[9rem] truncate font-normal text-brand/80">{(() => { try { return new URL(active.apolloUrl!).hostname.replace(/^www\./, ""); } catch { return "link"; } })()}</span>
           </a>
         )}

@@ -49,7 +49,7 @@ const seedSchema = z.object({
   companyShortDescription: z.string().trim().nullish(),
   sourceRow: z.array(z.string()).max(500).nullish(),
   // Full snapshot from a saved list (import dedup) — shown as-is, no crawl.
-  prefill: z.record(z.unknown()).nullish(),
+  prefill: z.record(z.string(), z.unknown()).nullish(),
 });
 
 // Two ways to create a people job:

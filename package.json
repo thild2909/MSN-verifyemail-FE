@@ -25,8 +25,8 @@
     "recharts": "^2.15.0",
     "server-only": "^0.0.1",
     "tailwind-merge": "^2.6.0",
-    "xlsx": "^0.18.5",
-    "zod": "^3.24.1"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
@@ -34,8 +34,11 @@
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
+    "postcss": "^8.5.33",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "postcss": "$postcss"
   }
 }
