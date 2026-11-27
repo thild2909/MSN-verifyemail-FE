@@ -43,7 +43,7 @@ export default function ApiPage() {
       ),
       icon: Server,
       tone: online ? "valid" : "invalid",
-      sub: health?.url || undefined,
+      sub: undefined,
     },
     { label: "Active keys", value: formatNumber(active.length), icon: Key, tone: "brand", sub: `${formatNumber(keys?.length ?? 0)} total` },
     { label: "Total requests", value: formatNumber(totalRequests), icon: Activity, tone: "sky", sub: "All keys, all time" },

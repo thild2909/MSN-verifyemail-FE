@@ -27,9 +27,12 @@ export function cookieSecure(req: Request): boolean {
   }
 }
 
-const SECRET = new TextEncoder().encode(
-  process.env.AUTH_JWT_SECRET ?? "dev-insecure-secret-change-me",
-);
+// Fail closed: with a missing / short / public-default secret NO session is ever
+// accepted (instead of silently trusting tokens anyone could forge).
+const RAW_SECRET = (process.env.AUTH_JWT_SECRET ?? "").trim();
+const SECRET_OK = RAW_SECRET.length >= 32 && RAW_SECRET !== "dev-insecure-secret-change-me";
+if (!SECRET_OK) console.error("[auth] AUTH_JWT_SECRET missing/weak — all sessions will be rejected.");
+const SECRET = new TextEncoder().encode(RAW_SECRET);
 
 export type Role = "admin" | "member";
 
@@ -42,10 +45,11 @@ export interface Session {
 
 /** Verify a session JWT. Returns null when missing/expired/tampered. */
 export async function verifySession(token: string | undefined): Promise<Session | null> {
-  if (!token) return null;
+  if (!token || !SECRET_OK) return null;
   try {
-    const { payload } = await jwtVerify(token, SECRET);
-    if (!payload.sub) return null;
+    const { payload } = await jwtVerify(token, SECRET, { algorithms: ["HS256"] });
+    // Tokens without a jti cannot be revoked server-side — reject them.
+    if (!payload.sub || !payload.jti) return null;
     return {
       sub: String(payload.sub),
       email: String(payload.email ?? ""),

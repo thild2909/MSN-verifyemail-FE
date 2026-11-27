@@ -15,6 +15,7 @@ import { Loader2 as Spinner } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { FinderOutcome, FinderResult, FinderState } from "@/lib/types";
+import { toCsv } from "@/lib/leads/csv";
 
 type Mode = "person" | "domain";
 
@@ -107,8 +108,13 @@ export function FinderPanel() {
         const found = data.contacts.filter((c) => c.state === "verified" || c.state === "accept_all").length;
         toast({
           variant: found > 0 ? "success" : "info",
-          title: `${found} of ${data.contacts.length} contacts found`,
-          description: found > 0 ? "Deliverable addresses are marked Verified." : "No mailbox could be confirmed on this domain.",
+          title: data.contacts.length === 0 ? "No people discovered" : `${found} of ${data.contacts.length} contacts found`,
+          description:
+            data.contacts.length === 0
+              ? "No named people could be discovered for this domain. Try Person search with a known name."
+              : found > 0
+                ? "Deliverable addresses are marked Verified."
+                : "No mailbox could be confirmed on this domain.",
         });
       }
     },

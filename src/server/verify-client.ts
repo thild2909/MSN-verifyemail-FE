@@ -5,6 +5,7 @@
  * so the service URL never reaches the browser.
  */
 import "server-only";
+import { beAuthHeaders } from "@/server/session";
 
 const BASE = process.env.VERIFY_SERVICE_URL ?? process.env.CRAWLER_SERVICE_URL ?? "http://localhost:8090";
 const TIMEOUT_MS = Number(process.env.VERIFY_SERVICE_TIMEOUT_MS ?? 120_000);
@@ -26,9 +27,12 @@ export async function be<T = unknown>(
     // Only declare a JSON content-type when there is actually a body. A bodyless
     // request (GET / DELETE) that still sends "Content-Type: application/json"
     // makes Fastify reject it with FST_ERR_CTP_EMPTY_JSON_BODY (400).
+    // Credentials (user session + service token) are always attached — BE-service
+    // rejects any un-authenticated call. Caller-supplied headers win.
     const headers = {
+      ...(await beAuthHeaders()),
       ...(init.body != null ? { "Content-Type": "application/json" } : {}),
-      ...(init.headers ?? {}),
+      ...((init.headers as Record<string, string> | undefined) ?? {}),
     };
     let res: Response;
     try {

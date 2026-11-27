@@ -3,6 +3,7 @@
  * Clears FE `.data/collect-cache.json` and crawler-service `.data/cache.json`.
  */
 import "server-only";
+import { beFetch } from "@/server/session";
 import { deleteCachedMany as deleteFeCachedMany } from "./collectors/cache";
 import type { CollectedCompany } from "@/lib/leads/collect-types";
 
@@ -42,7 +43,7 @@ export async function purgeCollectCaches(companies: CollectedCompany[]): Promise
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
-      const res = await fetch(`${BASE}/cache/invalidate`, {
+      const res = await beFetch(`${BASE}/cache/invalidate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

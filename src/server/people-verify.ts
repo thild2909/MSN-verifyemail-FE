@@ -12,6 +12,7 @@
  */
 import "server-only";
 import { AsyncResource } from "node:async_hooks";
+import { safePublicFetch } from "./safe-fetch";
 import { cachedVerify, currentRowCancelled, newRowContext, rowStalledMs, runInRowContext, RowCancelledError, setRowPhase, smtpGateStats, type RowContext } from "./verification";
 import { VerifierUnavailableError, pingBackend, thirdPartyStats } from "@/lib/verifier/backend";
 import { m365GctStats, m365MailboxExists } from "@/lib/verifier/m365";
@@ -877,13 +878,14 @@ async function fetchPage(url: string): Promise<{ html: string; finalHost: string
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SITE_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
-      redirect: "follow",
+    // SSRF guard: the domain comes from imported / crawled rows, so refuse
+    // internal targets (loopback, private ranges, metadata) on every redirect hop.
+    const res = await safePublicFetch(url, {
       signal: controller.signal,
       cache: "no-store",
       headers: { "User-Agent": "Mozilla/5.0 (compatible; MSN-Enrich/1.0)", Accept: "text/html,*/*" },
     });
-    if (!res.ok || !res.body) return null;
+    if (!res || !res.ok || !res.body) return null;
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
     let size = 0;

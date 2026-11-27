@@ -4,6 +4,7 @@
  * proxy pool) and maps the service's raw jobs onto the FE `CollectedJob` shape.
  */
 import "server-only";
+import { beFetch } from "@/server/session";
 import type { CollectionAttempt } from "@/lib/leads/collect-types";
 import type { CollectedJob, JobSource } from "@/lib/leads/job-collect-types";
 
@@ -66,7 +67,7 @@ export async function searchJobsViaCrawler(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/jobs/search`, {
+    const res = await beFetch(`${BASE}/jobs/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ source, keywords: query.keywords, location: query.location, maxPages: query.maxPages }),

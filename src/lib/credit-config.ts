@@ -1,9 +1,8 @@
 import type { CreditOperation } from "./types";
 
 /**
- * Credit pricing. In production this is served by the backend
- * (GET /api/v1/config/pricing) so it is never hard-coded in the UI.
- * Here it is a single source of truth the mock API reads from.
+ * Credit pricing shown in the UI (single source of truth for display).
+ * Actual credit debits are computed and enforced server-side by BE-service.
  */
 export const CREDIT_COSTS: Record<Exclude<CreditOperation, "top_up">, number> = {
   single_verification: 1,

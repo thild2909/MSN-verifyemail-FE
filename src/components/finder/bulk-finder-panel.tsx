@@ -14,6 +14,7 @@ import { findEmailsBulk, verifyEmail } from "@/lib/api/client";
 import { FINDER_STATE_META, scoreIsMeaningful } from "@/lib/finder/state-ui";
 import { formatNumber, cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
+import { toCsv } from "@/lib/leads/csv";
 import type { BulkFinderResponse, FinderState, VerificationStatus } from "@/lib/types";
 
 type Step = "idle" | "mapping" | "finding" | "done";

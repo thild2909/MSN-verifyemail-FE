@@ -35,7 +35,6 @@ import type {
   WebhookDelivery,
 } from "../types";
 import { statusBucket } from "../types";
-import { seededRandom } from "../utils";
 import { cleanDomain } from "../finder/patterns";
 import type {
   AiReport,
@@ -93,12 +92,12 @@ export async function verifySingleEmail(
 }
 
 /** Is the verification backend reachable? Used for the live status badge. */
-export async function getBackendHealth(): Promise<{ online: boolean; url: string }> {
+export async function getBackendHealth(): Promise<{ online: boolean }> {
   try {
     const res = await fetch("/api/health", { cache: "no-store" });
     return await res.json();
   } catch {
-    return { online: false, url: "" };
+    return { online: false };
   }
 }
 
@@ -121,6 +120,10 @@ export class ApiError extends Error {
  * readable message instead of "Unexpected end of JSON input".
  */
 async function readJson(res: Response): Promise<any> {
+  // Session expired / revoked → back to the login page (keeps the current path).
+  if (res.status === 401 && typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+    window.location.href = `/login?next=${encodeURIComponent(window.location.pathname)}`;
+  }
   const text = await res.text().catch(() => "");
   if (text) {
     try {
@@ -317,7 +320,6 @@ export async function getTransactions(): Promise<CreditTransaction[]> {
 
 /* ------------------------------ Finder ----------------------------- */
 
-const FINDER_TITLES = ["CEO", "CTO", "COO", "VP Sales", "Head of Marketing", "Engineering Lead"];
 
 /**
  * Find one person's email through the server-side finder pipeline (a single
@@ -351,27 +353,13 @@ export async function findEmailsBulk(
 }
 
 /**
- * Discover likely contacts at a company, resolving each through the same
- * server finder pipeline as the single/bulk finders (shared domain + email
- * cache, early-exit, confidence threshold). Each row carries its own verdict
- * `state`, so the UI reports verified / unverified / not-found identically.
+ * Discover REAL contacts at a company (crawler people discovery) and resolve
+ * each through the server finder pipeline. Returns an empty list when nobody
+ * could be discovered — no placeholder people or titles are ever invented.
  */
 export async function findEmailsByDomain(domainInput: string): Promise<FinderResult[]> {
-  const d = cleanDomain(domainInput);
-  const roster: [string, string][] = [
-    ["John", "Smith"], ["Sarah", "Lee"], ["David", "Wong"], ["Emily", "Brown"],
-    ["Michael", "Chen"], ["Laura", "Davis"], ["James", "Wilson"], ["Anna", "Patel"],
-  ];
-
-  const { results } = await findEmailsBulk(roster.map(([firstName, lastName]) => ({ firstName, lastName, domain: d })));
-
-  return results.map((r, i) => ({
-    ...r.outcome.result,
-    id: `df_${i}`,
-    name: `${roster[i][0]} ${roster[i][1]}`,
-    jobTitle: FINDER_TITLES[Math.floor(seededRandom(r.outcome.result.email) * FINDER_TITLES.length)],
-    state: r.outcome.state,
-  }));
+  const { data } = await apiPost<FinderResult[]>("/api/v1/finder/domain", { domain: cleanDomain(domainInput) });
+  return data;
 }
 
 export async function getFinderSearches(): Promise<FinderSearch[]> {

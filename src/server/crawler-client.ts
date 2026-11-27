@@ -5,6 +5,7 @@
  * canonical record onto the FE's CollectedCompany shape. No mock data.
  */
 import "server-only";
+import { beFetch } from "@/server/session";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { initials } from "@/lib/utils";
 import type {
@@ -145,7 +146,7 @@ export async function resolveViaCrawler(name: string, location: string): Promise
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/resolve`, {
+    const res = await beFetch(`${BASE}/resolve`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ company: name, location }),
@@ -181,7 +182,7 @@ export async function resolveCompanyWebsiteViaCrawler(company: string, location:
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/company-website`, {
+    const res = await beFetch(`${BASE}/company-website`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ company, location }),
@@ -214,7 +215,7 @@ export async function resolveCompanyEmailDomainViaCrawler(company: string, locat
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/company-email-domain`, {
+    const res = await beFetch(`${BASE}/company-email-domain`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ company, location, domain: website ?? undefined }),
@@ -239,7 +240,7 @@ export async function resolvePersonEmailsViaCrawler(input: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/person-emails`, {
+    const res = await beFetch(`${BASE}/person-emails`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({
@@ -284,7 +285,7 @@ export async function resolvePersonByRoleViaCrawler(input: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/person-by-role`, {
+    const res = await beFetch(`${BASE}/person-by-role`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({
@@ -339,7 +340,7 @@ export async function resolveNameByLinkedinUrlViaCrawler(input: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PERSON_SERP_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/name-by-linkedin`, {
+    const res = await beFetch(`${BASE}/name-by-linkedin`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -440,7 +441,7 @@ export async function resolvePersonViaCrawler(seed: PeopleSeedInput): Promise<{ 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/person`, {
+    const res = await beFetch(`${BASE}/person`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({
@@ -467,7 +468,7 @@ export async function resolvePeopleViaCrawler(seed: PeopleSeedInput): Promise<{ 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/people`, {
+    const res = await beFetch(`${BASE}/people`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({
@@ -507,7 +508,7 @@ async function llmFetch(path: string, records: unknown[]): Promise<LlmVerifyResp
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await beFetch(`${BASE}${path}`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ records }),
@@ -528,7 +529,7 @@ export async function llmFindEmailsViaCrawler(records: EmailFindRecord[]): Promi
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/llm/find-emails`, {
+    const res = await beFetch(`${BASE}/llm/find-emails`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ records }),
@@ -576,7 +577,7 @@ export async function analyzeNameEmailStructureViaCrawler(records: NameStructure
   // must not stall the whole deferred batch (and the pass) for minutes.
   const timer = setTimeout(() => controller.abort(), NAME_STRUCTURE_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/llm/name-email-structure`, {
+    const res = await beFetch(`${BASE}/llm/name-email-structure`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ records, webSearch }),
@@ -620,7 +621,7 @@ export async function llmEnrichCompaniesViaCrawler(records: CompanySeedRecord[])
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/llm/enrich-companies`, {
+    const res = await beFetch(`${BASE}/llm/enrich-companies`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ records }),
@@ -652,7 +653,7 @@ export async function llmEnrichPeopleViaCrawler(records: PeopleEnrichSeedRecord[
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/llm/enrich-people`, {
+    const res = await beFetch(`${BASE}/llm/enrich-people`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ records }),
@@ -685,7 +686,7 @@ export async function tagPeopleViaCrawler(prompt: string, records: TagPersonReco
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/llm/tag-people`, {
+    const res = await beFetch(`${BASE}/llm/tag-people`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({ prompt, records }),
@@ -738,7 +739,7 @@ export async function aiReportViaCrawler(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const res = await fetch(`${BASE}/llm/ai-report`, {
+    const res = await beFetch(`${BASE}/llm/ai-report`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify({
@@ -776,7 +777,7 @@ export async function getAiProvidersViaCrawler(): Promise<AiProviderInfo[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
-    const res = await fetch(`${BASE}/llm/providers`, { signal: controller.signal, cache: "no-store" });
+    const res = await beFetch(`${BASE}/llm/providers`, { signal: controller.signal, cache: "no-store" });
     if (!res.ok) throw new Error(`crawler-service /llm/providers responded ${res.status}`);
     const json = (await res.json()) as { providers?: AiProviderInfo[] };
     return json.providers ?? [];
@@ -791,7 +792,7 @@ async function svcFetch(path: string, init?: RequestInit): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20_000);
   try {
-    const res = await fetch(`${BASE}${path}`, { ...init, signal: controller.signal, cache: "no-store" });
+    const res = await beFetch(`${BASE}${path}`, { ...init, signal: controller.signal, cache: "no-store" });
     if (!res.ok) throw new Error(`crawler-service ${path} responded ${res.status}`);
     return await res.json();
   } finally {
@@ -810,7 +811,7 @@ export async function crawlerProxyAvailable(): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
   try {
-    const res = await fetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
+    const res = await beFetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
     if (!res.ok) return true;
     const j = (await res.json()) as { decodoActive?: boolean; proxyActive?: boolean };
     // Newer builds report `decodoActive`; `proxyActive` is kept as an alias.
@@ -853,7 +854,7 @@ export async function l5WebSearchAvailable(): Promise<boolean> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
   try {
-    const res = await fetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
+    const res = await beFetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
     const j = res.ok ? ((await res.json()) as { l5WebSearch?: boolean }) : null;
     const on = j?.l5WebSearch === true;
     l5WebCache = { at: Date.now(), on };
@@ -871,7 +872,7 @@ export async function pingCrawler(): Promise<{ online: boolean; url: string; pro
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
   try {
-    const res = await fetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
+    const res = await beFetch(`${BASE}/health`, { signal: controller.signal, cache: "no-store" });
     const j = res.ok ? ((await res.json()) as { searchProvider?: string }) : null;
     return { online: res.ok, url: BASE, provider: j?.searchProvider };
   } catch (err) {

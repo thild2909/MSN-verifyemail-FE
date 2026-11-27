@@ -3,7 +3,7 @@
  *
  * People, Companies and Jobs deliberately share the same filter/sort/column
  * infrastructure so the table, sidebar and bulk-action components are reused
- * across all three tabs. All data is deterministic mock (see ./data.ts).
+ * across all three tabs. All data is real (crawler-service / Postgres).
  */
 
 export type LeadsTab = "people" | "companies" | "jobs" | "linkedin" | "ai";

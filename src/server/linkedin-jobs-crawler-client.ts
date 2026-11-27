@@ -7,6 +7,7 @@
  * transport error; a walled query resolves with `blocked: true`.
  */
 import "server-only";
+import { beFetch } from "@/server/session";
 import type { LinkedInDatePosted, LinkedInJobType } from "@/lib/leads/linkedin-jobs-types";
 
 const BASE = process.env.CRAWLER_SERVICE_URL ?? "http://localhost:8090";
@@ -91,7 +92,7 @@ async function post<T>(path: string, body: unknown, timeoutMs = TIMEOUT_MS): Pro
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await beFetch(`${BASE}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

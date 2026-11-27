@@ -57,8 +57,20 @@ function matchesFilter(status: string | undefined, filter: string): boolean {
   }
 }
 
+/**
+ * Neutralise spreadsheet formula injection (CWE-1236): crawled/uploaded values
+ * such as `=HYPERLINK(...)` or `@SUM(...)` would execute when the CSV is opened
+ * in Excel/Sheets. Prefix with an apostrophe unless the value is a plain number
+ * or phone number (e.g. "+61 2 9999 0000", "-12.5"), which stay untouched.
+ */
+function defuseFormula(s: string): string {
+  if (!/^[=+\-@\t\r]/.test(s)) return s;
+  if (/^[+-]?[\d\s().-]+$/.test(s) && /\d/.test(s)) return s;
+  return `'${s}`;
+}
+
 function csvEscape(v: string | number): string {
-  const s = String(v);
+  const s = typeof v === "number" ? String(v) : defuseFormula(String(v));
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

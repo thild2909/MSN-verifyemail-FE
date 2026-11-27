@@ -32,7 +32,7 @@ export interface SourcedField<T = string> {
 
 /**
  * Deliverability verdict for a company's contact email, produced by the
- * `check-if-email-exists` backend (or the local mock when it is unreachable).
+ * `check-if-email-exists` backend (no fallback: unreachable → "unknown").
  */
 export interface EmailVerification {
   email: string;

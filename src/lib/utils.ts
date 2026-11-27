@@ -37,20 +37,6 @@ export function formatDateTime(input: string | Date): string {
   });
 }
 
-/** Deterministic pseudo-random in [0,1) from a string seed — keeps mock data stable across renders. */
-export function seededRandom(seed: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  // xorshift for a bit more spread
-  h ^= h << 13;
-  h ^= h >>> 17;
-  h ^= h << 5;
-  return ((h >>> 0) % 100000) / 100000;
-}
-
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

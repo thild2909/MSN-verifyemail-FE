@@ -21,6 +21,7 @@
  * It must never return a made-up "valid".
  */
 import "server-only";
+import { internalHeaders } from "@/server/session";
 import { mapReacherOutput, type CheckEmailOutput } from "./reacher";
 import type { VerificationResult } from "@/lib/types";
 
@@ -132,7 +133,7 @@ async function thirdPartyFallback(email: string, output: CheckEmailOutput, resul
   try {
     const res = await fetch(`${CRAWLER_URL}/verify/thirdparty`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...internalHeaders() },
       body: JSON.stringify({ email }),
       signal: controller.signal,
       cache: "no-store",

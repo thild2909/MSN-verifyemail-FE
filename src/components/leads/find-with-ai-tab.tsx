@@ -593,7 +593,7 @@ function AssistantReport({ report }: { report: ReportPayload }) {
   function exportCsv() {
     const header = columns.map((c) => c.label);
     const data = rows.map((r) => columns.map((c) => r[c.key] ?? ""));
-    const csv = Papa.unparse({ fields: header, data });
+    const csv = Papa.unparse({ fields: header, data }, { escapeFormulae: true });
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
