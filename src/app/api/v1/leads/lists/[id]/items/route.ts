@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { be } from "@/server/verify-client";
+import { be, beError } from "@/server/verify-client";
 import type { LeadItemsPage } from "@/lib/api/client";
 
 export const runtime = "nodejs";
@@ -15,7 +15,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const qs = new URL(req.url).searchParams.toString();
   const res = await be<{ data: LeadItemsPage }>(`/leads/lists/${encodeURIComponent(id)}/items${qs ? `?${qs}` : ""}`);
   if (res.status === 404) return notFound();
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not load items." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not load items.");
   return NextResponse.json({ success: true, data: res.json.data });
 }
 
@@ -49,7 +49,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     body: JSON.stringify({ items: parsed.data.items }),
   });
   if (res.status === 404) return notFound();
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not add items." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not add items.");
   return NextResponse.json({ success: true, data: res.json.data });
 }
 
@@ -66,6 +66,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     body: JSON.stringify({ ids: parsed.data.ids }),
   });
   if (res.status === 404) return notFound();
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not remove items." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not remove items.");
   return NextResponse.json({ success: true, data: res.json.data });
 }

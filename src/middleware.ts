@@ -118,6 +118,22 @@ function apiError(status: number, code: string, message: string): NextResponse {
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
+/** The only API route that legitimately accepts a multipart upload. */
+const MULTIPART_API = new Set(["/api/v1/leads/ai-report/parse-file"]);
+
+/**
+ * JSON-only API: a state-changing request that declares a non-JSON body
+ * (form-urlencoded / multipart / text/plain — the content types an HTML form
+ * can send cross-site without a CORS preflight) is refused with 415.
+ */
+function unsupportedBody(req: NextRequest, pathname: string): boolean {
+  if (SAFE_METHODS.has(req.method)) return false;
+  const ct = (req.headers.get("content-type") ?? "").toLowerCase();
+  if (!ct) return false; // bodyless POST/DELETE
+  if (MULTIPART_API.has(pathname)) return !ct.startsWith("multipart/form-data");
+  return !ct.startsWith("application/json");
+}
+
 /** Reject cross-site state-changing API calls (Origin must match our host). */
 function foreignOrigin(req: NextRequest): boolean {
   if (SAFE_METHODS.has(req.method)) return false;
@@ -142,6 +158,7 @@ export async function middleware(req: NextRequest) {
   /* ---------------------------------- API ---------------------------------- */
   if (under(pathname, "/api")) {
     if (foreignOrigin(req)) return apiError(403, "FORBIDDEN", "Cross-origin request refused.");
+    if (unsupportedBody(req, pathname)) return apiError(415, "UNSUPPORTED_MEDIA_TYPE", "Send a JSON body (Content-Type: application/json).");
     if (PUBLIC_API.has(pathname)) return NextResponse.next();
 
     const session = await currentSession(req);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { be } from "@/server/verify-client";
+import { be, beError } from "@/server/verify-client";
 import type { VerificationResult } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -22,6 +22,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (res.status === 404) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "List or record not found." } }, { status: 404 });
   }
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Deep scan failed." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Deep scan failed.");
   return NextResponse.json({ success: true, data: res.json.data });
 }

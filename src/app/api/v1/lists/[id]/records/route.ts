@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { be } from "@/server/verify-client";
+import { be, beError } from "@/server/verify-client";
 import type { EmailRecord } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -26,6 +26,6 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (res.status === 404) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "List not found." } }, { status: 404 });
   }
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not load records." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not load records.");
   return NextResponse.json({ success: true, data: res.json.data });
 }

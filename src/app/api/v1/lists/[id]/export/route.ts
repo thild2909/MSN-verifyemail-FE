@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import * as XLSX from "xlsx";
-import { be } from "@/server/verify-client";
+import { be, beError } from "@/server/verify-client";
 import type { EmailList, EmailRecord } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -89,7 +89,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (res.status === 404) {
     return NextResponse.json({ success: false, error: { code: "NOT_FOUND", message: "List not found." } }, { status: 404 });
   }
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Export failed." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Export failed.");
 
   const { list, records: allRecords } = res.json.data;
   const records = allRecords.filter((r) => matchesFilter(r.result?.status, filter));

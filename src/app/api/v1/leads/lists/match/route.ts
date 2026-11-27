@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { be } from "@/server/verify-client";
+import { be, beError } from "@/server/verify-client";
 import type { LeadMatchResult } from "@/lib/api/client";
 
 export const runtime = "nodejs";
@@ -27,6 +27,6 @@ export async function POST(req: Request) {
     method: "POST",
     body: JSON.stringify(parsed.data),
   });
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not match against lists." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not match against lists.");
   return NextResponse.json({ success: true, data: res.json.data });
 }

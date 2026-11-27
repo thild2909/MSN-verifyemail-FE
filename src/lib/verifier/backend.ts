@@ -20,6 +20,7 @@
  *     what keeps a bulk pass from aborting wholesale on a single slow mailbox.
  * It must never return a made-up "valid".
  */
+import { mailTargetsPrivate } from "./mx-guard";
 import "server-only";
 import { internalHeaders } from "@/server/session";
 import { mapReacherOutput, type CheckEmailOutput } from "./reacher";
@@ -94,6 +95,35 @@ function timedOutOutcome(email: string): VerifyOutcome {
     },
   };
 }
+
+/** Verdict for an address whose mail servers resolve to an internal network
+ * address: undeliverable on the public internet; the engine is never asked to
+ * connect there (SMTP-SSRF guard, see mx-guard.ts). */
+function privateMxOutcome(email: string): VerifyOutcome {
+  const domain = email.split("@")[1] ?? "";
+  return {
+    provider: "reacher",
+    result: {
+      email,
+      status: "invalid",
+      score: 0,
+      suggestedAction: "Undeliverable: the domain's mail servers point to a private/internal network address.",
+      domain,
+      domainAgeYears: null,
+      checks: {
+        syntax: "pass", domain: "pass", dns: "pass", mx: "fail",
+        smtp: "unknown", mailbox: "unknown",
+        catchAll: false, disposable: false, roleBased: false, freeProvider: false, greylisted: false,
+      },
+      deepScanned: false,
+      verifiedAt: new Date().toISOString(),
+      provider: null,
+      mxRecords: [],
+    },
+  };
+}
+
+const domainOf = (email: string): string => email.split("@").pop() ?? "";
 
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
@@ -234,6 +264,7 @@ async function verifyAttempt(email: string, timeoutMs: number): Promise<VerifyOu
 }
 
 export async function verifyWithBackend(email: string, opts: { timeoutMs?: number } = {}): Promise<VerifyOutcome> {
+  if (await mailTargetsPrivate(domainOf(email))) return privateMxOutcome(email);
   const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : TIMEOUT_MS;
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -262,6 +293,14 @@ export async function verifyEmailsBatch(
   opts: { timeoutMs?: number; concurrency?: number } = {},
 ): Promise<VerifyOutcome[]> {
   if (emails.length === 0) return [];
+  // SMTP-SSRF guard: never hand internal mail targets to the engine.
+  const blocked = await Promise.all(emails.map((e) => mailTargetsPrivate(domainOf(e))));
+  if (blocked.some(Boolean)) {
+    const allowed = emails.filter((_, i) => !blocked[i]);
+    const verified = allowed.length ? await verifyEmailsBatch(allowed, opts) : [];
+    let j = 0;
+    return emails.map((e, i) => (blocked[i] ? privateMxOutcome(e) : verified[j++]));
+  }
   const timeoutMs = opts.timeoutMs ?? Math.min(TIMEOUT_MS, 30_000);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

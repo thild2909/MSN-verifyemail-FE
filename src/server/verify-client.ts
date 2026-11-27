@@ -64,3 +64,23 @@ export async function be<T = unknown>(
 export function beUrl(path: string): string {
   return `${BASE}${path}`;
 }
+
+/**
+ * Map a failed BE response to the FE envelope, preserving client-error codes
+ * (400 validation, 401/403 auth, 404 missing, 429 throttled) instead of turning
+ * every failure into a 502. BE error text is never echoed; only `fallback` is
+ * used for real upstream failures.
+ */
+export function beError(res: BeResponse, fallback: string): Response {
+  const map: Record<number, [string, string]> = {
+    400: ["INVALID_REQUEST", "Invalid request."],
+    401: ["UNAUTHENTICATED", "Not authenticated."],
+    403: ["FORBIDDEN", "Not allowed."],
+    404: ["NOT_FOUND", "Not found."],
+    413: ["TOO_LARGE", "Request too large."],
+    429: ["RATE_LIMITED", "Too many requests. Try again later."],
+  };
+  const hit = map[res.status];
+  const [code, message, status] = hit ? [hit[0], hit[1], res.status] : ["INTERNAL", fallback, 502];
+  return Response.json({ success: false, error: { code, message } }, { status });
+}

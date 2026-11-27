@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { be } from "@/server/verify-client";
+import { be, beError } from "@/server/verify-client";
 import type { EmailList } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -14,7 +14,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const res = await be<{ data: EmailList }>(`/lists/${encodeURIComponent(id)}`);
   if (res.status === 404) return notFound();
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not load list." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not load list.");
   return NextResponse.json({ success: true, data: res.json.data });
 }
 
@@ -31,7 +31,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     body: JSON.stringify({ name: parsed.data.name }),
   });
   if (res.status === 404) return notFound();
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not rename list." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not rename list.");
   return NextResponse.json({ success: true, data: res.json.data });
 }
 
@@ -39,6 +39,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const res = await be(`/lists/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (res.status === 404) return notFound();
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not delete list." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not delete list.");
   return NextResponse.json({ success: true, data: { id } });
 }

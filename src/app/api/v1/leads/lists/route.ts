@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { be } from "@/server/verify-client";
+import { be, beError } from "@/server/verify-client";
 import type { LeadList } from "@/lib/api/client";
 
 export const runtime = "nodejs";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const res = await be<{ data: LeadList[] }>("/leads/lists");
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not load lists." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not load lists.");
   return NextResponse.json({ success: true, data: res.json.data });
 }
 
@@ -23,6 +23,6 @@ export async function POST(req: Request) {
     method: "POST",
     body: JSON.stringify({ name: parsed.data.name }),
   });
-  if (!res.ok) return NextResponse.json({ success: false, error: { code: "INTERNAL", message: "Could not create list." } }, { status: 502 });
+  if (!res.ok) return beError(res, "Could not create list.");
   return NextResponse.json({ success: true, data: res.json.data }, { status: 201 });
 }
